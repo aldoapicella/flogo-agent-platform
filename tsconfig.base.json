@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "declaration": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@flogo-agent/contracts": [
+        "packages/contracts/src/index.ts"
+      ],
+      "@flogo-agent/flogo-graph": [
+        "packages/flogo-graph/src/index.ts"
+      ],
+      "@flogo-agent/tools": [
+        "packages/tools/src/index.ts"
+      ],
+      "@flogo-agent/agent": [
+        "packages/agent/src/index.ts"
+      ],
+      "@flogo-agent/prompts": [
+        "packages/prompts/src/index.ts"
+      ],
+      "@flogo-agent/evals": [
+        "packages/evals/src/index.ts"
+      ]
+    }
+  }
+}
