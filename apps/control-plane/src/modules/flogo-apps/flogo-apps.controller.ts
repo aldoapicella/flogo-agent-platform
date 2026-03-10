@@ -1,13 +1,18 @@
-import { Controller, Get, Param } from "@nestjs/common";
-import { FlogoAppsService } from "./flogo-apps.service";
+import { Controller, Get, NotFoundException, Param } from "@nestjs/common";
 
-@Controller("projects/:projectId/apps/:appId/graph")
+import { FlogoAppsService } from "./flogo-apps.service.js";
+
+@Controller("projects/:projectId/apps")
 export class FlogoAppsController {
   constructor(private readonly flogoAppsService: FlogoAppsService) {}
 
-  @Get()
-  getGraph(@Param("projectId") projectId: string, @Param("appId") appId: string) {
-    return this.flogoAppsService.getGraph(projectId, appId);
+  @Get(":appId/graph")
+  async getGraph(@Param("appId") appId: string) {
+    const graph = await this.flogoAppsService.getGraph(appId);
+    if (!graph) {
+      throw new NotFoundException(`Unknown app ${appId}`);
+    }
+    return graph;
   }
 }
 

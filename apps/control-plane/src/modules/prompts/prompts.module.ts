@@ -1,10 +1,11 @@
 import { Global, Module } from "@nestjs/common";
-import { PromptsService } from "./prompts.service";
+
+import { PromptCatalogService } from "./prompts.service.js";
 
 @Global()
 @Module({
-  providers: [PromptsService],
-  exports: [PromptsService]
+  providers: [PromptCatalogService],
+  exports: [PromptCatalogService]
 })
 export class PromptsModule {}
 

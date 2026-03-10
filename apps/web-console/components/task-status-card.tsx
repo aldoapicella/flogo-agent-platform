@@ -1,19 +1,23 @@
-import type { TaskRecord } from "@flogo-agent/contracts";
+import type { TaskSummary } from "@flogo-agent/contracts";
 
-export function TaskStatusCard({ task }: { task: TaskRecord }) {
+export function TaskStatusCard({ task }: { task: TaskSummary }) {
   return (
-    <section className="card">
-      <div className="badge">{task.status}</div>
-      <h2>{task.type.toUpperCase()} task</h2>
-      <p className="muted">{task.planSummary ?? "Waiting for planning output."}</p>
-      <div className="grid two">
-        <div>
-          <strong>Project</strong>
-          <p className="muted mono">{task.projectId}</p>
+    <section className="card stack">
+      <div className="pill">{task.state}</div>
+      <h2>{task.appId}</h2>
+      <p className="muted">{task.prompt}</p>
+      <div className="list">
+        <div className="listItem">
+          <strong>Task</strong>
+          <div>{task.id}</div>
         </div>
-        <div>
-          <strong>App path</strong>
-          <p className="muted mono">{task.appPath}</p>
+        <div className="listItem">
+          <strong>Project</strong>
+          <div>{task.projectId}</div>
+        </div>
+        <div className="listItem">
+          <strong>Plan Summary</strong>
+          <div>{task.planSummary ?? "No summary yet."}</div>
         </div>
       </div>
     </section>

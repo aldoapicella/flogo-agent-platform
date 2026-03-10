@@ -1,52 +1,21 @@
-"use client";
+import { type TaskResult } from "@flogo-agent/contracts";
 
-import { useState } from "react";
-import type { ApprovalDecision, ApprovalRequest, TaskRecord } from "@flogo-agent/contracts";
-
-interface ApprovalCardProps {
-  approval?: ApprovalRequest;
-  taskId: string;
-  onDecision(decision: ApprovalDecision): Promise<void>;
-}
-
-export function ApprovalCard({ approval, taskId, onDecision }: ApprovalCardProps) {
-  const [loading, setLoading] = useState(false);
-
-  if (!approval) {
-    return null;
-  }
-
+export function ApprovalCard({ task }: { task: TaskResult | null }) {
   return (
-    <section className="card">
-      <div className="badge">Approval Required</div>
-      <h2>{approval.type}</h2>
-      <p className="muted">{approval.rationale}</p>
-      <p className="mono">{taskId}</p>
-      <div className="actions">
-        <button
-          className="primary"
-          disabled={loading}
-          onClick={async () => {
-            setLoading(true);
-            await onDecision({ status: "approved" });
-            setLoading(false);
-          }}
-        >
-          Approve
-        </button>
-        <button
-          className="secondary"
-          disabled={loading}
-          onClick={async () => {
-            setLoading(true);
-            await onDecision({ status: "rejected", rationale: "Rejected from UI" });
-            setLoading(false);
-          }}
-        >
-          Reject
-        </button>
-      </div>
-    </section>
+    <div className="card">
+      <h3>Approval gates</h3>
+      {task && task.requiredApprovals.length > 0 ? (
+        <div className="list">
+          {task.requiredApprovals.map((approval) => (
+            <div key={approval} className="pill">
+              {approval}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="meta">No approvals are currently blocking this task.</p>
+      )}
+    </div>
   );
 }
 

@@ -1,22 +1,22 @@
-import type { ArtifactRef } from "@flogo-agent/contracts";
+import { type ArtifactRef } from "@flogo-agent/contracts";
 
 export function ArtifactList({ artifacts }: { artifacts: ArtifactRef[] }) {
   return (
-    <section className="card">
-      <h2>Artifacts</h2>
-      <div className="list">
-        {artifacts.length ? (
-          artifacts.map((artifact) => (
-            <div key={`${artifact.kind}-${artifact.uri}`}>
-              <strong>{artifact.kind}</strong>
-              <div className="muted mono">{artifact.uri}</div>
+    <div className="card">
+      <h3>Artifacts</h3>
+      {artifacts.length === 0 ? (
+        <p className="meta">No artifacts published yet.</p>
+      ) : (
+        <div className="list">
+          {artifacts.map((artifact) => (
+            <div key={artifact.id}>
+              <strong>{artifact.name}</strong>
+              <div className="meta">{artifact.uri}</div>
             </div>
-          ))
-        ) : (
-          <p className="muted">No artifacts published yet.</p>
-        )}
-      </div>
-    </section>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -1,10 +1,11 @@
 import { Global, Module } from "@nestjs/common";
-import { EventStreamService } from "./event-stream.service";
+
+import { TaskEventsService } from "./task-events.service.js";
 
 @Global()
 @Module({
-  providers: [EventStreamService],
-  exports: [EventStreamService]
+  providers: [TaskEventsService],
+  exports: [TaskEventsService]
 })
 export class EventsModule {}
 

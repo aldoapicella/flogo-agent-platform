@@ -1,10 +1,11 @@
 import { Global, Module } from "@nestjs/common";
-import { ToolsService } from "./tools.service";
+
+import { ToolsetService } from "./toolset.service.js";
 
 @Global()
 @Module({
-  providers: [ToolsService],
-  exports: [ToolsService]
+  providers: [ToolsetService],
+  exports: [ToolsetService]
 })
 export class ToolsModule {}
 

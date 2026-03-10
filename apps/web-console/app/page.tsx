@@ -1,28 +1,36 @@
+import Link from "next/link";
+
 import { TaskForm } from "../components/task-form";
 
 export default function HomePage() {
   return (
-    <main className="shell">
+    <main className="page">
       <section className="hero">
-        <div className="badge">Foundation-first MVP</div>
-        <h1>Flogo agent platform</h1>
-        <p className="muted">
-          Submit create, update, debug, and review workflows against `flogo.json`, then watch
-          the control-plane queue build and smoke-test work for the runner.
+        <div className="pill">Foundation-first MVP</div>
+        <h1>Flogo Agent Platform</h1>
+        <p>
+          Create, update, debug, and review Flogo apps through a shared control-plane, runner-worker, and evaluation
+          pipeline.
         </p>
       </section>
-      <div className="grid two">
-        <TaskForm />
-        <section className="card">
-          <h2>Core flow</h2>
+
+      <section className="grid">
+        <div className="card">
+          <h2>Submit task</h2>
+          <TaskForm />
+        </div>
+        <div className="card">
+          <h2>Operator notes</h2>
+          <p className="meta">
+            The control-plane exposes REST, SSE, and artifact endpoints. The runner-worker consumes BullMQ jobs and the
+            web console tracks task state via shared contracts.
+          </p>
           <div className="list">
-            <div>1. Validate request and register app path.</div>
-            <div>2. Build a task plan and approval state.</div>
-            <div>3. Queue build and smoke-test jobs in BullMQ.</div>
-            <div>4. Stream live status, approvals, and artifacts.</div>
+            <Link href="/tasks/example-task">Open task detail shell</Link>
+            <Link href="http://localhost:3001/docs">Open control-plane docs</Link>
           </div>
-        </section>
-      </div>
+        </div>
+      </section>
     </main>
   );
 }

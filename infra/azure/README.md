@@ -1,20 +1,18 @@
-# Azure Infra
+# Azure Scaffold
 
-This Bicep scaffold provisions the core foundation-first MVP dependencies:
+This folder contains an AKS-oriented infrastructure scaffold for the foundation-first MVP.
 
-- AKS with workload identity enabled
+Provisioned components:
+
+- Azure Kubernetes Service
+- Azure Container Registry
 - Azure Database for PostgreSQL Flexible Server
 - Azure Cache for Redis
-- Azure Blob Storage
-- Azure Key Vault
-- Azure Container Registry
-- Log Analytics and Application Insights
+- Azure Storage account for artifacts
+- Key Vault
+- Log Analytics workspace
+- Application Insights
+- User-assigned managed identity for workload identity scenarios
 
-Deploy with Azure CLI:
+Use `main.bicep` as the entry point and adjust parameters for your subscription, region, and network requirements.
 
-```bash
-az deployment group create \
-  --resource-group <rg> \
-  --template-file infra/azure/main.bicep \
-  --parameters @infra/azure/parameters.example.json
-```

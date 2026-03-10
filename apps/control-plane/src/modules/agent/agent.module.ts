@@ -1,10 +1,11 @@
 import { Global, Module } from "@nestjs/common";
-import { AgentService } from "./agent.service";
+
+import { OrchestrationService } from "./orchestration.service.js";
 
 @Global()
 @Module({
-  providers: [AgentService],
-  exports: [AgentService]
+  providers: [OrchestrationService],
+  exports: [OrchestrationService]
 })
 export class AgentModule {}
 

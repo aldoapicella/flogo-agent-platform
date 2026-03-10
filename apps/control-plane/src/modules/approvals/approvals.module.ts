@@ -1,13 +1,9 @@
-import { Global, Module, forwardRef } from "@nestjs/common";
-import { ApprovalsController } from "./approvals.controller";
-import { ApprovalsService } from "./approvals.service";
-import { TasksModule } from "../tasks/tasks.module";
+import { Module } from "@nestjs/common";
 
-@Global()
+import { ApprovalsController } from "./approvals.controller.js";
+
 @Module({
-  imports: [forwardRef(() => TasksModule)],
-  controllers: [ApprovalsController],
-  providers: [ApprovalsService],
-  exports: [ApprovalsService]
+  controllers: [ApprovalsController]
 })
 export class ApprovalsModule {}
+

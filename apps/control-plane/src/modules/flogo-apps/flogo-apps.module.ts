@@ -1,12 +1,11 @@
-import { Global, Module } from "@nestjs/common";
-import { FlogoAppsController } from "./flogo-apps.controller";
-import { FlogoAppsService } from "./flogo-apps.service";
+import { Module } from "@nestjs/common";
 
-@Global()
+import { FlogoAppsController } from "./flogo-apps.controller.js";
+import { FlogoAppsService } from "./flogo-apps.service.js";
+
 @Module({
   controllers: [FlogoAppsController],
-  providers: [FlogoAppsService],
-  exports: [FlogoAppsService]
+  providers: [FlogoAppsService]
 })
 export class FlogoAppsModule {}
 

@@ -1,10 +1,11 @@
 import { Global, Module } from "@nestjs/common";
-import { QueueService } from "./queue.service";
+
+import { RunnerQueueService } from "./runner-queue.service.js";
 
 @Global()
 @Module({
-  providers: [QueueService],
-  exports: [QueueService]
+  providers: [RunnerQueueService],
+  exports: [RunnerQueueService]
 })
 export class QueueModule {}
 

@@ -1,11 +1,9 @@
-import { Global, Module } from "@nestjs/common";
-import { ArtifactsController } from "./artifacts.controller";
-import { ArtifactsService } from "./artifacts.service";
+import { Module } from "@nestjs/common";
 
-@Global()
+import { ArtifactsController } from "./artifacts.controller.js";
+
 @Module({
-  controllers: [ArtifactsController],
-  providers: [ArtifactsService],
-  exports: [ArtifactsService]
+  controllers: [ArtifactsController]
 })
 export class ArtifactsModule {}
+

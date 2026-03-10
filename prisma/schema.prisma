@@ -197,6 +197,7 @@ model BuildRun {
   exitCode    Int?
   startedAt   DateTime?
   finishedAt  DateTime?
+  testRuns    TestRun[]
 }
 
 model TestRun {

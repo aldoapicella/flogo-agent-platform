@@ -1,13 +1,18 @@
-import { Controller, Get, Param } from "@nestjs/common";
-import { ArtifactsService } from "./artifacts.service";
+import { Controller, Get, NotFoundException, Param } from "@nestjs/common";
+
+import { OrchestrationService } from "../agent/orchestration.service.js";
 
 @Controller("tasks/:taskId/artifacts")
 export class ArtifactsController {
-  constructor(private readonly artifactsService: ArtifactsService) {}
+  constructor(private readonly orchestrationService: OrchestrationService) {}
 
   @Get()
-  list(@Param("taskId") taskId: string) {
-    return this.artifactsService.list(taskId);
+  listArtifacts(@Param("taskId") taskId: string) {
+    const task = this.orchestrationService.getTask(taskId);
+    if (!task) {
+      throw new NotFoundException(`Unknown task ${taskId}`);
+    }
+    return this.orchestrationService.listArtifacts(taskId);
   }
 }
 

@@ -2,91 +2,67 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { TaskRequest, TaskType } from "@flogo-agent/contracts";
 
-const defaultRequest: TaskRequest = {
-  type: "create",
-  projectId: "demo-project",
-  appPath: "examples/hello-rest/flogo.json",
-  prompt: "Create a REST endpoint that says hello.",
-  requestedBy: "operator",
-  constraints: {
-    allowDependencyChanges: false,
-    allowCustomCode: false,
-    targetEnv: "dev"
-  },
-  expectedOutputs: [],
-  metadata: {}
-};
+import { createTask } from "../lib/api";
 
 export function TaskForm() {
-  const [form, setForm] = useState(defaultRequest);
-  const [loading, setLoading] = useState(false);
+  const [summary, setSummary] = useState("Create a REST hello world app");
+  const [type, setType] = useState("create");
+  const [projectId, setProjectId] = useState("demo-project");
+  const [appPath, setAppPath] = useState("examples/hello-rest/flogo.json");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const result = await createTask({
+        type,
+        projectId,
+        appPath,
+        summary,
+        requestedBy: "web-console"
+      });
+      router.push(`/tasks/${result.taskId}`);
+    } catch (submissionError) {
+      setError(submissionError instanceof Error ? submissionError.message : "Task submission failed");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   return (
-    <section className="card">
-      <h2>Submit task</h2>
-      <div className="grid">
-        <label className="field">
-          <span>Workflow</span>
-          <select
-            value={form.type}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, type: event.target.value as TaskType }))
-            }
-          >
-            <option value="create">Create</option>
-            <option value="update">Update</option>
-            <option value="debug">Debug</option>
-            <option value="review">Review</option>
-          </select>
-        </label>
-        <label className="field">
-          <span>Project ID</span>
-          <input
-            value={form.projectId}
-            onChange={(event) => setForm((current) => ({ ...current, projectId: event.target.value }))}
-          />
-        </label>
-        <label className="field">
-          <span>App path</span>
-          <input
-            value={form.appPath}
-            onChange={(event) => setForm((current) => ({ ...current, appPath: event.target.value }))}
-          />
-        </label>
-        <label className="field">
-          <span>Prompt</span>
-          <textarea
-            value={form.prompt}
-            onChange={(event) => setForm((current) => ({ ...current, prompt: event.target.value }))}
-          />
-        </label>
-        <div className="actions">
-          <button
-            className="primary"
-            disabled={loading}
-            onClick={async () => {
-              setLoading(true);
-              const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
-              const response = await fetch(`${baseUrl}/v1/tasks`, {
-                method: "POST",
-                headers: {
-                  "content-type": "application/json"
-                },
-                body: JSON.stringify(form)
-              });
-              const task = (await response.json()) as { id: string };
-              setLoading(false);
-              router.push(`/tasks/${task.id}`);
-            }}
-          >
-            {loading ? "Submitting..." : "Create task"}
-          </button>
-        </div>
-      </div>
-    </section>
+    <form className="form" onSubmit={handleSubmit}>
+      <label>
+        Task type
+        <select value={type} onChange={(event) => setType(event.target.value)}>
+          <option value="create">create</option>
+          <option value="update">update</option>
+          <option value="debug">debug</option>
+          <option value="review">review</option>
+        </select>
+      </label>
+      <label>
+        Project ID
+        <input value={projectId} onChange={(event) => setProjectId(event.target.value)} />
+      </label>
+      <label>
+        App path
+        <input value={appPath} onChange={(event) => setAppPath(event.target.value)} />
+      </label>
+      <label>
+        Summary
+        <textarea value={summary} onChange={(event) => setSummary(event.target.value)} />
+      </label>
+      <button className="button" type="submit" disabled={isSubmitting}>
+        {isSubmitting ? "Submitting..." : "Create task"}
+      </button>
+      {error ? <div className="meta">{error}</div> : null}
+    </form>
   );
 }
 

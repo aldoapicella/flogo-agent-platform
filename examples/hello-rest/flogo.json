@@ -6,45 +6,55 @@
     {
       "alias": "log",
       "ref": "github.com/project-flogo/contrib/activity/log"
+    },
+    {
+      "alias": "rest",
+      "ref": "github.com/project-flogo/contrib/trigger/rest"
     }
   ],
   "triggers": [
     {
-      "id": "rest_trigger",
+      "id": "rest",
       "ref": "#rest",
       "settings": {
-        "port": 9999
+        "port": 8080
       },
       "handlers": [
         {
+          "id": "hello-handler",
           "settings": {
             "method": "GET",
             "path": "/hello"
           },
           "action": {
-            "ref": "#flow:hello_flow"
+            "ref": "flow:hello"
           }
         }
       ]
     }
   ],
-  "resources": [
-    {
-      "id": "hello_flow",
+  "resources": {
+    "hello": {
+      "type": "flow",
       "data": {
-        "name": "hello_flow",
+        "metadata": {
+          "input": ["name"],
+          "output": ["message"]
+        },
         "tasks": [
           {
-            "id": "log_1",
-            "activityRef": "#log",
+            "id": "log-request",
+            "name": "log-request",
+            "activity": {
+              "ref": "#log"
+            },
             "input": {
-              "message": "hello"
+              "message": "received hello request"
             }
           }
-        ],
-        "links": []
+        ]
       }
     }
-  ]
+  }
 }
 

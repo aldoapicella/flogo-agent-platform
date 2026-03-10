@@ -44,10 +44,10 @@ const approvalMap: Record<TaskRequest["type"], ApprovalType[]> = {
 export class PolicyAgent {
   evaluate(task: TaskRequest): ApprovalType[] {
     const approvals = new Set<ApprovalType>(approvalMap[task.type]);
-    if (!task.constraints.allowDependencyChanges) {
+    if (!task.constraints.allowDependencyChanges && task.inputs.requiresDependencyChange === true) {
       approvals.add("dependency_upgrade");
     }
-    if (!task.constraints.allowCustomCode) {
+    if (!task.constraints.allowCustomCode && task.inputs.requiresCustomCode === true) {
       approvals.add("custom_code");
     }
     return Array.from(approvals);

@@ -2,48 +2,49 @@
   "name": "broken-mappings",
   "type": "flogo:app",
   "appModel": "1.1.0",
-  "imports": [
-    {
-      "alias": "log",
-      "ref": "github.com/project-flogo/contrib/activity/log"
-    }
-  ],
+  "imports": [],
   "triggers": [
     {
-      "id": "rest_trigger",
+      "id": "rest",
       "ref": "#rest",
       "settings": {
-        "port": 9999
+        "port": 8081
       },
       "handlers": [
         {
+          "id": "broken-handler",
           "settings": {
             "method": "GET",
             "path": "/broken"
           },
           "action": {
-            "ref": "#flow:broken_flow"
+            "ref": "flow:missing"
           }
         }
       ]
     }
   ],
-  "resources": [
-    {
-      "id": "broken_flow",
+  "resources": {
+    "broken-flow": {
+      "type": "flow",
       "data": {
-        "name": "broken_flow",
+        "metadata": {
+          "input": [],
+          "output": []
+        },
         "tasks": [
           {
-            "id": "log_1",
-            "activityRef": "#log",
+            "id": "log-request",
+            "name": "log-request",
+            "activity": {
+              "ref": "#log"
+            },
             "input": {
-              "message": "$activity[future].message"
+              "message": "=$activity[missing].message"
             }
           }
-        ],
-        "links": []
+        ]
       }
     }
-  ]
+  }
 }

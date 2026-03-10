@@ -138,6 +138,25 @@ export const TaskResultSchema = z.object({
 });
 export type TaskResult = z.infer<typeof TaskResultSchema>;
 
+export const TaskSummarySchema = z.object({
+  id: z.string(),
+  type: TaskTypeSchema,
+  state: TaskStatusSchema,
+  projectId: z.string(),
+  appId: z.string().optional(),
+  appPath: z.string().optional(),
+  prompt: z.string(),
+  planSummary: z.string().optional(),
+  approvalStatus: ApprovalStatusSchema.optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  validationReport: ValidationReportSchema.optional(),
+  artifacts: z.array(ArtifactRefSchema).default([]),
+  requiredApprovals: z.array(ApprovalTypeSchema).default([]),
+  nextActions: z.array(z.string()).default([])
+});
+export type TaskSummary = z.infer<typeof TaskSummarySchema>;
+
 export const ApprovalRequestSchema = z.object({
   taskId: z.string(),
   type: ApprovalTypeSchema,

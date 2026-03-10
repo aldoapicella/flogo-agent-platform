@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   ArtifactRefSchema,
   type ArtifactRef,
+  type FlogoApp,
   type RunnerJobResult,
   RunnerJobResultSchema,
   RunnerJobSpecSchema,
@@ -15,7 +16,13 @@ import {
   type ToolResponse,
   ToolResponseSchema
 } from "@flogo-agent/contracts";
-import { buildAppGraph, parseFlogoAppDocument, validateFlogoApp, validateMappings } from "@flogo-agent/flogo-graph";
+import {
+  buildAppGraph,
+  parseFlogoAppDocument,
+  summarizeAppDiff,
+  validateFlogoApp,
+  validateMappings
+} from "@flogo-agent/flogo-graph";
 
 function toolResponse(partial: ToolResponse): ToolResponse {
   return ToolResponseSchema.parse(partial);
@@ -98,77 +105,69 @@ export class RepoTools {
 }
 
 export class FlogoTools {
-  constructor(private readonly rootPath: string) {}
-
-  async parseApp(appPath: string): Promise<ToolResponse> {
-    const absolutePath = await ensureAbsolutePath(this.rootPath, appPath);
-    const content = await fs.readFile(absolutePath, "utf8");
-    const graph = buildAppGraph(content);
+  parseApp(raw: string | FlogoApp | unknown): ToolResponse {
+    const graph = buildAppGraph(raw);
     return toolResponse({
       ok: true,
-      summary: `Parsed ${appPath}`,
-      data: graph as unknown as Record<string, unknown>,
+      summary: `Parsed ${graph.app.name}`,
+      data: { graph },
       diagnostics: graph.diagnostics,
       artifacts: [],
       retryable: false
     });
   }
 
-  async validateApp(appPath: string): Promise<ToolResponse> {
-    const absolutePath = await ensureAbsolutePath(this.rootPath, appPath);
-    const content = await fs.readFile(absolutePath, "utf8");
-    const report = validateFlogoApp(content);
+  validateApp(raw: string | FlogoApp | unknown): ToolResponse {
+    const report = validateFlogoApp(raw);
     return toolResponse({
       ok: report.ok,
       summary: report.summary,
-      data: { report },
+      data: { validationReport: report },
       diagnostics: report.stages.flatMap((stage) => stage.diagnostics),
-      artifacts: [],
+      artifacts: report.artifacts,
       retryable: false
     });
   }
 
-  async validateMappings(appPath: string): Promise<ToolResponse> {
-    const absolutePath = await ensureAbsolutePath(this.rootPath, appPath);
-    const content = await fs.readFile(absolutePath, "utf8");
-    const report = validateMappings(content);
+  validateMappings(raw: string | FlogoApp | unknown): ToolResponse {
+    const report = validateMappings(raw);
     return toolResponse({
       ok: report.ok,
-      summary: report.ok ? `Mappings are valid for ${appPath}` : `Mappings need fixes for ${appPath}`,
-      data: { report },
+      summary: report.ok ? "Mappings are valid." : "Mappings need fixes.",
+      data: { validationReport: report },
       diagnostics: report.diagnostics,
       artifacts: [],
       retryable: false
     });
   }
 
-  generateApp(request: TaskRequest): ToolResponse {
-    const generated = {
-      name: request.summary.replace(/\s+/g, "-").toLowerCase(),
+  generateApp(task: TaskRequest): ToolResponse {
+    const generated = parseFlogoAppDocument({
+      name: task.summary.replace(/\s+/g, "-").toLowerCase(),
       type: "flogo:app",
       appModel: "1.1.0",
       imports: [],
       triggers: [],
       resources: []
-    };
-    const app = parseFlogoAppDocument(generated);
+    });
+
     return toolResponse({
       ok: true,
-      summary: `Generated base Flogo app for ${request.summary}`,
-      data: { app },
+      summary: `Generated base Flogo app for ${task.summary}`,
+      data: { app: generated },
       diagnostics: [],
       artifacts: [],
       retryable: false
     });
   }
 
-  patchApp(document: unknown, patch: (app: ReturnType<typeof parseFlogoAppDocument>) => ReturnType<typeof parseFlogoAppDocument>): ToolResponse {
+  patchApp(document: string | FlogoApp | unknown, patcher: (app: FlogoApp) => FlogoApp): ToolResponse {
     const app = parseFlogoAppDocument(document);
-    const updatedApp = patch(app);
+    const nextApp = patcher(app);
     return toolResponse({
       ok: true,
-      summary: "Patched Flogo app document",
-      data: { app: updatedApp },
+      summary: summarizeAppDiff(app, nextApp),
+      data: { app: nextApp },
       diagnostics: [],
       artifacts: [],
       retryable: false
@@ -193,7 +192,7 @@ export class FlogoTools {
       data: {
         contribs: [
           "github.com/project-flogo/contrib/activity/log",
-          "github.com/project-flogo/contrib/activity/rest"
+          "github.com/project-flogo/contrib/trigger/rest"
         ].filter((entry) => (filter ? entry.includes(filter) : true))
       },
       diagnostics: [],
@@ -221,6 +220,49 @@ export class LocalRunnerDispatcher implements RunnerDispatcher {
   }
 }
 
+export class RunnerTools {
+  constructor(private readonly dispatcher: RunnerDispatcher = new LocalRunnerDispatcher()) {}
+
+  async buildApp(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch(parsed);
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued build job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
+  async runApp(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({ ...parsed, stepType: "run" });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued run job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
+  async collectLogs(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({ ...parsed, stepType: "collect_logs" });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued log collection job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+}
+
 export class TestTools {
   generateSmoke(appUrl: string): ToolResponse {
     const smokeTest = SmokeTestSpecSchema.parse({
@@ -238,7 +280,7 @@ export class TestTools {
     return toolResponse({
       ok: true,
       summary: `Generated smoke test for ${appUrl}`,
-      data: { smokeTest },
+      data: { smoke: smokeTest },
       diagnostics: [],
       artifacts: [],
       retryable: false
@@ -246,11 +288,11 @@ export class TestTools {
   }
 
   runSmoke(spec: SmokeTestSpec): ToolResponse {
-    const parsed = SmokeTestSpecSchema.parse(spec);
+    const smoke = SmokeTestSpecSchema.parse(spec);
     return toolResponse({
       ok: true,
-      summary: `Queued smoke test ${parsed.name}`,
-      data: { smokeTest: parsed },
+      summary: `Prepared smoke test ${smoke.name}`,
+      data: { smoke },
       diagnostics: [],
       artifacts: [],
       retryable: false
@@ -259,29 +301,30 @@ export class TestTools {
 }
 
 export class ArtifactTools {
-  publish(artifact: ArtifactRef): ToolResponse {
-    const parsed = ArtifactRefSchema.parse(artifact);
+  publish(type: ArtifactRef["type"], name: string, uri: string, metadata?: Record<string, unknown>): ToolResponse {
+    const artifact = ArtifactRefSchema.parse({
+      id: `${type}-${Date.now()}`,
+      type,
+      name,
+      uri,
+      metadata
+    });
+
     return toolResponse({
       ok: true,
-      summary: `Published artifact ${parsed.name}`,
-      data: { artifact: parsed },
+      summary: `Published artifact ${artifact.name}`,
+      data: { artifact },
       diagnostics: [],
-      artifacts: [parsed],
+      artifacts: [artifact],
       retryable: false
     });
   }
 }
 
-export function createDefaultToolset(rootPath: string): {
-  repo: RepoTools;
-  flogo: FlogoTools;
-  runner: RunnerDispatcher;
-  test: TestTools;
-  artifact: ArtifactTools;
-} {
+export function createDefaultToolset(rootPath: string) {
   return {
     repo: new RepoTools(rootPath),
-    flogo: new FlogoTools(rootPath),
+    flogo: new FlogoTools(),
     runner: new LocalRunnerDispatcher(),
     test: new TestTools(),
     artifact: new ArtifactTools()
