@@ -6,7 +6,7 @@ import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 
-import { AppModule } from "./modules/app.module.js";
+import { AppModule } from "./app.module.js";
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter());
@@ -22,7 +22,7 @@ async function bootstrap(): Promise<void> {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup("docs", app, document);
 
-  await app.listen(configService.get<number>("port", 3001), "0.0.0.0");
+  await app.listen(configService.get<number>("port", Number(process.env.PORT ?? 3000)), "0.0.0.0");
   Logger.log("Control plane is listening", "bootstrap");
 }
 
@@ -31,4 +31,3 @@ bootstrap().catch((error: unknown) => {
   logger.error(error);
   process.exitCode = 1;
 });
-

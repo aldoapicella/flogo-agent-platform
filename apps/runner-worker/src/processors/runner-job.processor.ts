@@ -1,5 +1,4 @@
-import { Worker } from "bullmq";
-import IORedis from "ioredis";
+import { type ConnectionOptions, Worker } from "bullmq";
 
 import { RunnerJobSpecSchema } from "@flogo-agent/contracts";
 
@@ -8,9 +7,14 @@ import { SmokeTestService } from "../services/smoke-test.service.js";
 
 export function createRunnerWorker() {
   const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
-  const connection = new IORedis(redisUrl, {
+  const parsed = new URL(redisUrl);
+  const connection: ConnectionOptions = {
+    host: parsed.hostname,
+    port: Number(parsed.port || 6379),
+    username: parsed.username || undefined,
+    password: parsed.password || undefined,
     maxRetriesPerRequest: null
-  });
+  };
   const runnerExecutor = createRunnerExecutor();
   const smokeTestService = new SmokeTestService();
 
@@ -33,4 +37,3 @@ export function createRunnerWorker() {
     }
   );
 }
-

@@ -11,6 +11,7 @@ export function ArtifactList({ artifacts }: { artifacts: ArtifactRef[] }) {
           {artifacts.map((artifact) => (
             <div key={artifact.id}>
               <strong>{artifact.name}</strong>
+              <div className="meta">{artifact.type}</div>
               <div className="meta">{artifact.uri}</div>
             </div>
           ))}
@@ -19,4 +20,3 @@ export function ArtifactList({ artifacts }: { artifacts: ArtifactRef[] }) {
     </div>
   );
 }
-

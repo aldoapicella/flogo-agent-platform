@@ -33,4 +33,3 @@ export async function getTask(taskId: string): Promise<TaskResult | null> {
     return null;
   }
 }
-

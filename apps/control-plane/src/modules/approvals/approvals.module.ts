@@ -6,4 +6,3 @@ import { ApprovalsController } from "./approvals.controller.js";
   controllers: [ApprovalsController]
 })
 export class ApprovalsModule {}
-

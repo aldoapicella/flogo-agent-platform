@@ -6,4 +6,3 @@ import { TasksController } from "./tasks.controller.js";
   controllers: [TasksController]
 })
 export class TasksModule {}
-

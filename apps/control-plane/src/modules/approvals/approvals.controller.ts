@@ -12,7 +12,9 @@ export class ApprovalsController {
   async approve(@Param("taskId") taskId: string, @Body() body: unknown) {
     const decision = ApprovalDecisionSchema.parse({
       ...((body as Record<string, unknown>) ?? {}),
-      taskId
+      taskId,
+      status: ((body as Record<string, unknown>)?.status as string | undefined) ?? "approved",
+      type: ((body as Record<string, unknown>)?.type as string | undefined) ?? "change_public_contract"
     });
     const task = await this.orchestrationService.approveTask(taskId, decision.rationale);
     if (!task) {

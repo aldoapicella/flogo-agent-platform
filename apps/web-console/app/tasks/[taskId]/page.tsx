@@ -25,3 +25,4 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ tas
     </main>
   );
 }
+

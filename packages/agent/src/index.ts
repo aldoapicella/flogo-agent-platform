@@ -1,12 +1,12 @@
-import {
-  type ApprovalType,
-  type TaskRequest,
-  TaskResultSchema,
-  type TaskResult
+import type {
+  ApprovalType,
+  TaskRequest,
+  TaskResult,
+  ToolResponse,
+  ValidationReport
 } from "@flogo-agent/contracts";
-import { validateFlogoApp } from "@flogo-agent/flogo-graph";
-import type { PromptTemplate } from "@flogo-agent/prompts";
-import { promptCatalog } from "@flogo-agent/prompts";
+import { TaskResultSchema } from "@flogo-agent/contracts";
+import { promptCatalog, type PromptTemplate } from "@flogo-agent/prompts";
 import type { ArtifactTools, FlogoTools, RepoTools, RunnerDispatcher, TestTools } from "@flogo-agent/tools";
 
 export interface ModelClient {
@@ -32,6 +32,8 @@ export interface ExecutionPlan {
   taskType: TaskRequest["type"];
   steps: ExecutionPlanStep[];
   requiredApprovals: ApprovalType[];
+  validation?: ToolResponse;
+  summary: string;
 }
 
 const approvalMap: Record<TaskRequest["type"], ApprovalType[]> = {
@@ -41,108 +43,88 @@ const approvalMap: Record<TaskRequest["type"], ApprovalType[]> = {
   review: []
 };
 
-export class PolicyAgent {
+export class PolicyEngine {
   evaluate(task: TaskRequest): ApprovalType[] {
     const approvals = new Set<ApprovalType>(approvalMap[task.type]);
-    if (!task.constraints.allowDependencyChanges && task.inputs.requiresDependencyChange === true) {
+    const summary = task.summary.toLowerCase();
+
+    if (!task.constraints.allowDependencyChanges && summary.includes("upgrade")) {
       approvals.add("dependency_upgrade");
     }
-    if (!task.constraints.allowCustomCode && task.inputs.requiresCustomCode === true) {
+
+    if (!task.constraints.allowCustomCode && (summary.includes("custom activity") || summary.includes("custom trigger"))) {
       approvals.add("custom_code");
     }
+
+    if (summary.includes("delete") || summary.includes("remove")) {
+      approvals.add("delete_flow");
+    }
+
+    if (summary.includes("deploy")) {
+      approvals.add("deploy");
+    }
+
     return Array.from(approvals);
   }
 }
 
-export class BuilderAgent {
-  async createPlan(task: TaskRequest, modelClient: ModelClient): Promise<ExecutionPlan> {
-    await modelClient.complete(promptCatalog.builder, { task });
+export class TaskPlanner {
+  private readonly policy = new PolicyEngine();
+
+  plan(task: TaskRequest): ExecutionPlan {
+    const validation = task.type === "create" ? undefined : this.validateDraft(task);
     return {
       taskType: task.type,
-      requiredApprovals: [],
+      requiredApprovals: this.policy.evaluate(task),
+      validation,
+      summary: `Prepared ${task.type} workflow for ${task.summary}.`,
       steps: [
-        { id: "plan", label: "Plan the requested Flogo change" },
-        { id: "generate", label: "Generate or patch flogo.json", tool: "flogo.generateApp" },
-        { id: "validate-structural", label: "Run structural validation", tool: "flogo.validateApp" },
-        { id: "validate-mappings", label: "Run mapping validation", tool: "flogo.validateMappings" },
-        { id: "build", label: "Queue build job", tool: "runner.buildApp" },
-        { id: "smoke", label: "Queue smoke test", tool: "test.runSmoke" }
+        { id: "graph", label: "Parse current Flogo graph", tool: "flogo.parseApp" },
+        { id: "validate", label: "Validate structure and mappings", tool: "flogo.validateApp" },
+        { id: "patch", label: "Generate or patch flogo.json", tool: task.type === "create" ? "flogo.generateApp" : "flogo.patchApp" },
+        { id: "build", label: "Queue build step", tool: "runner.buildApp" },
+        { id: "smoke", label: "Queue smoke validation", tool: "test.runSmoke" }
       ]
     };
   }
-}
 
-export class DebuggerAgent {
-  async createPlan(task: TaskRequest, modelClient: ModelClient): Promise<ExecutionPlan> {
-    await modelClient.complete(promptCatalog.debugger, { task });
-    return {
-      taskType: task.type,
-      requiredApprovals: [],
-      steps: [
-        { id: "parse", label: "Parse current flogo.json", tool: "flogo.parseApp" },
-        { id: "classify", label: "Classify the failure and root cause" },
-        { id: "patch", label: "Prepare minimal patch", tool: "flogo.patchApp" },
-        { id: "validate", label: "Validate the fix", tool: "flogo.validateApp" },
-        { id: "retest", label: "Re-run smoke test", tool: "test.runSmoke" }
-      ]
-    };
-  }
-}
+  private validateDraft(task: TaskRequest): ToolResponse | undefined {
+    if (!task.appPath) {
+      return undefined;
+    }
 
-export class ReviewerAgent {
-  async createPlan(task: TaskRequest, modelClient: ModelClient): Promise<ExecutionPlan> {
-    await modelClient.complete(promptCatalog.reviewer, { task });
     return {
-      taskType: task.type,
-      requiredApprovals: [],
-      steps: [
-        { id: "parse", label: "Parse the current app", tool: "flogo.parseApp" },
-        { id: "review", label: "Review maintainability, mapping correctness, and security posture" },
-        { id: "artifact", label: "Publish review report", tool: "artifact.publish" }
-      ]
+      ok: true,
+      summary: `Validation deferred until ${task.appPath} is loaded.`,
+      data: {},
+      diagnostics: [],
+      artifacts: [],
+      retryable: false
     };
   }
 }
 
 export class OrchestratorAgent {
-  private readonly builder = new BuilderAgent();
-  private readonly debugger = new DebuggerAgent();
-  private readonly reviewer = new ReviewerAgent();
-  private readonly policy = new PolicyAgent();
+  private readonly planner = new TaskPlanner();
 
   constructor(private readonly dependencies: AgentDependencies) {}
 
   async planTask(task: TaskRequest): Promise<ExecutionPlan> {
-    const requiredApprovals = this.policy.evaluate(task);
-    let plan: ExecutionPlan;
-
-    switch (task.type) {
-      case "create":
-      case "update":
-        plan = await this.builder.createPlan(task, this.dependencies.modelClient);
-        break;
-      case "debug":
-        plan = await this.debugger.createPlan(task, this.dependencies.modelClient);
-        break;
-      case "review":
-        plan = await this.reviewer.createPlan(task, this.dependencies.modelClient);
-        break;
-    }
-
-    return { ...plan, requiredApprovals };
+    await this.dependencies.modelClient.complete(promptCatalog.orchestrator, { task });
+    return this.planner.plan(task);
   }
 
-  async validateDocument(document: string | object): Promise<TaskResult> {
-    const validationReport = validateFlogoApp(document);
+  buildResult(task: TaskRequest, validationReport?: ValidationReport): TaskResult {
+    const plan = this.planner.plan(task);
     return TaskResultSchema.parse({
-      taskId: "validation",
-      type: "review",
-      status: validationReport.ok ? "completed" : "failed",
-      summary: validationReport.summary,
+      taskId: task.taskId ?? "pending",
+      type: task.type,
+      status: plan.requiredApprovals.length > 0 ? "awaiting_approval" : "planning",
+      summary: plan.summary,
       validationReport,
       artifacts: [],
-      requiredApprovals: [],
-      nextActions: validationReport.ok ? ["Queue build and smoke test"] : ["Fix validation errors"]
+      requiredApprovals: plan.requiredApprovals,
+      nextActions: plan.steps.map((step) => step.label)
     });
   }
 }

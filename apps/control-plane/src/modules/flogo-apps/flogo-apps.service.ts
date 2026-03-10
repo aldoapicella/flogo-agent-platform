@@ -7,17 +7,14 @@ import { buildAppGraph } from "@flogo-agent/flogo-graph";
 @Injectable()
 export class FlogoAppsService {
   async getGraph(appId: string) {
-    const candidatePaths = [path.join(process.cwd(), "examples", appId, "flogo.json")];
+    const candidatePath = path.join(process.cwd(), "examples", appId, "flogo.json");
 
-    for (const candidatePath of candidatePaths) {
-      try {
-        const content = await fs.readFile(candidatePath, "utf8");
-        return buildAppGraph(content);
-      } catch {
-        continue;
-      }
+    try {
+      const content = await fs.readFile(candidatePath, "utf8");
+      return buildAppGraph(content);
+    } catch {
+      return undefined;
     }
-
-    return undefined;
   }
 }
+

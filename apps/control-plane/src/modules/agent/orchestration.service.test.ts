@@ -6,8 +6,9 @@ import { ToolsetService } from "../tools/toolset.service.js";
 import { OrchestrationService } from "./orchestration.service.js";
 
 describe("OrchestrationService", () => {
-  it("submits tasks and emits events", async () => {
+  it("submits a task and publishes initial events", async () => {
     const service = new OrchestrationService(new ToolsetService(), new RunnerQueueService(), new TaskEventsService());
+
     const task = await service.submitTask({
       type: "create",
       projectId: "demo",
@@ -19,4 +20,3 @@ describe("OrchestrationService", () => {
     expect(service.listTaskEvents(task.id).length).toBeGreaterThan(0);
   });
 });
-

@@ -21,6 +21,7 @@
     "compose:down": "docker compose -f infra/local/docker-compose.yml down --remove-orphans"
   },
   "devDependencies": {
+    "@prisma/client": "^6.19.2",
     "@types/diff": "^7.0.1",
     "@types/node": "^22.13.10",
     "@vitest/coverage-v8": "^3.0.8",
@@ -32,4 +33,3 @@
     "vitest": "^3.0.8"
   }
 }
-
