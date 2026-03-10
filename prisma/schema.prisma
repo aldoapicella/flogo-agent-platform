@@ -1,0 +1,315 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TaskType {
+  create
+  update
+  debug
+  review
+}
+
+enum TaskStatus {
+  queued
+  planning
+  running
+  awaiting_approval
+  completed
+  failed
+  cancelled
+}
+
+enum TaskStepType {
+  plan
+  validate
+  patch
+  build
+  run
+  test
+  review
+  approve
+  artifact
+}
+
+enum ApprovalType {
+  delete_flow
+  change_public_contract
+  dependency_upgrade
+  custom_code
+  external_endpoint_change
+  deploy
+}
+
+enum ApprovalStatus {
+  pending
+  approved
+  rejected
+}
+
+enum ArtifactType {
+  flogo_json
+  binary
+  build_log
+  runtime_log
+  test_report
+  patch_bundle
+  review_report
+  workspace_snapshot
+}
+
+enum BuildRunStatus {
+  queued
+  running
+  completed
+  failed
+}
+
+enum TestRunStatus {
+  queued
+  running
+  passed
+  failed
+}
+
+model Organization {
+  id        String    @id @default(uuid())
+  name      String
+  createdAt DateTime  @default(now())
+  projects  Project[]
+}
+
+model Project {
+  id             String       @id @default(uuid())
+  organizationId String
+  name           String
+  repoUrl        String
+  defaultBranch  String       @default("main")
+  rootPath       String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  apps           FlogoApp[]
+  tasks          Task[]
+}
+
+model FlogoApp {
+  id            String       @id @default(uuid())
+  projectId     String
+  appName       String
+  appPath       String
+  appType       String       @default("flogo:app")
+  appModel      String
+  lastKnownHash String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  project       Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks         Task[]
+  imports       AppImport[]
+  triggers      AppTrigger[]
+  resources     AppResource[]
+}
+
+model Task {
+  id                 String              @id @default(uuid())
+  projectId          String
+  flogoAppId         String?
+  taskType           TaskType
+  status             TaskStatus
+  requestedBy        String
+  inputPayload       Json
+  planSummary        String?
+  riskScore          Decimal?            @db.Decimal(5, 2)
+  requiresApproval   Boolean             @default(false)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  project            Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  flogoApp           FlogoApp?           @relation(fields: [flogoAppId], references: [id], onDelete: SetNull)
+  events             TaskEvent[]
+  steps              TaskStep[]
+  toolCalls          ToolCall[]
+  approvals          Approval[]
+  patches            Patch[]
+  buildRuns          BuildRun[]
+  testRuns           TestRun[]
+  artifacts          Artifact[]
+  workspaceSnapshots WorkspaceSnapshot[]
+}
+
+model TaskEvent {
+  id        String   @id @default(uuid())
+  taskId    String
+  level     String
+  category  String
+  message   String
+  payload   Json?
+  createdAt DateTime @default(now())
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model TaskStep {
+  id         String      @id @default(uuid())
+  taskId     String
+  stepOrder  Int
+  stepType   TaskStepType
+  status     TaskStatus
+  summary    String?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  task       Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model ToolCall {
+  id        String   @id @default(uuid())
+  taskId     String
+  stepId    String?
+  toolName  String
+  request   Json
+  response  Json?
+  success   Boolean?
+  latencyMs Int?
+  createdAt DateTime @default(now())
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model Approval {
+  id           String         @id @default(uuid())
+  taskId        String
+  approvalType ApprovalType
+  requestedFrom String
+  status       ApprovalStatus
+  rationale    String?
+  createdAt    DateTime       @default(now())
+  respondedAt  DateTime?
+  task         Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model WorkspaceSnapshot {
+  id         String   @id @default(uuid())
+  taskId      String
+  repoCommit String?
+  branchName String?
+  snapshotUri String
+  createdAt  DateTime @default(now())
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model Patch {
+  id          String   @id @default(uuid())
+  taskId      String
+  filePath    String
+  patchFormat String   @default("unified_diff")
+  patchText   String
+  applied     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model BuildRun {
+  id         String         @id @default(uuid())
+  taskId      String
+  runnerJobId String
+  commandLine String
+  status     BuildRunStatus
+  binaryUri  String?
+  logUri     String?
+  exitCode   Int?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  task       Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model TestRun {
+  id         String        @id @default(uuid())
+  taskId      String
+  buildRunId String?
+  testType   String
+  status     TestRunStatus
+  reportUri  String?
+  summary    Json?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  task       Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model Artifact {
+  id           String       @id @default(uuid())
+  taskId        String
+  artifactType ArtifactType
+  name         String
+  uri          String
+  metadata     Json?
+  createdAt    DateTime     @default(now())
+  task         Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model KnowledgeChunk {
+  id          String   @id @default(uuid())
+  sourceType  String
+  sourceUri   String
+  title       String?
+  chunkText   String
+  embeddingId String?
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+}
+
+model PromptVersion {
+  id        String   @id @default(uuid())
+  promptId  String
+  version   String
+  content   Json
+  createdAt DateTime @default(now())
+}
+
+model EvalRun {
+  id         String   @id @default(uuid())
+  evalSuite  String
+  version    String
+  summary    Json
+  startedAt  DateTime?
+  finishedAt DateTime?
+}
+
+model AppImport {
+  id         String   @id @default(uuid())
+  flogoAppId String
+  alias      String
+  ref        String
+  version    String?
+  app        FlogoApp @relation(fields: [flogoAppId], references: [id], onDelete: Cascade)
+}
+
+model AppTrigger {
+  id         String       @id @default(uuid())
+  flogoAppId String
+  triggerId  String
+  ref        String
+  settings   Json
+  app        FlogoApp     @relation(fields: [flogoAppId], references: [id], onDelete: Cascade)
+  handlers   AppHandler[]
+}
+
+model AppHandler {
+  id             String     @id @default(uuid())
+  triggerRowId   String
+  handlerIndex   Int
+  settings       Json
+  actionRef      String
+  inputMappings  Json?
+  outputMappings Json?
+  trigger        AppTrigger @relation(fields: [triggerRowId], references: [id], onDelete: Cascade)
+}
+
+model AppResource {
+  id           String   @id @default(uuid())
+  flogoAppId   String
+  resourceId   String
+  resourceType String
+  body         Json
+  app          FlogoApp @relation(fields: [flogoAppId], references: [id], onDelete: Cascade)
+}
