@@ -1,10 +1,13 @@
 {
-  "name": "@flogo-agent/flogo-graph",
+  "name": "@flogo-agent/evals",
   "version": "0.1.0",
   "private": true,
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -14,4 +17,3 @@
     "@flogo-agent/contracts": "workspace:*"
   }
 }
-
