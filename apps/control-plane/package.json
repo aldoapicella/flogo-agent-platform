@@ -1,0 +1,36 @@
+{
+  "name": "@flogo-agent/control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.2",
+    "@flogo-agent/agent": "workspace:*",
+    "@flogo-agent/contracts": "workspace:*",
+    "@flogo-agent/flogo-graph": "workspace:*",
+    "@flogo-agent/prompts": "workspace:*",
+    "@flogo-agent/tools": "workspace:*",
+    "@nestjs/common": "^11.0.11",
+    "@nestjs/core": "^11.0.11",
+    "@nestjs/platform-fastify": "^11.0.11",
+    "@nestjs/swagger": "^11.1.6",
+    "@prisma/client": "^6.4.1",
+    "bullmq": "^5.41.0",
+    "fastify": "^5.2.1",
+    "ioredis": "^5.4.2",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.0.11",
+    "supertest": "^7.0.0",
+    "tsx": "^4.19.3"
+  }
+}
+

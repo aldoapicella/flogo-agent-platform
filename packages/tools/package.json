@@ -2,24 +2,26 @@
   "name": "@flogo-agent/tools",
   "version": "0.1.0",
   "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "default": "./dist/index.js"
     }
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "build": "tsup src/index.ts --format esm --dts",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
     "@flogo-agent/contracts": "workspace:*",
-    "@flogo-agent/flogo-graph": "workspace:*"
+    "@flogo-agent/flogo-graph": "workspace:*",
+    "diff": "^7.0.0",
+    "fast-glob": "^3.3.3"
   }
 }
 

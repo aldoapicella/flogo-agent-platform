@@ -19,29 +19,25 @@ enum TaskStatus {
   planning
   running
   awaiting_approval
-  completed
+  succeeded
   failed
   cancelled
 }
 
-enum TaskStepType {
-  plan
-  validate
-  patch
-  build
-  run
-  test
-  review
-  approve
-  artifact
+enum TaskStepStatus {
+  pending
+  running
+  succeeded
+  failed
 }
 
 enum ApprovalType {
+  delete_resource
   delete_flow
-  change_public_contract
   dependency_upgrade
   custom_code
   external_endpoint_change
+  public_contract_change
   deploy
 }
 
@@ -51,224 +47,204 @@ enum ApprovalStatus {
   rejected
 }
 
-enum ArtifactType {
-  flogo_json
+enum ArtifactKind {
+  diff
   binary
   build_log
   runtime_log
-  test_report
-  patch_bundle
-  review_report
-  workspace_snapshot
-}
-
-enum BuildRunStatus {
-  queued
-  running
-  completed
-  failed
-}
-
-enum TestRunStatus {
-  queued
-  running
-  passed
-  failed
+  report
+  snapshot
+  readme
 }
 
 model Organization {
   id        String    @id @default(uuid())
   name      String
-  createdAt DateTime  @default(now())
   projects  Project[]
+  createdAt DateTime  @default(now())
 }
 
 model Project {
   id             String       @id @default(uuid())
   organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
   name           String
   repoUrl        String
   defaultBranch  String       @default("main")
-  rootPath       String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   apps           FlogoApp[]
   tasks          Task[]
+  createdAt      DateTime     @default(now())
 }
 
 model FlogoApp {
-  id            String       @id @default(uuid())
+  id            String        @id @default(uuid())
   projectId     String
+  project       Project       @relation(fields: [projectId], references: [id])
   appName       String
   appPath       String
-  appType       String       @default("flogo:app")
+  appType       String        @default("flogo:app")
   appModel      String
   lastKnownHash String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  project       Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  tasks         Task[]
   imports       AppImport[]
   triggers      AppTrigger[]
   resources     AppResource[]
+  tasks         Task[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 }
 
 model Task {
-  id                 String              @id @default(uuid())
-  projectId          String
-  flogoAppId         String?
-  taskType           TaskType
-  status             TaskStatus
-  requestedBy        String
-  inputPayload       Json
-  planSummary        String?
-  riskScore          Decimal?            @db.Decimal(5, 2)
-  requiresApproval   Boolean             @default(false)
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  project            Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  flogoApp           FlogoApp?           @relation(fields: [flogoAppId], references: [id], onDelete: SetNull)
-  events             TaskEvent[]
-  steps              TaskStep[]
-  toolCalls          ToolCall[]
-  approvals          Approval[]
-  patches            Patch[]
-  buildRuns          BuildRun[]
-  testRuns           TestRun[]
-  artifacts          Artifact[]
-  workspaceSnapshots WorkspaceSnapshot[]
+  id           String              @id @default(uuid())
+  projectId    String
+  project      Project             @relation(fields: [projectId], references: [id])
+  flogoAppId   String?
+  flogoApp     FlogoApp?           @relation(fields: [flogoAppId], references: [id])
+  type         TaskType
+  status       TaskStatus
+  requestedBy  String
+  prompt       String
+  inputPayload Json
+  planSummary  String?
+  riskScore    Decimal?
+  steps        TaskStep[]
+  events       TaskEvent[]
+  toolCalls    ToolCall[]
+  approvals    Approval[]
+  snapshots    WorkspaceSnapshot[]
+  patches      Patch[]
+  buildRuns    BuildRun[]
+  testRuns     TestRun[]
+  artifacts    Artifact[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+}
+
+model TaskStep {
+  id         String         @id @default(uuid())
+  taskId     String
+  task       Task           @relation(fields: [taskId], references: [id])
+  stepOrder  Int
+  type       String
+  status     TaskStepStatus
+  summary    String?
+  startedAt  DateTime?
+  finishedAt DateTime?
 }
 
 model TaskEvent {
   id        String   @id @default(uuid())
   taskId    String
-  level     String
-  category  String
-  message   String
-  payload   Json?
+  task      Task     @relation(fields: [taskId], references: [id])
+  type      String
+  payload   Json
   createdAt DateTime @default(now())
-  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-}
-
-model TaskStep {
-  id         String      @id @default(uuid())
-  taskId     String
-  stepOrder  Int
-  stepType   TaskStepType
-  status     TaskStatus
-  summary    String?
-  startedAt  DateTime?
-  finishedAt DateTime?
-  task       Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
 }
 
 model ToolCall {
   id        String   @id @default(uuid())
-  taskId     String
-  stepId    String?
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id])
   toolName  String
   request   Json
   response  Json?
   success   Boolean?
   latencyMs Int?
   createdAt DateTime @default(now())
-  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
 }
 
 model Approval {
-  id           String         @id @default(uuid())
+  id            String         @id @default(uuid())
   taskId        String
-  approvalType ApprovalType
+  task          Task           @relation(fields: [taskId], references: [id])
+  type          ApprovalType
+  status        ApprovalStatus
+  rationale     String
   requestedFrom String
-  status       ApprovalStatus
-  rationale    String?
-  createdAt    DateTime       @default(now())
-  respondedAt  DateTime?
-  task         Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  respondedAt   DateTime?
+  createdAt     DateTime       @default(now())
 }
 
 model WorkspaceSnapshot {
-  id         String   @id @default(uuid())
+  id          String   @id @default(uuid())
   taskId      String
-  repoCommit String?
-  branchName String?
+  task        Task     @relation(fields: [taskId], references: [id])
+  repoCommit  String?
+  branchName  String
   snapshotUri String
-  createdAt  DateTime @default(now())
-  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
 }
 
 model Patch {
   id          String   @id @default(uuid())
   taskId      String
+  task        Task     @relation(fields: [taskId], references: [id])
   filePath    String
   patchFormat String   @default("unified_diff")
   patchText   String
   applied     Boolean  @default(false)
   createdAt   DateTime @default(now())
-  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
 }
 
 model BuildRun {
-  id         String         @id @default(uuid())
+  id          String   @id @default(uuid())
   taskId      String
-  runnerJobId String
+  task        Task     @relation(fields: [taskId], references: [id])
+  jobId       String
   commandLine String
-  status     BuildRunStatus
-  binaryUri  String?
-  logUri     String?
-  exitCode   Int?
-  startedAt  DateTime?
-  finishedAt DateTime?
-  task       Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  status      String
+  binaryUri   String?
+  logUri      String?
+  exitCode    Int?
+  startedAt   DateTime?
+  finishedAt  DateTime?
 }
 
 model TestRun {
-  id         String        @id @default(uuid())
-  taskId      String
+  id         String    @id @default(uuid())
+  taskId     String
+  task       Task      @relation(fields: [taskId], references: [id])
   buildRunId String?
-  testType   String
-  status     TestRunStatus
+  buildRun   BuildRun? @relation(fields: [buildRunId], references: [id])
+  type       String
+  status     String
   reportUri  String?
   summary    Json?
   startedAt  DateTime?
   finishedAt DateTime?
-  task       Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
 }
 
 model Artifact {
-  id           String       @id @default(uuid())
-  taskId        String
-  artifactType ArtifactType
-  name         String
-  uri          String
-  metadata     Json?
-  createdAt    DateTime     @default(now())
-  task         Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  id        String       @id @default(uuid())
+  taskId    String
+  task      Task         @relation(fields: [taskId], references: [id])
+  kind      ArtifactKind
+  name      String
+  uri       String
+  createdAt DateTime     @default(now())
 }
 
 model KnowledgeChunk {
-  id          String   @id @default(uuid())
-  sourceType  String
-  sourceUri   String
-  title       String?
-  chunkText   String
-  embeddingId String?
-  metadata    Json     @default("{}")
-  createdAt   DateTime @default(now())
+  id         String   @id @default(uuid())
+  sourceType String
+  sourceUri  String
+  title      String?
+  chunkText  String
+  metadata   Json
+  createdAt  DateTime @default(now())
 }
 
 model PromptVersion {
   id        String   @id @default(uuid())
   promptId  String
   version   String
+  role      String
   content   Json
   createdAt DateTime @default(now())
 }
 
 model EvalRun {
   id         String   @id @default(uuid())
-  evalSuite  String
+  suite      String
   version    String
   summary    Json
   startedAt  DateTime?
@@ -278,38 +254,37 @@ model EvalRun {
 model AppImport {
   id         String   @id @default(uuid())
   flogoAppId String
+  flogoApp   FlogoApp @relation(fields: [flogoAppId], references: [id])
   alias      String
   ref        String
-  version    String?
-  app        FlogoApp @relation(fields: [flogoAppId], references: [id], onDelete: Cascade)
 }
 
 model AppTrigger {
   id         String       @id @default(uuid())
   flogoAppId String
+  flogoApp   FlogoApp     @relation(fields: [flogoAppId], references: [id])
   triggerId  String
   ref        String
   settings   Json
-  app        FlogoApp     @relation(fields: [flogoAppId], references: [id], onDelete: Cascade)
   handlers   AppHandler[]
 }
 
 model AppHandler {
   id             String     @id @default(uuid())
-  triggerRowId   String
+  triggerId      String
+  trigger        AppTrigger @relation(fields: [triggerId], references: [id])
   handlerIndex   Int
   settings       Json
   actionRef      String
   inputMappings  Json?
   outputMappings Json?
-  trigger        AppTrigger @relation(fields: [triggerRowId], references: [id], onDelete: Cascade)
 }
 
 model AppResource {
   id           String   @id @default(uuid())
   flogoAppId   String
+  flogoApp     FlogoApp @relation(fields: [flogoAppId], references: [id])
   resourceId   String
   resourceType String
   body         Json
-  app          FlogoApp @relation(fields: [flogoAppId], references: [id], onDelete: Cascade)
 }

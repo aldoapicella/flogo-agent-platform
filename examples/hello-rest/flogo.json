@@ -1,0 +1,50 @@
+{
+  "name": "hello-rest",
+  "type": "flogo:app",
+  "appModel": "1.1.0",
+  "imports": [
+    {
+      "alias": "log",
+      "ref": "github.com/project-flogo/contrib/activity/log"
+    }
+  ],
+  "triggers": [
+    {
+      "id": "rest_trigger",
+      "ref": "#rest",
+      "settings": {
+        "port": 9999
+      },
+      "handlers": [
+        {
+          "settings": {
+            "method": "GET",
+            "path": "/hello"
+          },
+          "action": {
+            "ref": "#flow:hello_flow"
+          }
+        }
+      ]
+    }
+  ],
+  "resources": [
+    {
+      "id": "hello_flow",
+      "data": {
+        "name": "hello_flow",
+        "tasks": [
+          {
+            "id": "log_1",
+            "activityRef": "#log",
+            "input": {
+              "message": "hello"
+            }
+          }
+        ],
+        "links": []
+      }
+    }
+  ]
+}
+

@@ -1,0 +1,84 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: flogo_agent
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    command: azurite --blobHost 0.0.0.0 --blobPort 10000
+    ports:
+      - "10000:10000"
+    volumes:
+      - azurite-data:/data
+
+  control-plane:
+    image: node:22
+    working_dir: /workspace
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/flogo_agent
+      REDIS_URL: redis://redis:6379
+      BLOB_ENDPOINT: http://azurite:10000/devstoreaccount1
+      PORT: 3000
+    command: >
+      sh -lc "corepack enable &&
+      pnpm install &&
+      pnpm --filter @flogo-agent/control-plane dev"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+      - redis
+      - azurite
+    volumes:
+      - ../../:/workspace
+
+  runner-worker:
+    image: node:22
+    working_dir: /workspace
+    environment:
+      REDIS_URL: redis://redis:6379
+      RUNNER_MODE: docker
+    command: >
+      sh -lc "corepack enable &&
+      pnpm install &&
+      pnpm --filter @flogo-agent/runner-worker dev"
+    depends_on:
+      - redis
+    volumes:
+      - ../../:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  web-console:
+    image: node:22
+    working_dir: /workspace
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3000
+      PORT: 3001
+    command: >
+      sh -lc "corepack enable &&
+      pnpm install &&
+      pnpm --filter @flogo-agent/web-console dev"
+    ports:
+      - "3001:3001"
+    depends_on:
+      - control-plane
+    volumes:
+      - ../../:/workspace
+
+volumes:
+  postgres-data:
+  azurite-data:

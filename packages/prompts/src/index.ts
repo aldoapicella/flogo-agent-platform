@@ -1,44 +1,54 @@
 export interface PromptTemplate {
   id: string;
   version: string;
-  purpose: string;
-  template: string;
+  evalId: string;
+  content: string;
 }
 
-export const promptCatalog: Record<string, PromptTemplate> = {
+export const promptCatalog: Record<"orchestrator" | "builder" | "debugger" | "reviewer" | "policy", PromptTemplate> = {
   orchestrator: {
     id: "orchestrator",
-    version: "2026-03-10",
-    purpose: "Select workflow, tools, validation gates, and evidence requirements.",
-    template:
-      "Treat flogo.json as canonical. Choose the smallest safe workflow, validate after every mutation, and require evidence before success."
+    version: "0.1.0",
+    evalId: "eval-orchestrator-v1",
+    content: [
+      "You orchestrate Flogo engineering tasks.",
+      "Use the smallest safe change set and keep flogo.json canonical.",
+      "Never report success without validation, build, and smoke-test evidence."
+    ].join("\n")
   },
   builder: {
     id: "builder",
-    version: "2026-03-10",
-    purpose: "Generate triggers, flows, activities, and mappings.",
-    template:
-      "Produce minimal Flogo graphs that satisfy the request, reuse existing resources, and avoid unnecessary contribs."
+    version: "0.1.0",
+    evalId: "eval-builder-v1",
+    content: [
+      "Translate intent into triggers, handlers, resources, activities, and mappings.",
+      "Prefer minimal valid Flogo graphs and reuse existing resources when practical."
+    ].join("\n")
   },
   debugger: {
     id: "debugger",
-    version: "2026-03-10",
-    purpose: "Classify failures and propose minimal fixes.",
-    template:
-      "Return root cause, evidence, patch, risk, and a proving smoke test."
+    version: "0.1.0",
+    evalId: "eval-debugger-v1",
+    content: [
+      "Classify failures into model, reference, mapping, trigger, activity, runtime, or behavioral faults.",
+      "Return root cause, evidence, minimal patch, and proving test."
+    ].join("\n")
   },
   reviewer: {
     id: "reviewer",
-    version: "2026-03-10",
-    purpose: "Review maintainability, security, and contract drift.",
-    template:
-      "Flag unused imports, orphaned refs, brittle mappings, risky contract changes, and missing tests."
+    version: "0.1.0",
+    evalId: "eval-reviewer-v1",
+    content: [
+      "Check maintainability, naming, orphaned refs, fragile mappings, and security concerns.",
+      "Flag risky public contract changes and missing tests."
+    ].join("\n")
   },
   policy: {
     id: "policy",
-    version: "2026-03-10",
-    purpose: "Decide when human approval is required.",
-    template:
-      "Require approval for deletes, public REST contract changes, dependency upgrades, custom Go code, endpoint target changes, and deploy actions."
+    version: "0.1.0",
+    evalId: "eval-policy-v1",
+    content: [
+      "Require approval for destructive changes, dependency upgrades, public contract changes, custom code, external endpoint changes, and deployments."
+    ].join("\n")
   }
 };

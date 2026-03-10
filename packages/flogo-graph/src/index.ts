@@ -1,317 +1,235 @@
 import {
-  type FlogoAppGraph,
   FlogoAppGraphSchema,
-  type FlogoImport,
-  type FlogoResource,
-  type FlogoTask,
-  type ValidationIssue,
+  FlogoAppSchema,
+  type Diagnostic,
+  type FlogoApp,
+  type FlogoAppGraph,
   type ValidationReport,
-  ValidationReportSchema
+  ValidationReportSchema,
+  type ValidationStage,
+  type ValidationStageResult
 } from "@flogo-agent/contracts";
 
-type JsonObject = Record<string, unknown>;
-
-function toObject(input: string | JsonObject): JsonObject {
-  return typeof input === "string" ? (JSON.parse(input) as JsonObject) : input;
+function createDiagnostic(
+  code: string,
+  message: string,
+  severity: Diagnostic["severity"],
+  path?: string,
+  details?: Record<string, unknown>
+): Diagnostic {
+  return { code, message, severity, path, details };
 }
 
-function normalizeImports(raw: unknown): FlogoImport[] {
-  if (Array.isArray(raw)) {
-    return raw
-      .filter((item): item is JsonObject => typeof item === "object" && item !== null)
-      .map((item) => ({
-        alias: String(item.alias ?? item.name ?? ""),
-        ref: String(item.ref ?? ""),
-        version: item.version ? String(item.version) : undefined
-      }))
-      .filter((item) => item.alias && item.ref);
-  }
-
-  if (raw && typeof raw === "object") {
-    return Object.entries(raw as JsonObject).map(([alias, value]) => ({
-      alias,
-      ref: typeof value === "string" ? value : String((value as JsonObject).ref ?? ""),
-      version:
-        value && typeof value === "object" && "version" in (value as JsonObject)
-          ? String((value as JsonObject).version)
-          : undefined
-    }));
-  }
-
-  return [];
+function stageResult(stage: ValidationStage, diagnostics: Diagnostic[]): ValidationStageResult {
+  return {
+    stage,
+    ok: diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    diagnostics
+  };
 }
 
-function normalizeTasks(raw: unknown): FlogoTask[] {
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-
-  return raw
-    .filter((item): item is JsonObject => typeof item === "object" && item !== null)
-    .map((item, index) => ({
-      id: String(item.id ?? `task-${index}`),
-      name: item.name ? String(item.name) : undefined,
-      activityRef:
-        typeof item.activity === "object" && item.activity !== null
-          ? String((item.activity as JsonObject).ref ?? "")
-          : item.activityRef
-            ? String(item.activityRef)
-            : undefined,
-      inputMappings:
-        typeof item.input === "object" && item.input !== null
-          ? (item.input as Record<string, unknown>)
-          : undefined,
-      outputMappings:
-        typeof item.output === "object" && item.output !== null
-          ? (item.output as Record<string, unknown>)
-          : undefined
-    }));
+export function parseFlogoAppDocument(document: string | FlogoApp | unknown): FlogoApp {
+  const parsed = typeof document === "string" ? JSON.parse(document) : document;
+  return FlogoAppSchema.parse(parsed);
 }
 
-function normalizeResources(raw: unknown): FlogoResource[] {
-  if (Array.isArray(raw)) {
-    return raw
-      .filter((item): item is JsonObject => typeof item === "object" && item !== null)
-      .map((item, index) => ({
-        id: String(item.id ?? `resource-${index}`),
-        type: String(item.type ?? "flow"),
-        input: Array.isArray(item.input) ? item.input.map(String) : [],
-        output: Array.isArray(item.output) ? item.output.map(String) : [],
-        tasks: normalizeTasks(item.tasks)
-      }));
-  }
+export function buildAppGraph(document: string | FlogoApp | unknown): FlogoAppGraph {
+  const app = parseFlogoAppDocument(document);
+  const importsByAlias = Object.fromEntries(app.imports.map((entry) => [entry.alias, entry.ref]));
+  const resourceIds = app.resources.map((resource) => resource.id);
+  const taskIds = app.resources.flatMap((resource) => resource.data.tasks.map((task) => task.id));
 
-  if (raw && typeof raw === "object") {
-    return Object.entries(raw as JsonObject).map(([resourceId, value]) => {
-      const resource = value as JsonObject;
-      const data =
-        typeof resource.data === "object" && resource.data !== null
-          ? (resource.data as JsonObject)
-          : resource;
-      const metadata =
-        typeof data.metadata === "object" && data.metadata !== null
-          ? (data.metadata as JsonObject)
-          : {};
-
-      return {
-        id: resourceId,
-        type: String(resource.type ?? "flow"),
-        input: Array.isArray(metadata.input) ? metadata.input.map(String) : [],
-        output: Array.isArray(metadata.output) ? metadata.output.map(String) : [],
-        tasks: normalizeTasks(data.tasks)
-      };
-    });
-  }
-
-  return [];
-}
-
-function normalizeTriggers(raw: unknown) {
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-
-  return raw
-    .filter((item): item is JsonObject => typeof item === "object" && item !== null)
-    .map((trigger, index) => ({
-      id: String(trigger.id ?? `trigger-${index}`),
-      ref: String(trigger.ref ?? ""),
-      settings:
-        typeof trigger.settings === "object" && trigger.settings !== null
-          ? (trigger.settings as Record<string, unknown>)
-          : {},
-      handlers: Array.isArray(trigger.handlers)
-        ? trigger.handlers
-            .filter((item): item is JsonObject => typeof item === "object" && item !== null)
-            .map((handler, handlerIndex) => ({
-              id: String(handler.id ?? `${trigger.id ?? `trigger-${index}`}-handler-${handlerIndex}`),
-              actionRef:
-                typeof handler.action === "object" && handler.action !== null
-                  ? String((handler.action as JsonObject).ref ?? "")
-                  : String(handler.actionRef ?? ""),
-              settings:
-                typeof handler.settings === "object" && handler.settings !== null
-                  ? (handler.settings as Record<string, unknown>)
-                  : {},
-              inputMappings:
-                typeof handler.input === "object" && handler.input !== null
-                  ? (handler.input as Record<string, unknown>)
-                  : undefined,
-              outputMappings:
-                typeof handler.output === "object" && handler.output !== null
-                  ? (handler.output as Record<string, unknown>)
-                  : undefined
-            }))
-        : []
-    }));
-}
-
-function emptyReport(): ValidationReport {
-  return ValidationReportSchema.parse({});
-}
-
-function addIssue(issues: ValidationIssue[], code: string, message: string, path?: string) {
-  issues.push({ code, message, path, severity: "error" });
-}
-
-function collectExpressions(value: unknown, expressions: string[] = []): string[] {
-  if (typeof value === "string") {
-    expressions.push(value);
-    return expressions;
-  }
-
-  if (Array.isArray(value)) {
-    value.forEach((item) => collectExpressions(item, expressions));
-    return expressions;
-  }
-
-  if (value && typeof value === "object") {
-    Object.values(value as JsonObject).forEach((item) => collectExpressions(item, expressions));
-  }
-
-  return expressions;
-}
-
-export function parseFlogoApp(input: string | JsonObject): FlogoAppGraph {
-  const raw = toObject(input);
   return FlogoAppGraphSchema.parse({
-    name: String(raw.name ?? "Unnamed Flogo App"),
-    type: String(raw.type ?? "flogo:app"),
-    appModel: String(raw.appModel ?? raw.app_model ?? ""),
-    imports: normalizeImports(raw.imports),
-    triggers: normalizeTriggers(raw.triggers),
-    resources: normalizeResources(raw.resources),
+    app,
+    importsByAlias,
+    resourceIds,
+    taskIds,
     diagnostics: []
   });
 }
 
-export function validateStructural(input: string | JsonObject): ValidationReport {
-  const raw = toObject(input);
-  const report = emptyReport();
+export function validateStructural(document: string | FlogoApp | unknown): ValidationStageResult {
+  const diagnostics: Diagnostic[] = [];
 
-  if (raw.type !== "flogo:app") {
-    addIssue(report.structural.issues, "invalid_type", "Root `type` must be `flogo:app`.", "type");
+  try {
+    const parsed = typeof document === "string" ? JSON.parse(document) : document;
+    FlogoAppSchema.parse(parsed);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown structural validation failure";
+    diagnostics.push(createDiagnostic("flogo.structural.invalid", message, "error"));
   }
 
-  if (!raw.appModel && !raw.app_model) {
-    addIssue(report.structural.issues, "missing_app_model", "`appModel` is required.", "appModel");
-  }
-
-  if (!Array.isArray(raw.triggers)) {
-    addIssue(report.structural.issues, "missing_triggers", "`triggers` must be an array.", "triggers");
-  }
-
-  if (!raw.resources || (typeof raw.resources !== "object" && !Array.isArray(raw.resources))) {
-    addIssue(report.structural.issues, "missing_resources", "`resources` must be present.", "resources");
-  }
-
-  report.structural.valid = report.structural.issues.length === 0;
-  report.overallValid = report.structural.valid;
-  return report;
+  return stageResult("structural", diagnostics);
 }
 
-export function validateSemantic(input: string | JsonObject): ValidationReport {
-  const graph = parseFlogoApp(input);
-  const report = emptyReport();
-  const importAliases = new Set(graph.imports.map((item) => item.alias));
-  const resourceIds = new Set(graph.resources.map((item) => item.id));
+export function validateSemantic(document: string | FlogoApp | unknown): ValidationStageResult {
+  const graph = buildAppGraph(document);
+  const diagnostics: Diagnostic[] = [];
+  const resourceIds = new Set(graph.resourceIds);
+  const importAliases = new Set(Object.keys(graph.importsByAlias));
 
-  graph.triggers.forEach((trigger) => {
-    trigger.handlers.forEach((handler) => {
-      if (handler.actionRef.startsWith("#") && !importAliases.has(handler.actionRef.slice(1))) {
-        addIssue(
-          report.semantic.issues,
-          "missing_import_alias",
-          `Handler ${handler.id} references missing import alias ${handler.actionRef}.`,
-          `triggers.${trigger.id}.handlers.${handler.id}.actionRef`
-        );
-      }
-
-      if (handler.actionRef.includes("flow:")) {
-        const resourceId = handler.actionRef.split(":").pop();
-        if (resourceId && !resourceIds.has(resourceId)) {
-          addIssue(
-            report.semantic.issues,
-            "missing_flow_resource",
-            `Handler ${handler.id} points to missing resource ${resourceId}.`,
-            `triggers.${trigger.id}.handlers.${handler.id}.actionRef`
+  for (const trigger of graph.app.triggers) {
+    for (const handler of trigger.handlers) {
+      const ref = handler.action.ref;
+      if (ref.startsWith("#flow:")) {
+        const flowId = ref.replace("#flow:", "");
+        if (!resourceIds.has(flowId)) {
+          diagnostics.push(
+            createDiagnostic(
+              "flogo.semantic.missing_flow",
+              `Handler action ref "${ref}" does not match a known flow resource`,
+              "error",
+              `triggers.${trigger.id}.handlers`
+            )
           );
         }
       }
-    });
-  });
+    }
+  }
 
-  graph.resources.forEach((resource) => {
-    resource.tasks.forEach((task) => {
-      if (task.activityRef?.startsWith("#") && !importAliases.has(task.activityRef.slice(1))) {
-        addIssue(
-          report.semantic.issues,
-          "missing_activity_alias",
-          `Task ${task.id} references missing import alias ${task.activityRef}.`,
-          `resources.${resource.id}.tasks.${task.id}.activityRef`
+  for (const resource of graph.app.resources) {
+    for (const task of resource.data.tasks) {
+      if (!task.activityRef) {
+        diagnostics.push(
+          createDiagnostic(
+            "flogo.semantic.missing_activity_ref",
+            `Task "${task.id}" is missing an activity ref`,
+            "warning",
+            `resources.${resource.id}.tasks.${task.id}`
+          )
         );
+        continue;
       }
 
-      collectExpressions(task.inputMappings)
-        .concat(collectExpressions(task.outputMappings))
-        .forEach((expression) => {
-          const activityMatches = expression.match(/\$activity\[(?<id>[^\]]+)\]/g);
-          activityMatches?.forEach((match) => {
-            const activityId = match.replace("$activity[", "").replace("]", "");
-            const known = resource.tasks.some((candidate) => candidate.id === activityId);
-            if (!known) {
-              addIssue(
-                report.semantic.issues,
-                "invalid_activity_reference",
-                `Task ${task.id} references unknown activity ${activityId}.`,
-                `resources.${resource.id}.tasks.${task.id}`
-              );
-            }
-          });
+      if (task.activityRef.startsWith("#")) {
+        const alias = task.activityRef.slice(1).split(".")[0];
+        if (!importAliases.has(alias) && alias !== "flow" && alias !== "rest") {
+          diagnostics.push(
+            createDiagnostic(
+              "flogo.semantic.missing_import",
+              `Task "${task.id}" references missing import alias "#${alias}"`,
+              "error",
+              `resources.${resource.id}.tasks.${task.id}.activityRef`
+            )
+          );
+        }
+      }
+    }
+  }
 
-          if (expression.includes("$flow.") && resource.type !== "flow") {
-            addIssue(
-              report.semantic.issues,
-              "invalid_flow_scope",
-              `Task ${task.id} uses $flow outside a flow resource.`,
+  return stageResult("semantic", diagnostics);
+}
+
+function collectActivityReferences(value: unknown, references: Set<string>): void {
+  if (typeof value === "string") {
+    const regex = /\$activity\[([^\]]+)\]/g;
+    let match: RegExpExecArray | null = regex.exec(value);
+    while (match) {
+      references.add(match[1]);
+      match = regex.exec(value);
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      collectActivityReferences(entry, references);
+    }
+    return;
+  }
+
+  if (value && typeof value === "object") {
+    for (const nestedValue of Object.values(value)) {
+      collectActivityReferences(nestedValue, references);
+    }
+  }
+}
+
+export function validateMappings(document: string | FlogoApp | unknown): ValidationStageResult {
+  const graph = buildAppGraph(document);
+  const diagnostics: Diagnostic[] = [];
+
+  for (const resource of graph.app.resources) {
+    const seenTasks = new Set<string>();
+
+    for (const task of resource.data.tasks) {
+      const references = new Set<string>();
+      collectActivityReferences(task.input, references);
+      collectActivityReferences(task.settings, references);
+      collectActivityReferences(task.output, references);
+
+      for (const reference of references) {
+        if (!seenTasks.has(reference)) {
+          diagnostics.push(
+            createDiagnostic(
+              "flogo.mapping.invalid_activity_scope",
+              `Task "${task.id}" references activity "${reference}" before it exists in flow order`,
+              "error",
               `resources.${resource.id}.tasks.${task.id}`
-            );
-          }
-        });
-    });
+            )
+          );
+        }
+      }
+
+      seenTasks.add(task.id);
+    }
+  }
+
+  return stageResult("semantic", diagnostics);
+}
+
+export function validateDependencies(document: string | FlogoApp | unknown): ValidationStageResult {
+  const app = parseFlogoAppDocument(document);
+  const diagnostics: Diagnostic[] = [];
+
+  for (const entry of app.imports) {
+    if (!entry.ref.includes("/")) {
+      diagnostics.push(
+        createDiagnostic(
+          "flogo.dependency.invalid_ref",
+          `Import "${entry.alias}" has a non-package ref "${entry.ref}"`,
+          "warning",
+          `imports.${entry.alias}`
+        )
+      );
+    }
+  }
+
+  return stageResult("dependency", diagnostics);
+}
+
+export function validateFlogoApp(document: string | FlogoApp | unknown): ValidationReport {
+  const stages = [
+    validateStructural(document),
+    validateSemantic(document),
+    validateMappings(document),
+    validateDependencies(document)
+  ];
+
+  const ok = stages.every((stage) => stage.ok);
+  const summary = ok
+    ? "Flogo application passed structural, semantic, mapping, and dependency validation."
+    : "Flogo application has validation errors that must be resolved before build or runtime checks.";
+
+  return ValidationReportSchema.parse({
+    ok,
+    stages,
+    summary,
+    artifacts: []
   });
-
-  report.semantic.valid = report.semantic.issues.length === 0;
-  report.overallValid = report.semantic.valid;
-  return report;
 }
 
-export function validateFlogoApp(input: string | JsonObject): ValidationReport {
-  const structural = validateStructural(input);
-  const semantic = validateSemantic(input);
+export function summarizeAppDiff(beforeDocument: string | FlogoApp | unknown, afterDocument: string | FlogoApp | unknown): string {
+  const beforeGraph = buildAppGraph(beforeDocument);
+  const afterGraph = buildAppGraph(afterDocument);
+  const importDelta = afterGraph.app.imports.length - beforeGraph.app.imports.length;
+  const triggerDelta = afterGraph.app.triggers.length - beforeGraph.app.triggers.length;
+  const resourceDelta = afterGraph.app.resources.length - beforeGraph.app.resources.length;
 
-  return {
-    structural: structural.structural,
-    semantic: semantic.semantic,
-    dependency: { valid: true, issues: [] },
-    build: { valid: true, issues: [] },
-    runtime: { valid: true, issues: [] },
-    regression: { valid: true, issues: [] },
-    overallValid: structural.structural.valid && semantic.semantic.valid
-  };
-}
-
-export function summarizeGraphDiff(before: FlogoAppGraph, after: FlogoAppGraph): string[] {
-  const summary: string[] = [];
-  if (before.imports.length !== after.imports.length) {
-    summary.push(`Imports: ${before.imports.length} -> ${after.imports.length}`);
-  }
-  if (before.triggers.length !== after.triggers.length) {
-    summary.push(`Triggers: ${before.triggers.length} -> ${after.triggers.length}`);
-  }
-  if (before.resources.length !== after.resources.length) {
-    summary.push(`Resources: ${before.resources.length} -> ${after.resources.length}`);
-  }
-  return summary.length > 0 ? summary : ["No structural graph changes detected."];
+  return [
+    `imports ${importDelta >= 0 ? "+" : ""}${importDelta}`,
+    `triggers ${triggerDelta >= 0 ? "+" : ""}${triggerDelta}`,
+    `resources ${resourceDelta >= 0 ? "+" : ""}${resourceDelta}`
+  ].join(", ");
 }
 
