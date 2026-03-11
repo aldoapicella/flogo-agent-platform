@@ -14,7 +14,18 @@ const runnerWorkerBaseUrl = (process.env.RUNNER_WORKER_BASE_URL ?? "http://local
 const controlPlaneInternalUrl = process.env.CONTROL_PLANE_INTERNAL_URL?.replace(/\/$/, "");
 const internalServiceToken = process.env.INTERNAL_SERVICE_TOKEN;
 
-export const workflowRunnerSteps: RunnerStepType[] = ["build", "run", "generate_smoke", "run_smoke"];
+const defaultWorkflowRunnerSteps: RunnerStepType[] = ["build", "run", "generate_smoke", "run_smoke"];
+
+export function resolveWorkflowRunnerSteps(start: OrchestratorStartRequest): RunnerStepType[] {
+  const mode = start.request.inputs["mode"];
+  if (mode === "catalog") {
+    return ["catalog_contribs"];
+  }
+  if (mode === "mapping_preview") {
+    return ["preview_mapping"];
+  }
+  return defaultWorkflowRunnerSteps;
+}
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -42,9 +53,20 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
   const jobKind =
     stepType === "generate_smoke" || stepType === "run_smoke"
       ? "smoke_test"
-      : stepType === "build" || stepType === "run"
+      : stepType === "catalog_contribs"
+        ? "catalog"
+        : stepType === "preview_mapping"
+          ? "mapping_preview"
+          : stepType === "build" || stepType === "run"
         ? "build"
         : "eval";
+  const sampleInput = start.request.inputs["sampleInput"];
+  const analysisPayload =
+    sampleInput && typeof sampleInput === "object" && !Array.isArray(sampleInput)
+      ? (sampleInput as Record<string, unknown>)
+      : undefined;
+  const targetNodeId = typeof start.request.inputs["nodeId"] === "string" ? (start.request.inputs["nodeId"] as string) : undefined;
+  const targetRef = typeof start.request.inputs["ref"] === "string" ? (start.request.inputs["ref"] as string) : undefined;
 
   return {
     taskId: start.taskId,
@@ -62,6 +84,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
     artifactBlobPrefix: `artifacts/${start.taskId}/${stepType}`,
     jobTemplateName: process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-runner",
     correlationId: start.taskId,
+    analysisPayload,
+    targetNodeId,
+    targetRef,
     command: [],
     containerArgs: []
   };

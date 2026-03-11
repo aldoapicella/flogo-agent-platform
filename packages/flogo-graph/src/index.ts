@@ -849,6 +849,10 @@ function collectMappingFields(prefix: string, value: unknown, sampleInput: Mappi
   const kind = classifyMappingValue(value);
   const expression = typeof value === "string" ? value : undefined;
   const references = typeof value === "string" ? collectResolverReferences(value) : [];
+  const { resolved, diagnostics } = typeof value === "string" ? resolveStringMapping(value, sampleInput, prefix) : {
+    resolved: resolveMappingValue(value, sampleInput),
+    diagnostics: []
+  };
 
   return [
     {
@@ -856,8 +860,8 @@ function collectMappingFields(prefix: string, value: unknown, sampleInput: Mappi
       kind,
       expression,
       references,
-      resolved: resolveMappingValue(value, sampleInput),
-      diagnostics: []
+      resolved,
+      diagnostics
     }
   ];
 }
@@ -906,44 +910,106 @@ function resolveMappingValue(value: unknown, sampleInput: MappingPreviewContext)
 }
 
 function resolveReference(reference: string, sampleInput: MappingPreviewContext): unknown {
+  return resolveReferenceWithStatus(reference, sampleInput).resolved;
+}
+
+function resolveReferenceWithStatus(reference: string, sampleInput: MappingPreviewContext): { resolved: unknown; ok: boolean } {
   if (reference.startsWith("$activity[")) {
     const activityMatch = /^\$activity\[([^\]]+)\](?:\.(.+))?$/.exec(reference);
     if (!activityMatch) {
-      return undefined;
+      return { resolved: undefined, ok: false };
     }
     const [, activityId, propertyPath] = activityMatch;
-    return resolveByPath(sampleInput.activity?.[activityId], propertyPath);
+    return resolveByPathWithStatus(sampleInput.activity?.[activityId], propertyPath);
   }
 
   if (reference.startsWith("$flow")) {
-    return resolveByPath(sampleInput.flow, reference.replace(/^\$flow\.?/, ""));
+    return resolveByPathWithStatus(sampleInput.flow, reference.replace(/^\$flow\.?/, ""));
   }
   if (reference.startsWith("$env")) {
-    return resolveByPath(sampleInput.env, reference.replace(/^\$env\.?/, ""));
+    return resolveByPathWithStatus(sampleInput.env, reference.replace(/^\$env\.?/, ""));
   }
   if (reference.startsWith("$property")) {
-    return resolveByPath(sampleInput.property, reference.replace(/^\$property\.?/, ""));
+    return resolveByPathWithStatus(sampleInput.property, reference.replace(/^\$property\.?/, ""));
   }
   if (reference.startsWith("$trigger")) {
-    return resolveByPath(sampleInput.trigger, reference.replace(/^\$trigger\.?/, ""));
+    return resolveByPathWithStatus(sampleInput.trigger, reference.replace(/^\$trigger\.?/, ""));
   }
 
-  return undefined;
+  return { resolved: undefined, ok: false };
 }
 
 function resolveByPath(value: unknown, pathExpression?: string): unknown {
+  return resolveByPathWithStatus(value, pathExpression).resolved;
+}
+
+function resolveByPathWithStatus(value: unknown, pathExpression?: string): { resolved: unknown; ok: boolean } {
   if (!pathExpression || pathExpression.length === 0) {
-    return value;
+    return { resolved: value, ok: value !== undefined };
   }
   const segments = pathExpression.split(".").filter(Boolean);
   let current = value;
   for (const segment of segments) {
     if (!current || typeof current !== "object") {
-      return undefined;
+      return { resolved: undefined, ok: false };
     }
     current = (current as Record<string, unknown>)[segment];
   }
-  return current;
+  return { resolved: current, ok: current !== undefined };
+}
+
+function resolveStringMapping(
+  value: string,
+  sampleInput: MappingPreviewContext,
+  path: string
+): { resolved: unknown; diagnostics: Diagnostic[] } {
+  const references = collectResolverReferences(value);
+  if (references.length === 0) {
+    return {
+      resolved: value,
+      diagnostics: []
+    };
+  }
+
+  const diagnostics: Diagnostic[] = [];
+  if (references.length === 1 && references[0] === value) {
+    const resolved = resolveReferenceWithStatus(references[0], sampleInput);
+    if (!resolved.ok) {
+      diagnostics.push(
+        createDiagnostic(
+          "flogo.mapping.unresolved_reference",
+          `Unable to resolve reference "${references[0]}"`,
+          "warning",
+          path
+        )
+      );
+    }
+    return {
+      resolved: resolved.resolved,
+      diagnostics
+    };
+  }
+
+  let resolved = value;
+  for (const reference of references) {
+    const replacement = resolveReferenceWithStatus(reference, sampleInput);
+    if (!replacement.ok) {
+      diagnostics.push(
+        createDiagnostic(
+          "flogo.mapping.unresolved_reference",
+          `Unable to resolve reference "${reference}"`,
+          "warning",
+          path
+        )
+      );
+    }
+    resolved = resolved.replace(reference, replacement.resolved === undefined ? "" : String(replacement.resolved));
+  }
+
+  return {
+    resolved,
+    diagnostics
+  };
 }
 
 function collectResolverKinds(value: unknown, propertyRefs: Set<string>, envRefs: Set<string>): void {

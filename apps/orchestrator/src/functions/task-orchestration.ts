@@ -17,11 +17,11 @@ import {
   buildRunnerJobSpec,
   getRunnerJobStatus,
   publishTaskEvent,
+  resolveWorkflowRunnerSteps,
   startRunnerJob,
   syncTaskState,
   toActiveJobRun,
   toTaskStatus,
-  workflowRunnerSteps
 } from "../shared/orchestrator-http.js";
 
 const durableClientInput = df.input.durableClient();
@@ -40,7 +40,7 @@ type PublishTaskEventActivityInput = {
 
 type StartRunnerJobActivityInput = {
   start: OrchestratorStartRequest;
-  stepType: (typeof workflowRunnerSteps)[number];
+  stepType: RunnerJobStatus["spec"]["stepType"];
 };
 
 type GetRunnerJobStatusActivityInput = {
@@ -137,7 +137,7 @@ df.app.orchestration("taskWorkflow", function* (context: any) {
     }
   }
 
-  for (const stepType of workflowRunnerSteps) {
+  for (const stepType of resolveWorkflowRunnerSteps(start)) {
     const job = (yield context.df.callActivity("startRunnerJobActivity", {
       start,
       stepType

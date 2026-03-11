@@ -44,7 +44,7 @@ export class OrchestrationService {
     const steps: TaskStep[] = plan.steps.map((step, index) => ({
       id: `${id}-${step.id}`,
       order: index,
-      type: index === 0 ? "plan" : index === plan.steps.length - 1 ? "test" : "patch",
+      type: this.mapPlanStepType(step.tool),
       status: "planning",
       summary: step.label
     }));
@@ -266,5 +266,24 @@ export class OrchestrationService {
       throw new Error(`Task ${taskId} was not persisted`);
     }
     return task;
+  }
+
+  private mapPlanStepType(tool?: string): TaskStep["type"] {
+    if (!tool) {
+      return "plan";
+    }
+    if (tool.includes("validate")) {
+      return "validate";
+    }
+    if (tool.includes("generateApp") || tool.includes("patchApp")) {
+      return "patch";
+    }
+    if (tool.includes("buildApp") || tool.includes("runSmoke")) {
+      return "test";
+    }
+    if (tool.includes("catalogContribs") || tool.includes("previewMapping") || tool.includes("planProperties")) {
+      return "review";
+    }
+    return "plan";
   }
 }

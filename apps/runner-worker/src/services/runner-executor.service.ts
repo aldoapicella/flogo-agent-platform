@@ -1,9 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   type ArtifactRef,
+  type ContribCatalog,
+  type ContribDescriptor,
   type Diagnostic,
+  type MappingPreviewResult,
   type RunnerJobResult,
   type RunnerJobSpec,
   type RunnerJobState,
@@ -17,6 +23,11 @@ export interface RunnerExecutor {
   execute(spec: RunnerJobSpec): Promise<RunnerJobResult>;
   getStatus?(currentStatus: RunnerJobStatus): Promise<RunnerJobStatus>;
 }
+
+type PreparedCommand = {
+  command: string[];
+  cleanup?: () => Promise<void>;
+};
 
 function createLogArtifact(taskId: string, stepType: string, log: string): ArtifactRef {
   const type = stepType === "build" ? "build_log" : "runtime_log";
@@ -44,14 +55,23 @@ function createCommand(spec: RunnerJobSpec): string[] {
     case "run_smoke":
       return ["echo", `smoke:${spec.appPath}`];
     case "catalog_contribs":
-      return ["echo", `catalog:${spec.appPath}`];
+      return createHelperCommand("catalog", "contribs", "--app", spec.appPath);
     case "inspect_descriptor":
-      return ["echo", `descriptor:${spec.appPath}`];
+      return createHelperCommand("inspect", "descriptor", "--app", spec.appPath, "--ref", spec.targetRef ?? "");
     case "preview_mapping":
       return ["echo", `mapping-preview:${spec.appPath}`];
     default:
       return ["echo", `runner:${spec.stepType}`];
   }
+}
+
+function createHelperCommand(...args: string[]): string[] {
+  const helperBin = process.env.FLOGO_HELPER_BIN;
+  if (helperBin) {
+    return [helperBin, ...args];
+  }
+
+  return ["go", "run", "./go-runtime/flogo-helper", ...args];
 }
 
 function mapExecutionState(rawState: string | undefined): RunnerJobState {
@@ -75,10 +95,91 @@ function parseJsonResponse<T>(value: unknown): T {
   return value as T;
 }
 
+function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
+  return stepType === "catalog_contribs" || stepType === "inspect_descriptor" || stepType === "preview_mapping";
+}
+
+function createAnalysisArtifact(
+  spec: RunnerJobSpec,
+  type: ArtifactRef["type"],
+  suffix: string,
+  metadata: Record<string, unknown>
+): ArtifactRef {
+  return {
+    id: randomUUID(),
+    type,
+    name: `${spec.taskId}-${suffix}.json`,
+    uri: `memory://${spec.taskId}/${suffix}.json`,
+    metadata
+  };
+}
+
+async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
+  if (spec.stepType !== "preview_mapping") {
+    return {
+      command: createCommand(spec)
+    };
+  }
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "flogo-mapping-preview-"));
+  const inputPath = path.join(tempDir, "sample-input.json");
+  await fs.writeFile(inputPath, JSON.stringify(spec.analysisPayload ?? {}, null, 2), "utf8");
+
+  return {
+    command: createHelperCommand("preview", "mapping", "--app", spec.appPath, "--node", spec.targetNodeId ?? "", "--input", inputPath),
+    cleanup: async () => {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  };
+}
+
+function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostics: Diagnostic[]): ArtifactRef[] {
+  try {
+    if (spec.stepType === "catalog_contribs") {
+      const catalog = JSON.parse(stdout) as ContribCatalog;
+      return [
+        createAnalysisArtifact(spec, "contrib_catalog", "contrib-catalog", {
+          catalog,
+          diagnostics
+        })
+      ];
+    }
+
+    if (spec.stepType === "preview_mapping") {
+      const preview = JSON.parse(stdout) as MappingPreviewResult;
+      return [
+        createAnalysisArtifact(spec, "mapping_preview", `mapping-preview-${spec.targetNodeId ?? "node"}`, {
+          preview,
+          diagnostics
+        })
+      ];
+    }
+
+    if (spec.stepType === "inspect_descriptor") {
+      const descriptor = JSON.parse(stdout) as ContribDescriptor;
+      return [
+        createAnalysisArtifact(spec, "contrib_catalog", `descriptor-${spec.targetRef ?? "target"}`, {
+          descriptor,
+          diagnostics
+        })
+      ];
+    }
+  } catch (error) {
+    diagnostics.push({
+      code: "runner.analysis_parse_failed",
+      message: error instanceof Error ? error.message : String(error),
+      severity: "warning"
+    });
+  }
+
+  return [];
+}
+
 export class RunnerExecutorService implements RunnerExecutor {
   async execute(specInput: RunnerJobSpec): Promise<RunnerJobResult> {
     const spec = RunnerJobSpecSchema.parse(specInput);
-    const command = createCommand(spec);
+    const prepared = await prepareCommand(spec);
+    const command = prepared.command;
     const [binary, ...args] = command;
     const startedAt = new Date().toISOString();
 
@@ -101,7 +202,22 @@ export class RunnerExecutorService implements RunnerExecutor {
       });
 
       child.on("close", (code) => {
+        void prepared.cleanup?.();
         const logArtifact = createLogArtifact(spec.taskId, spec.stepType, `${stdout}\n${stderr}`.trim());
+        const diagnostics: Diagnostic[] = stderr
+          ? [
+              {
+                code: "runner.stderr",
+                message: stderr.trim(),
+                severity: "warning"
+              } satisfies Diagnostic
+            ]
+          : [];
+        const artifacts = [logArtifact];
+        if (code === 0 && isAnalysisStep(spec.stepType)) {
+          artifacts.push(...createAnalysisArtifacts(spec, stdout, diagnostics));
+        }
+
         resolve(
           RunnerJobResultSchema.parse({
             jobId: `${spec.taskId}-${spec.stepType}`,
@@ -114,21 +230,14 @@ export class RunnerExecutorService implements RunnerExecutor {
             finishedAt: new Date().toISOString(),
             jobTemplateName: spec.jobTemplateName,
             logArtifact,
-            artifacts: [logArtifact],
-            diagnostics: (stderr
-              ? [
-                  {
-                    code: "runner.stderr",
-                    message: stderr.trim(),
-                    severity: "warning"
-                  } satisfies Diagnostic
-                ]
-              : [])
+            artifacts,
+            diagnostics
           })
         );
       });
 
       child.on("error", (error) => {
+        void prepared.cleanup?.();
         const logArtifact = createLogArtifact(spec.taskId, spec.stepType, error.message);
         resolve(
           RunnerJobResultSchema.parse({

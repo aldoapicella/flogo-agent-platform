@@ -15,11 +15,11 @@ import {
   buildRunnerJobSpec,
   getRunnerJobStatus,
   publishTaskEvent,
+  resolveWorkflowRunnerSteps,
   sleep,
   startRunnerJob,
   syncTaskState,
-  toActiveJobRun,
-  workflowRunnerSteps
+  toActiveJobRun
 } from "./shared/orchestrator-http.js";
 
 type LocalOrchestrationState = OrchestratorStatus & {
@@ -83,7 +83,7 @@ async function runPipeline(state: LocalOrchestrationState): Promise<void> {
     orchestrationId: state.orchestrationId
   });
 
-  for (const stepType of workflowRunnerSteps) {
+  for (const stepType of resolveWorkflowRunnerSteps(state.request)) {
     const startedJob = await startRunnerJob(buildRunnerJobSpec(state.request, stepType));
     state.activeJobRuns = [
       ...state.activeJobRuns.filter((item) => item.stepType !== stepType),

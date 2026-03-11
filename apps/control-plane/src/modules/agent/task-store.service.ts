@@ -28,6 +28,7 @@ import { PrismaService } from "../prisma/prisma.service.js";
 
 const defaultOrganizationId = process.env.DEFAULT_ORGANIZATION_ID ?? "local-organization";
 const defaultOrganizationName = process.env.DEFAULT_ORGANIZATION_NAME ?? "Local Organization";
+const appAnalysisRequestedBy = "system:app-analysis";
 
 type DbArtifact = {
   id: string;
@@ -158,6 +159,11 @@ export class TaskStoreService {
   async listTasks(): Promise<TaskSummary[]> {
     const prisma = this.prisma as any;
     const tasks = (await prisma.task.findMany({
+      where: {
+        requestedBy: {
+          not: appAnalysisRequestedBy
+        }
+      },
       include: {
         approvals: true,
         artifacts: true

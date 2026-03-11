@@ -43,8 +43,17 @@ const approvalMap: Record<TaskRequest["type"], ApprovalType[]> = {
   review: []
 };
 
+function getAnalysisMode(task: TaskRequest): "catalog" | "mapping_preview" | undefined {
+  const mode = task.inputs["mode"];
+  return mode === "catalog" || mode === "mapping_preview" ? mode : undefined;
+}
+
 export class PolicyEngine {
   evaluate(task: TaskRequest): ApprovalType[] {
+    if (getAnalysisMode(task)) {
+      return [];
+    }
+
     const approvals = new Set<ApprovalType>(approvalMap[task.type]);
     const summary = task.summary.toLowerCase();
 
@@ -74,28 +83,38 @@ export class TaskPlanner {
   plan(task: TaskRequest): ExecutionPlan {
     const validation = task.type === "create" ? undefined : this.validateDraft(task);
     const summary = task.summary.toLowerCase();
+    const analysisMode = getAnalysisMode(task);
     const steps: ExecutionPlanStep[] = [
       { id: "graph", label: "Parse current Flogo graph", tool: "flogo.parseApp" },
       { id: "validate", label: "Validate structure and mappings", tool: "flogo.validateApp" }
     ];
 
-    if (/(trigger|activity|action|contrib|descriptor|catalog)/i.test(summary)) {
-      steps.push({ id: "catalog", label: "Catalog Flogo contributions and descriptors", tool: "flogo.catalogContribs" });
-    }
-
-    if (/(mapping|coercion|resolver|property|env)/i.test(summary)) {
-      steps.push({ id: "mapping", label: "Preview mappings and suggest coercions", tool: "flogo.previewMapping" });
-    }
-
-    if (/(property|env|config)/i.test(summary)) {
+    if (analysisMode === "catalog") {
+      steps.push({ id: "catalog", label: "Catalog Flogo contributions and descriptors", tool: "runner.catalogContribs" });
+    } else if (analysisMode === "mapping_preview") {
+      steps.push({ id: "mapping", label: "Preview mappings and suggest coercions", tool: "runner.previewMapping" });
       steps.push({ id: "properties", label: "Plan app properties and environment usage", tool: "flogo.planProperties" });
+    } else {
+      if (/(trigger|activity|action|contrib|descriptor|catalog)/i.test(summary)) {
+        steps.push({ id: "catalog", label: "Catalog Flogo contributions and descriptors", tool: "runner.catalogContribs" });
+      }
+
+      if (/(mapping|coercion|resolver|property|env)/i.test(summary)) {
+        steps.push({ id: "mapping", label: "Preview mappings and suggest coercions", tool: "runner.previewMapping" });
+      }
+
+      if (/(property|env|config)/i.test(summary)) {
+        steps.push({ id: "properties", label: "Plan app properties and environment usage", tool: "flogo.planProperties" });
+      }
     }
 
-    steps.push(
-      { id: "patch", label: "Generate or patch flogo.json", tool: task.type === "create" ? "flogo.generateApp" : "flogo.patchApp" },
-      { id: "build", label: "Queue build step", tool: "runner.buildApp" },
-      { id: "smoke", label: "Queue smoke validation", tool: "test.runSmoke" }
-    );
+    if (!analysisMode) {
+      steps.push(
+        { id: "patch", label: "Generate or patch flogo.json", tool: task.type === "create" ? "flogo.generateApp" : "flogo.patchApp" },
+        { id: "build", label: "Queue build step", tool: "runner.buildApp" },
+        { id: "smoke", label: "Queue smoke validation", tool: "test.runSmoke" }
+      );
+    }
 
     return {
       taskType: task.type,

@@ -2,37 +2,37 @@
 
 ## Overview
 
-The platform uses two complementary data models:
+The platform has three related data layers:
 
-1. Shared runtime contracts in `packages/contracts`
-2. Intended durable persistence schema in Prisma
+1. shared runtime contracts in `packages/contracts`,
+2. persistent operational state in Prisma/PostgreSQL,
+3. a domain-specific Flogo graph model in `packages/flogo-graph`.
 
-There is also a domain-specific graph model for Flogo apps in `packages/flogo-graph`.
+The roadmap for expanding these layers is tracked in:
+
+- [Flogo-Native Runtime Plan](./flogo-native-runtime-plan.md)
+- [Capability Matrix](./capability-matrix.md)
 
 ## Shared runtime contracts
 
 Source:
 
-- [packages/contracts/src/index.ts](C:/Users/aapicella/dev/flogo-agent-platform/packages/contracts/src/index.ts)
+- `packages/contracts/src/index.ts`
 
-The contracts package uses Zod to define both:
+The contracts package uses Zod so the same schema definitions drive:
 
-- runtime validation,
-- TypeScript inference.
+- API validation,
+- TypeScript inference,
+- orchestrator payloads,
+- runner payloads,
+- tests,
+- UI integration.
 
-This makes the same schemas usable in:
-
-- the control-plane,
-- the orchestrator,
-- the runner-worker,
-- the web console,
-- tests.
-
-## Core task contracts
+## Task contracts
 
 ### `TaskRequest`
 
-Represents task intake.
+Represents public task intake.
 
 Key fields:
 
@@ -46,6 +46,11 @@ Key fields:
 - `repo?`
 - `inputs`
 - `constraints`
+
+Important current `inputs` conventions:
+
+- `mode = "catalog"` for analysis-only contribution catalog work
+- `mode = "mapping_preview"` for analysis-only mapping preview work
 
 ### `TaskResult`
 
@@ -68,30 +73,49 @@ Key fields:
 
 ### `TaskSummary`
 
-Represents a broader read-model shape intended for task listings and detail views.
+Represents the list/detail read model for task listings.
 
-The current API mainly returns `TaskResult`, but the schema exists for richer read models.
+Key fields:
+
+- `id`
+- `type`
+- `state`
+- `projectId`
+- `appId?`
+- `appPath?`
+- `prompt`
+- `planSummary?`
+- `approvalStatus?`
+- `orchestrationId?`
+- `activeJobRuns`
+- `createdAt`
+- `updatedAt`
+
+### `TaskRuns`
+
+Represents persisted execution summaries.
+
+Key fields:
+
+- `taskId`
+- `buildRuns`
+- `testRuns`
 
 ## Approval contracts
 
-### `ApprovalRequest`
+### Approval types
 
-Describes an approval that should be requested.
-
-### `ApprovalDecision`
-
-Describes the approval outcome.
-
-Allowed approval types:
+Current approval types are:
 
 - `delete_flow`
+- `delete_resource`
 - `change_public_contract`
 - `dependency_upgrade`
 - `custom_code`
 - `external_endpoint_change`
 - `deploy`
 
-Allowed approval statuses:
+### Approval status
 
 - `pending`
 - `approved`
@@ -101,7 +125,7 @@ Allowed approval statuses:
 
 Artifacts are represented by `ArtifactRef`.
 
-Allowed artifact types:
+Current artifact kinds:
 
 - `flogo_json`
 - `binary`
@@ -111,51 +135,58 @@ Allowed artifact types:
 - `patch_bundle`
 - `review_report`
 - `workspace_snapshot`
+- `contrib_catalog`
+- `mapping_preview`
+- `flow_contract`
+- `run_trace`
+- `replay_report`
+- `contrib_bundle`
 
-## Validation model
+## Flogo-native contracts
 
-### `ValidationReport`
+### Contribution catalog contracts
 
-Contains:
+Important schemas:
 
-- overall `ok`,
-- ordered `stages`,
-- human-readable `summary`,
-- attached `artifacts`.
+- `ContribDescriptor`
+- `ContribCatalog`
+- `ContribCatalogResponse`
 
-### Validation stages
+These describe:
 
-The shared validation stage enum currently includes:
+- ref and alias,
+- contrib type,
+- settings,
+- inputs,
+- outputs,
+- examples,
+- compatibility notes,
+- response artifact references.
 
-- `structural`
-- `semantic`
-- `dependency`
-- `build`
-- `runtime`
-- `regression`
+### Mapping contracts
 
-Current implementation note:
+Important schemas:
 
-- `packages/flogo-graph` actively produces structural, semantic, and dependency-stage outputs.
-- The broader stage list exists to support the intended full pipeline.
+- `MappingPreviewRequest`
+- `MappingPreviewResult`
+- `MappingPreviewResponse`
 
-## Orchestration model
+These describe:
 
-### `OrchestrationRuntimeStatus`
+- target node,
+- field-level classification,
+- references used,
+- resolved preview values,
+- diagnostics,
+- coercion suggestions,
+- property-analysis output,
+- response artifact references.
 
-Allowed values:
-
-- `pending`
-- `running`
-- `completed`
-- `failed`
-- `terminated`
-- `continued_as_new`
-- `unknown`
+## Orchestration contracts
 
 ### `OrchestratorStartRequest`
 
-Used by the control-plane to start a workflow.
+Used by the control-plane to start orchestration.
 
 Fields:
 
@@ -164,15 +195,6 @@ Fields:
 - `requiredApprovals`
 - `planSummary`
 - `steps`
-
-### `OrchestratorStartResponse`
-
-Fields:
-
-- `orchestrationId`
-- `status`
-- `activeJobRuns`
-- `summary`
 
 ### `OrchestratorStatus`
 
@@ -186,15 +208,16 @@ Fields:
 - `summary`
 - `lastUpdatedAt`
 
-## Runner model
+## Runner contracts
 
 ### `RunnerJobSpec`
 
 Represents one finite execution request.
 
-Key fields:
+Important fields:
 
 - `taskId`
+- `jobKind`
 - `stepType`
 - `snapshotUri`
 - `appPath`
@@ -202,15 +225,20 @@ Key fields:
 - `envSecretRefs`
 - `timeoutSeconds`
 - `artifactOutputUri`
+- `workspaceBlobPrefix?`
+- `artifactBlobPrefix?`
 - `jobTemplateName`
 - `jobRunId?`
 - `correlationId?`
 - `command`
 - `containerArgs`
+- `analysisPayload?`
+- `targetNodeId?`
+- `targetRef?`
 
 ### `RunnerJobResult`
 
-Fields:
+Important fields:
 
 - `jobId`
 - `jobRunId?`
@@ -221,39 +249,29 @@ Fields:
 - `startedAt?`
 - `finishedAt?`
 - `jobTemplateName?`
+- `azureJobExecutionName?`
+- `azureJobResourceId?`
 - `logArtifact?`
 - `artifacts`
 - `diagnostics`
 
 ### `RunnerJobStatus`
 
-Fields:
+Important fields:
 
 - `jobRunId`
 - `status`
 - `summary`
 - `spec`
+- `azureJobExecutionName?`
+- `azureJobResourceId?`
 - `result?`
-
-### `ActiveJobRun`
-
-This is the compact job projection placed onto task results.
-
-Fields:
-
-- `id`
-- `stepType`
-- `jobTemplateName`
-- `status`
-- `summary?`
-- `startedAt?`
-- `finishedAt?`
 
 ## Event model
 
 ### `TaskEvent`
 
-Represents an item emitted to the control-plane event stream.
+Represents persisted event history and SSE event payloads.
 
 Fields:
 
@@ -264,7 +282,7 @@ Fields:
 - `timestamp`
 - `payload?`
 
-Supported event types:
+Supported event types today:
 
 - `status`
 - `log`
@@ -272,108 +290,135 @@ Supported event types:
 - `approval`
 - `tool`
 
-### `TaskEventPublish`
-
-This is the internal event-publish request used by the orchestrator.
-
 ## Flogo graph model
 
 Source:
 
-- [packages/flogo-graph/src/index.ts](C:/Users/aapicella/dev/flogo-agent-platform/packages/flogo-graph/src/index.ts)
+- `packages/flogo-graph/src/index.ts`
 
-### `FlogoApp`
+The graph package normalizes and analyzes Flogo apps.
 
-The parsed app descriptor.
+Key runtime concepts include:
 
-Key fields:
+- `FlogoApp`
+- `FlogoAppGraph`
+- imports by alias,
+- resource IDs,
+- task IDs,
+- diagnostics,
+- contribution catalog entries,
+- mapping preview results,
+- property analysis results.
 
-- `name`
-- `type`
-- `appModel`
-- `version?`
-- `description?`
-- `imports`
-- `triggers`
-- `resources`
+### Implemented graph behaviors
 
-### `FlogoAppGraph`
+Current graph-level logic includes:
 
-The enriched graph projection.
-
-Fields:
-
-- `app`
-- `importsByAlias`
-- `resourceIds`
-- `taskIds`
-- `diagnostics`
-
-### Graph validations implemented today
-
-- missing flow references in trigger handlers,
-- missing activity refs,
-- missing import aliases,
-- invalid `$activity[...]` order based on task ordering,
-- basic dependency ref formatting.
+- structural normalization of example and legacy-shaped Flogo documents,
+- alias and flow-ref validation,
+- activity-ref presence validation,
+- mapping-order validation for `$activity[...]`,
+- contribution catalog generation,
+- typed mapping preview classification,
+- unresolved-reference diagnostics,
+- coercion suggestion heuristics,
+- app property analysis.
 
 ## Prisma persistence schema
 
 Source:
 
-- [prisma/schema.prisma](C:/Users/aapicella/dev/flogo-agent-platform/prisma/schema.prisma)
+- `prisma/schema.prisma`
 
-The Prisma schema models the intended durable state for:
+### Persisted models currently used at runtime
 
-- organizations,
-- projects,
-- Flogo apps,
-- tasks,
-- task steps,
-- task events,
-- tool calls,
-- approvals,
-- workspace snapshots,
-- patches,
-- build runs,
-- test runs,
-- artifacts,
-- knowledge chunks,
-- prompt versions,
-- eval runs,
-- app imports,
-- app triggers,
-- app handlers,
-- app resources.
+- `Organization`
+- `Project`
+- `FlogoApp`
+- `Task`
+- `TaskStep`
+- `TaskEvent`
+- `Approval`
+- `Artifact`
+- `BuildRun`
+- `TestRun`
 
-## Important persistence caveat
+### Persisted models defined for the broader roadmap
 
-The Prisma schema is ahead of the live runtime integration.
+- `ToolCall`
+- `WorkspaceSnapshot`
+- `Patch`
+- `KnowledgeChunk`
+- `PromptVersion`
+- `EvalRun`
+- `AppImport`
+- `AppTrigger`
+- `AppHandler`
+- `AppResource`
 
-Current runtime behavior:
+## Current persistence behavior
 
-- the control-plane stores task state in a `Map`,
-- the task event stream is in-memory,
-- artifacts are stored as in-memory references,
-- graph lookup reads from the `examples` directory.
+The control-plane now persists task lifecycle data through Prisma.
 
-Intended future behavior:
+That includes:
 
-- the control-plane reads and writes task state through Prisma,
-- the orchestrator writes workflow state projections through internal sync routes backed by Prisma,
-- the runner-worker writes build and test run records,
-- Blob URIs resolve to real object storage records.
+- task records,
+- task status updates,
+- persisted event history,
+- approval records,
+- task artifacts,
+- build/test run summaries.
 
-This gap matters operationally. Do not assume task history survives a process restart yet.
+### App-scoped analysis persistence
 
-## Contract-to-schema drift
+Direct app-analysis endpoints currently persist analysis output by creating hidden synthetic task records.
 
-There is also some naming drift between the current public/runtime contracts and the Prisma schema.
+Current implementation detail:
+
+- hidden analysis tasks use `requestedBy = "system:app-analysis"`
+- app-scoped artifacts are attached to those hidden tasks
+- task listing APIs exclude those records from normal operator task lists
+
+This allows:
+
+- app-level catalog artifact history,
+- app-level mapping preview artifact history,
+- artifact lookup by resolved `FlogoApp`,
+
+without adding a second artifact storage model yet.
+
+## Artifact URI behavior
+
+Current runtime behavior is mixed:
+
+- persisted metadata is stored in PostgreSQL,
+- many local artifacts still use logical or local URIs,
+- Blob/Azurite is the target backend but not yet the default artifact implementation for every path.
+
+This matters for operators:
+
+- task and analysis history survive restart,
+- artifact metadata survives restart,
+- artifact payload location may still be logical rather than object-storage-backed.
+
+## App resolution model
+
+The app-analysis services resolve apps in this order:
+
+1. persisted `FlogoApp` record for `projectId + appId`,
+2. example fallback at `examples/<appId>/flogo.json`,
+3. `404` if neither exists.
+
+Example fallback can auto-register a local `FlogoApp` record when Prisma is available.
+
+## Known model gaps
+
+The current model is still ahead of the implementation roadmap in several places.
 
 Examples:
 
-- contract task status uses `completed`, while Prisma currently uses `succeeded`
-- contract approval type uses `change_public_contract`, while Prisma currently uses `public_contract_change`
-- contract approval type uses `delete_flow`, while Prisma also includes `delete_resource`
+- `flow_contract`, `run_trace`, `replay_report`, and `contrib_bundle` are defined as artifact kinds, but the runtime features that produce them are not implemented yet.
+- graph projections in Prisma exist, but the current runtime does not fully maintain them.
+- task persistence is live, but workspace snapshots and blob-backed artifact content are still planned work.
 
-This does not break the current running scaffold because Prisma is not yet the live task-state backend. It does matter for the next persistence integration pass. Before wiring the control-plane to Prisma, these enums should be normalized so the API layer, orchestrator, and database model all speak the same status and approval vocabulary.
+These are intentional roadmap placeholders, not accidental drift.

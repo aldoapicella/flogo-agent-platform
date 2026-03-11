@@ -2,27 +2,30 @@
 
 ## Overview
 
-This repository exposes three API layers:
+The repository exposes four API surfaces:
 
-1. Public control-plane API
-2. Internal control-plane sync API
-3. Internal orchestrator and runner-worker APIs
+1. public control-plane API,
+2. internal control-plane sync API,
+3. orchestrator API,
+4. runner-worker API.
 
-Only the control-plane public API is intended for external clients.
+Only the public control-plane API is intended for operators or external clients.
 
 ## Public control-plane API
 
-Base URL in local development:
+Local base URL:
 
 - `http://localhost:3001/v1`
 
-Swagger UI in local development:
+Swagger:
 
 - `http://localhost:3001/docs`
 
+## Task endpoints
+
 ### `POST /v1/tasks`
 
-Creates a task, plans it, starts an orchestration, and returns the initial `TaskResult`.
+Creates a task, persists it, starts orchestration, and returns the initial task result.
 
 Request shape:
 
@@ -31,24 +34,47 @@ Request shape:
 Important fields:
 
 - `type`: `create | update | debug | review`
-- `projectId`: logical project identifier
-- `appId`: optional app identifier
-- `appPath`: optional path to `flogo.json`
-- `requestedBy`: caller name
-- `summary`: natural language description
-- `repo`: optional repo target
-- `inputs`: arbitrary task-specific inputs
-- `constraints`: runtime and approval constraints
+- `projectId`
+- `appId?`
+- `appPath?`
+- `requestedBy`
+- `summary`
+- `repo?`
+- `inputs`
+- `constraints`
+
+Important analysis-only modes:
+
+- `inputs.mode = "catalog"`
+- `inputs.mode = "mapping_preview"`
+
+When one of those modes is supplied, the planner avoids patch/build/smoke steps and routes the task through analysis-oriented runner steps.
 
 Example:
 
 ```json
 {
-  "type": "create",
-  "projectId": "demo-project",
-  "appPath": "examples/hello-rest/flogo.json",
+  "type": "review",
+  "projectId": "demo",
+  "appId": "hello-rest",
   "requestedBy": "web-console",
-  "summary": "Create a REST hello world app"
+  "summary": "Inspect mapping behavior for the request logger",
+  "inputs": {
+    "mode": "mapping_preview",
+    "nodeId": "log-request",
+    "sampleInput": {
+      "flow": {},
+      "activity": {},
+      "env": {},
+      "property": {},
+      "trigger": {}
+    }
+  },
+  "constraints": {
+    "allowDependencyChanges": false,
+    "allowCustomCode": false,
+    "targetEnv": "dev"
+  }
 }
 ```
 
@@ -56,7 +82,7 @@ Response shape:
 
 - `TaskResult`
 
-Important response fields:
+Key fields:
 
 - `taskId`
 - `type`
@@ -69,26 +95,57 @@ Important response fields:
 - `nextActions`
 - `artifacts`
 
+### `GET /v1/tasks`
+
+Returns the current task summaries.
+
+Response shape:
+
+- `TaskSummary[]`
+
+Behavior:
+
+- hidden app-analysis persistence records are excluded from this listing.
+
 ### `GET /v1/tasks/:taskId`
 
 Returns the current `TaskResult`.
 
 Behavior:
 
-- the control-plane asks the orchestrator for the latest orchestration status when `orchestrationId` exists,
-- then merges the result into the control-plane read model before returning.
+- if the task has an `orchestrationId`, the control-plane refreshes status from the orchestrator before returning the result.
 
 ### `GET /v1/tasks/:taskId/stream`
 
 Streams task events using SSE.
 
-Event payload shape:
+Payload shape:
 
 - `TaskEvent`
 
 ### `GET /v1/tasks/:taskId/events`
 
-Alias for `/v1/tasks/:taskId/stream`.
+Alias for the SSE event stream.
+
+Payload shape:
+
+- `TaskEvent`
+
+### `GET /v1/tasks/:taskId/history`
+
+Returns persisted event history for the task.
+
+Response shape:
+
+- `TaskEvent[]`
+
+### `GET /v1/tasks/:taskId/runs`
+
+Returns persisted build and test run summaries for a task.
+
+Response shape:
+
+- `TaskRuns`
 
 ### `POST /v1/tasks/:taskId/approvals`
 
@@ -98,10 +155,10 @@ Request shape:
 
 - `ApprovalDecision`
 
-Defaults currently applied by the controller:
+Defaults applied by the controller:
 
-- `status` defaults to `approved` if missing
-- `type` defaults to `change_public_contract` if missing
+- `status` defaults to `approved`
+- `type` defaults to `change_public_contract`
 
 Example:
 
@@ -115,19 +172,71 @@ Example:
 
 ### `GET /v1/tasks/:taskId/artifacts`
 
-Returns the current artifact list from the control-plane read model.
+Returns persisted task-scoped artifacts.
 
 Response shape:
 
 - `ArtifactRef[]`
 
+## Flogo app-analysis endpoints
+
 ### `GET /v1/projects/:projectId/apps/:appId/graph`
 
-Returns a parsed Flogo graph for examples currently located under `examples/<appId>/flogo.json`.
+Returns the parsed Flogo graph.
+
+Source resolution behavior:
+
+1. try a persisted `FlogoApp` for `projectId + appId`,
+2. fall back to `examples/<appId>/flogo.json`,
+3. return `404` if neither exists.
+
+### `GET /v1/projects/:projectId/apps/:appId/catalog`
+
+Returns the contribution catalog plus a persisted artifact reference.
+
+Response shape:
+
+- `ContribCatalogResponse`
+
+Key fields:
+
+- `catalog`
+- `artifact`
+
+### `GET /v1/projects/:projectId/apps/:appId/artifacts`
+
+Returns app-scoped analysis artifacts currently associated with the resolved app.
+
+Response shape:
+
+- `ArtifactRef[]`
 
 Current implementation note:
 
-- `projectId` is part of the route but is not used by the current example-backed lookup.
+- app-scoped analysis artifacts are currently persisted through hidden synthetic review tasks.
+
+### `POST /v1/projects/:projectId/apps/:appId/mappings/preview`
+
+Runs typed mapping preview for a specific node and returns the result plus a persisted artifact reference.
+
+Request shape:
+
+- `MappingPreviewRequest`
+
+Important fields:
+
+- `nodeId`
+- `sampleInput`
+
+Response shape:
+
+- `MappingPreviewResponse`
+
+Key fields:
+
+- `preview`
+- `propertyPlan`
+- `artifact`
 
 ### `GET /v1/health`
 
@@ -143,30 +252,28 @@ Returns:
 
 ## Internal control-plane API
 
-These routes are used by the orchestrator and are not intended for external clients.
+These routes are intended only for orchestrator and runner integration.
 
-Base URL in local development:
+Local base URL:
 
 - `http://localhost:3001/v1/internal`
 
+Authentication:
+
+- local/dev mode uses `X-Internal-Service-Token`
+- production should move to managed service identity or equivalent service-to-service auth
+
 ### `POST /v1/internal/tasks/:taskId/events`
 
-Publishes a task event into the control-plane event stream.
+Publishes a task event into persisted task history and the SSE stream.
 
 Request shape:
 
 - `TaskEventPublish`
 
-Fields:
-
-- `taskId`
-- `type`
-- `message`
-- `payload`
-
 ### `POST /v1/internal/tasks/:taskId/sync`
 
-Synchronizes orchestration state into the control-plane task result.
+Synchronizes orchestration or runner state into the control-plane read model.
 
 Request shape:
 
@@ -183,17 +290,18 @@ Important fields:
 - `validationReport`
 - `requiredApprovals`
 - `nextActions`
+- `jobRunStatus`
 
 ## Orchestrator API
 
-There are two execution shapes:
+The repo supports two execution shapes:
 
-- Azure Functions + Durable Functions routes in deployment
-- Fastify development routes locally
+- Durable Functions routes for deployment,
+- Fastify-based local development routes.
 
-Both shapes use the same route patterns and shared contracts.
+Both use the same request and response contracts.
 
-Base URL in local development:
+Local base URL:
 
 - `http://localhost:7071/api`
 
@@ -226,21 +334,11 @@ Fields:
 
 ### `GET /api/orchestrations/:orchestrationId`
 
-Returns the current orchestration view.
+Returns the current orchestration projection.
 
 Response shape:
 
 - `OrchestratorStatus`
-
-Fields:
-
-- `orchestrationId`
-- `taskId`
-- `runtimeStatus`
-- `approvalStatus`
-- `activeJobRuns`
-- `summary`
-- `lastUpdatedAt`
 
 ### `POST /api/orchestrations/:orchestrationId/approvals`
 
@@ -250,20 +348,20 @@ Request shape:
 
 - `ApprovalDecision`
 
-Behavior:
+Workflow behavior:
 
-- in the local host, this updates in-memory orchestration state and resumes the pipeline when approved,
-- in the Durable Functions host, this raises the `approval-decision` external event.
+- mutating workflows use build/run/smoke-oriented runner steps,
+- analysis-only workflows use `catalog_contribs` or `preview_mapping`.
 
 ## Runner-worker API
 
-Base URL in local development:
+Local base URL:
 
 - `http://localhost:3010`
 
 ### `GET /health`
 
-Returns a lightweight service health object.
+Returns a lightweight service health response.
 
 ### `POST /internal/jobs/start`
 
@@ -276,6 +374,7 @@ Request shape:
 Important fields:
 
 - `taskId`
+- `jobKind`
 - `stepType`
 - `snapshotUri`
 - `appPath`
@@ -283,11 +382,16 @@ Important fields:
 - `envSecretRefs`
 - `timeoutSeconds`
 - `artifactOutputUri`
+- `workspaceBlobPrefix?`
+- `artifactBlobPrefix?`
 - `jobTemplateName`
-- `jobRunId`
-- `correlationId`
+- `jobRunId?`
+- `correlationId?`
 - `command`
 - `containerArgs`
+- `analysisPayload?`
+- `targetNodeId?`
+- `targetRef?`
 
 Response shape:
 
@@ -301,68 +405,57 @@ Response shape:
 
 - `RunnerJobStatus`
 
+Important status/result fields:
+
+- `status`
+- `summary`
+- `spec`
+- `azureJobExecutionName?`
+- `azureJobResourceId?`
+- `result?`
+
 ## Shared contract summary
 
-The canonical schemas are defined in [packages/contracts/src/index.ts](C:/Users/aapicella/dev/flogo-agent-platform/packages/contracts/src/index.ts).
+The canonical contract definitions are in `packages/contracts/src/index.ts`.
 
 The most important ones are:
 
 - `TaskRequest`
 - `TaskResult`
 - `TaskSummary`
+- `TaskRuns`
 - `ApprovalDecision`
 - `ArtifactRef`
 - `TaskEvent`
+- `TaskEventPublish`
 - `TaskStateSync`
 - `FlogoAppGraph`
+- `ContribDescriptor`
+- `ContribCatalog`
+- `ContribCatalogResponse`
+- `MappingPreviewRequest`
+- `MappingPreviewResult`
+- `MappingPreviewResponse`
 - `ValidationReport`
 - `RunnerJobSpec`
 - `RunnerJobResult`
 - `RunnerJobStatus`
-- `SmokeTestSpec`
 - `OrchestratorStartRequest`
 - `OrchestratorStartResponse`
 - `OrchestratorStatus`
 
-## SSE event model
-
-The control-plane SSE stream emits `TaskEvent` objects wrapped as `MessageEvent.data`.
-
-Current event categories:
-
-- `status`
-- `log`
-- `artifact`
-- `approval`
-- `tool`
-
-Example SSE payload:
-
-```json
-{
-  "id": "5f1f1f5d-6f72-40e8-8d43-c89e95f97aa1",
-  "taskId": "0d5f5cde-d5b6-4eb4-a4b2-c0f14d26da56",
-  "type": "status",
-  "message": "Workflow completed successfully",
-  "timestamp": "2026-03-11T00:00:00.000Z",
-  "payload": {
-    "status": "completed"
-  }
-}
-```
-
 ## Error behavior
 
-Current error handling is intentionally simple:
+Current behavior:
 
 - unknown task IDs return `404`,
-- unknown job IDs return `404`,
-- schema validation failures surface as framework-level request errors,
-- orchestrator client failures currently throw server-side errors rather than being mapped into a custom platform error envelope.
+- unknown app IDs return `404`,
+- unknown runner job IDs return `404`,
+- schema validation errors surface as framework request errors,
+- orchestrator and runner integration errors currently bubble as server-side failures rather than a uniform platform error envelope.
 
-This is sufficient for the current scaffold, but a later production pass should introduce:
+Future hardening should add:
 
-- standardized API error bodies,
-- correlation IDs,
-- retryability hints,
-- explicit downstream dependency error classes.
+- correlation IDs in public error responses,
+- explicit retryability hints,
+- typed downstream dependency error bodies.

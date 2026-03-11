@@ -329,6 +329,12 @@ export const ContribCatalogSchema = z.object({
 });
 export type ContribCatalog = z.infer<typeof ContribCatalogSchema>;
 
+export const ContribCatalogResponseSchema = z.object({
+  catalog: ContribCatalogSchema,
+  artifact: ArtifactRefSchema.optional()
+});
+export type ContribCatalogResponse = z.infer<typeof ContribCatalogResponseSchema>;
+
 export const MappingKindSchema = z.enum(["literal", "expression", "object", "array"]);
 export type MappingKind = z.infer<typeof MappingKindSchema>;
 
@@ -432,6 +438,9 @@ export const RunnerJobSpecSchema = z.object({
   jobTemplateName: z.string().default("flogo-runner"),
   jobRunId: z.string().optional(),
   correlationId: z.string().optional(),
+  analysisPayload: z.record(z.string(), z.unknown()).optional(),
+  targetNodeId: z.string().optional(),
+  targetRef: z.string().optional(),
   command: z.array(z.string()).default([]),
   containerArgs: z.array(z.string()).default([])
 });

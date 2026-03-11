@@ -212,6 +212,23 @@ describe("flogo graph", () => {
     expect(diagnostics.some((diagnostic) => diagnostic.code === "flogo.mapping.coercion.numeric")).toBe(true);
   });
 
+  it("reports unresolved mapping references in previews", () => {
+    const app = structuredClone(validApp);
+    app.resources[0].data.tasks[0].input = {
+      message: "$activity[missing].message"
+    };
+
+    const preview = previewMapping(app, "log_1", {
+      flow: {},
+      activity: {},
+      env: {},
+      property: {},
+      trigger: {}
+    });
+
+    expect(preview.diagnostics.some((diagnostic) => diagnostic.code === "flogo.mapping.unresolved_reference")).toBe(true);
+  });
+
   it("analyzes property and environment usage", () => {
     const app = structuredClone(validApp);
     app.resources[0].data.tasks[0].input = {

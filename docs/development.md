@@ -2,15 +2,33 @@
 
 ## Overview
 
-This guide explains how to run, inspect, and extend the current repository.
+This guide explains how to run and extend the repository in its current Container Apps-first, Flogo-native-expansion state.
+
+Before implementing new Flogo-native work, read:
+
+1. [Flogo-Native Runtime Plan](./flogo-native-runtime-plan.md)
+2. [Capability Matrix](./capability-matrix.md)
+3. [Architecture](./architecture.md)
+
+## Implementation rule
+
+For every implementation slice that changes the Flogo-native roadmap:
+
+1. update [Flogo-Native Runtime Plan](./flogo-native-runtime-plan.md),
+2. update [Capability Matrix](./capability-matrix.md),
+3. update the affected operational docs,
+4. then implement the code changes.
+
+This keeps the roadmap and the checked-in implementation aligned.
 
 ## Prerequisites
 
 - Node.js 22 or newer
 - pnpm 9 or newer
 - Docker
-- Azure CLI if validating Bicep
-- Bicep CLI or `az bicep`
+- Go toolchain if you build the helper locally
+- Azure CLI if validating or deploying Azure infrastructure
+- `az bicep` or Bicep support through Azure CLI
 
 ## Repository layout
 
@@ -30,6 +48,10 @@ This guide explains how to run, inspect, and extend the current repository.
 - `packages/prompts`
 - `packages/evals`
 
+### Go helper
+
+- `go-runtime/flogo-helper`
+
 ### Infrastructure
 
 - `infra/local`
@@ -43,9 +65,9 @@ This guide explains how to run, inspect, and extend the current repository.
 
 ## Environment configuration
 
-Copy [.env.example](C:/Users/aapicella/dev/flogo-agent-platform/.env.example) to `.env`.
+Copy `.env.example` to `.env`.
 
-### Variables
+### Important variables
 
 #### Runtime and ports
 
@@ -61,16 +83,41 @@ Copy [.env.example](C:/Users/aapicella/dev/flogo-agent-platform/.env.example) to
 - `RUNNER_WORKER_BASE_URL`
 - `CONTROL_PLANE_INTERNAL_URL`
 
+#### Internal auth
+
+- `INTERNAL_SERVICE_TOKEN`
+
 #### Runner settings
 
 - `RUNNER_EXECUTION_MODE`
 - `RUNNER_JOB_TEMPLATE_NAME`
+- `RUNNER_BUILD_JOB_TEMPLATE_NAME`
+- `RUNNER_SMOKE_JOB_TEMPLATE_NAME`
+- `RUNNER_CUSTOM_CONTRIB_JOB_TEMPLATE_NAME`
+- `RUNNER_EVAL_JOB_TEMPLATE_NAME`
+- `RUNNER_CATALOG_JOB_TEMPLATE_NAME`
+- `RUNNER_MAPPING_PREVIEW_JOB_TEMPLATE_NAME`
+- `FLOGO_HELPER_BIN` if you want to point runner-worker at a prebuilt helper
 
-#### Storage and orchestration
+#### Durable orchestration backend
+
+- `DURABLE_BACKEND_PROVIDER`
+- `DURABLE_TASK_HUB_NAME`
+- `DURABLE_STORAGE_PROVIDER_TYPE`
+- `DURABLE_BACKEND_CONNECTION_NAME`
+- `DURABLE_TASK_SCHEDULER_ENDPOINT`
+- `DURABLE_TASK_SCHEDULER_NAMESPACE`
+- `DURABLE_STORAGE_CONNECTION_STRING`
+- `DURABLE_STORAGE_TASKHUB_CONNECTION_NAME`
+
+#### Storage and Azure integration
 
 - `DATABASE_URL`
-- `DURABLE_TASK_HUB_NAME`
 - `AZURITE_CONNECTION_STRING`
+- `AZURE_SUBSCRIPTION_ID`
+- `AZURE_RESOURCE_GROUP`
+- `AZURE_RESOURCE_MANAGER_ENDPOINT`
+- `CONTAINER_APPS_API_VERSION`
 
 #### Model integration
 
@@ -89,6 +136,24 @@ pnpm install
 ```bash
 pnpm db:generate
 ```
+
+### Build shared packages only
+
+```bash
+pnpm build:shared
+```
+
+### Typecheck the workspace
+
+```bash
+pnpm typecheck
+```
+
+Important:
+
+- `pnpm typecheck` rebuilds shared packages first,
+- shared packages are consumed through their `dist` exports,
+- when you change `packages/contracts`, `packages/flogo-graph`, `packages/tools`, or `packages/agent`, use `pnpm build:shared` or `pnpm typecheck` before validating downstream apps.
 
 ### Run tests
 
@@ -117,7 +182,7 @@ pnpm dev:runner-worker
 pnpm dev:web
 ```
 
-### Run the Docker Compose stack
+### Run Docker Compose stack
 
 ```bash
 pnpm compose:up
@@ -130,121 +195,111 @@ pnpm compose:down
 
 Use `pnpm dev` when:
 
-- you want fast code iteration,
-- you are debugging service logic,
-- you do not need container isolation.
+- you want fast iteration,
+- you are working on contracts, planner logic, or service code,
+- you do not need containerized execution.
 
 ### Docker Compose mode
 
 Use `pnpm compose:up` when:
 
-- you want a closer approximation of the local stack,
-- you want Postgres and Azurite started consistently,
-- you want the apps launched inside containerized Node environments.
-
-## Service startup order
-
-In Docker Compose, the effective startup order is:
-
-1. `postgres`
-2. `azurite`
-3. `runner-worker`
-4. `orchestrator`
-5. `control-plane`
-6. `web-console`
+- you want Postgres and Azurite up together,
+- you want a closer approximation of the local multi-app stack,
+- you want to exercise environment wiring more realistically.
 
 ## Extending the codebase
 
-### Adding a new public API endpoint
+## Adding a new public endpoint
 
-1. Add the controller or extend an existing module under `apps/control-plane/src/modules`.
-2. Reuse or extend Zod contracts in `packages/contracts`.
-3. Keep the external payload shape validated at the API boundary.
-4. Update [docs/api-reference.md](C:/Users/aapicella/dev/flogo-agent-platform/docs/api-reference.md).
+1. add or extend a controller/module under `apps/control-plane/src/modules`,
+2. define or extend the shared schema in `packages/contracts`,
+3. keep validation at the API boundary,
+4. update [API reference](./api-reference.md),
+5. update the roadmap docs if the endpoint exposes a new Flogo-native capability.
 
-### Adding a new orchestration step
+## Adding a new Flogo-native capability
 
-1. Extend `workflowRunnerSteps` in [apps/orchestrator/src/shared/orchestrator-http.ts](C:/Users/aapicella/dev/flogo-agent-platform/apps/orchestrator/src/shared/orchestrator-http.ts) if the step belongs in the normalized execution pipeline.
-2. Extend `RunnerStepTypeSchema` in [packages/contracts/src/index.ts](C:/Users/aapicella/dev/flogo-agent-platform/packages/contracts/src/index.ts).
-3. Update runner-worker execution logic if the step requires special handling.
-4. Update tests and docs.
+Use this order:
 
-### Adding a new shared contract
+1. update [Flogo-Native Runtime Plan](./flogo-native-runtime-plan.md),
+2. update [Capability Matrix](./capability-matrix.md),
+3. add or extend contracts in `packages/contracts`,
+4. add graph/planner logic in `packages/flogo-graph` or `packages/agent`,
+5. add tool wrappers in `packages/tools`,
+6. extend control-plane/orchestrator/runner-worker surfaces,
+7. extend the Go helper if the capability needs Core/Flow-native execution,
+8. add tests,
+9. update [Architecture](./architecture.md), [API reference](./api-reference.md), and [Data model](./data-model.md).
 
-1. Define the schema in `packages/contracts/src/index.ts`.
-2. Export both the schema and the inferred type.
-3. Rebuild the workspace so downstream packages get updated declarations.
+## Extending the Go helper
 
-### Extending Flogo validation
+Go helper source:
 
-Add validation logic to [packages/flogo-graph/src/index.ts](C:/Users/aapicella/dev/flogo-agent-platform/packages/flogo-graph/src/index.ts).
+- `go-runtime/flogo-helper/main.go`
 
-Recommended pattern:
+Current contract:
 
-1. produce deterministic diagnostics,
-2. group them into stage results,
-3. keep validation logic free of HTTP or framework dependencies,
-4. add tests in `packages/flogo-graph/src/index.test.ts`.
+- strict JSON to stdout,
+- logs/errors to stderr,
+- normalized exit code behavior for runner-worker consumption.
 
-### Extending the planner or policy logic
+When adding a helper command:
 
-Planner and policy live in [packages/agent/src/index.ts](C:/Users/aapicella/dev/flogo-agent-platform/packages/agent/src/index.ts).
+1. define or reuse shared contracts first,
+2. add runner-worker command construction,
+3. add command/result tests,
+4. document the command in the roadmap docs if it is a new capability area.
 
-Recommended pattern:
+## Extending orchestration
 
-1. add or refine plan steps,
-2. keep approval logic explicit and deterministic,
-3. avoid binding planning logic directly to a concrete LLM provider.
+Planner logic:
 
-### Extending prompts
+- `packages/agent/src/index.ts`
 
-Prompts live in [packages/prompts/src/index.ts](C:/Users/aapicella/dev/flogo-agent-platform/packages/prompts/src/index.ts).
+Orchestrator routing:
 
-Recommended pattern:
+- `apps/orchestrator/src/shared/orchestrator-http.ts`
 
-1. bump the `version`,
-2. keep `evalId` aligned with the prompt revision,
-3. update or add eval coverage in `packages/evals`.
+When adding a new execution mode:
 
-## Testing strategy in development
+1. keep `create | update | debug | review` as the top-level public task types unless there is a compelling API reason,
+2. prefer richer `inputs.mode` or typed payloads over public API churn,
+3. update runner step resolution only when the runtime path actually changes.
 
-Current tests cover:
+## Extending the runner path
 
-- control-plane orchestration submission behavior,
-- runner execution defaults,
-- smoke-test generation,
-- Flogo parsing and validation.
+Runner-worker sources:
 
-When adding behavior, prefer:
+- `apps/runner-worker/src/services/runner-job.service.ts`
+- `apps/runner-worker/src/services/runner-executor.service.ts`
 
-- unit tests first,
-- contract tests second,
-- integration tests only where the boundary is meaningful.
+When adding a new job kind:
 
-## Local debugging tips
+1. extend `RunnerJobSpec` and related schemas if needed,
+2. map job kinds to runner behavior and job templates,
+3. keep structured artifacts/diagnostics rather than raw shell output,
+4. update [API reference](./api-reference.md) and [Data model](./data-model.md).
 
-### Control-plane
+## Testing strategy
 
-- inspect Swagger at `/docs`
-- hit `/v1/health`
-- submit a task with `/v1/tasks`
+Preferred order:
 
-### Orchestrator
+1. unit tests,
+2. contract tests,
+3. meaningful integration tests,
+4. end-to-end/eval coverage when the boundary is important.
 
-- hit `http://localhost:7071/health`
-- inspect the returned orchestration status through `/api/orchestrations/:id`
+Current important test areas:
 
-### Runner-worker
-
-- hit `http://localhost:3010/health`
-- start a job manually through `/internal/jobs/start`
-
-### Web console
-
-- open `http://localhost:3000`
+- `packages/flogo-graph/src/index.test.ts`
+- control-plane service tests
+- runner-worker service tests
 
 ## Known development caveats
 
-- Do not rely on task persistence across process restarts.
-- Do not assume the Azure Functions runtime is active locally unless you explicitly host it outside the default `pnpm dev` path.
-- Do not assume job artifacts are persisted to blob storage yet; many URIs are still logical placeholders.
+- Shared packages are consumed from `dist`, so stale package builds can look like app-level type errors.
+- `next build` and Vitest can hit environment-specific `spawn EPERM` failures in restricted Windows shells even when the code is type-correct.
+- Some artifact URIs are still logical/local rather than Blob-backed.
+- The Go helper currently covers only the Phase 1 catalog/descriptor/mapping-preview slice.
+
+If the environment blocks build/test execution, validate the same commands again in CI or an unrestricted local shell before assuming the code is broken.

@@ -1,79 +1,79 @@
 # flogo-agent-platform
 
-`flogo-agent-platform` is a TypeScript monorepo for creating, updating, debugging, and reviewing TIBCO Flogo applications with `flogo.json` as the canonical artifact.
+`flogo-agent-platform` is a TypeScript monorepo for creating, updating, debugging, reviewing, and increasingly analyzing TIBCO Flogo applications with `flogo.json` as the canonical artifact.
 
-The current implementation is Container Apps-first:
+The platform is Container Apps-first:
 
-- Azure Container Apps runs the always-on services.
-- Azure Container Apps Jobs are the intended isolated execution model for finite Flogo build, run, debug, and smoke-test steps.
-- PostgreSQL is the system-of-record schema target.
-- Blob storage is the artifact and workspace snapshot store.
-- Key Vault and managed identity are the intended cloud secret and identity model.
+- Azure Container Apps hosts always-on services.
+- Azure Container Apps Jobs are the production target for heavyweight finite Flogo execution.
+- PostgreSQL is the operational system of record.
+- Blob Storage is the target artifact and workspace store.
+- Durable Functions is the orchestration model.
+- A Go helper binary is the bridge into Flogo Core/Flow-native functionality.
 
-## Current state
+## Current implementation shape
 
-The repository is a working MVP scaffold with real code paths for:
+The repository contains four primary apps:
 
-- public task submission and task inspection,
-- orchestration planning,
-- approval signaling,
-- internal workflow-to-control-plane synchronization,
-- internal runner job start and status polling,
-- shared contracts, validation logic, prompts, and eval data,
-- local development with Docker Compose,
-- Azure Container Apps infrastructure scaffolding.
+- `apps/control-plane`
+- `apps/orchestrator`
+- `apps/runner-worker`
+- `apps/web-console`
 
-The repository also has a few explicit implementation boundaries that are important to understand:
+and shared capability packages:
 
-- The control-plane currently stores task state, events, and artifact references in memory.
-- The Prisma schema is present and generated, but task persistence is not yet wired into the control-plane runtime.
-- The orchestrator app includes Durable Functions definitions for deployment and a Fastify-based local shim for local development.
-- The runner-worker currently provides a normalized internal job API and local process execution path; the Azure Container Apps Job bridge is scaffolded at the contract and infrastructure level rather than fully calling Azure management APIs.
+- `packages/contracts`
+- `packages/flogo-graph`
+- `packages/tools`
+- `packages/agent`
+- `packages/prompts`
+- `packages/evals`
 
-## Documentation map
+## Current feature baseline
 
-- [Documentation index](C:/Users/aapicella/dev/flogo-agent-platform/docs/README.md)
-- [Architecture](C:/Users/aapicella/dev/flogo-agent-platform/docs/architecture.md)
-- [API reference](C:/Users/aapicella/dev/flogo-agent-platform/docs/api-reference.md)
-- [Data model](C:/Users/aapicella/dev/flogo-agent-platform/docs/data-model.md)
-- [Development guide](C:/Users/aapicella/dev/flogo-agent-platform/docs/development.md)
-- [Deployment guide](C:/Users/aapicella/dev/flogo-agent-platform/docs/deployment.md)
-- [Operations guide](C:/Users/aapicella/dev/flogo-agent-platform/docs/operations.md)
+The current repo supports:
+
+- task submission, listing, history, run summaries, approvals, and artifact reads,
+- Prisma-backed task, event, approval, build-run, test-run, and artifact persistence,
+- orchestration through a dedicated orchestrator app with Durable Functions definitions and a local development host,
+- runner-worker support for local process execution and Container Apps Job metadata/start-poll adapters,
+- Flogo graph parsing, structural/semantic/mapping validation, contribution cataloging, mapping preview, coercion suggestions, and property analysis,
+- direct app-analysis APIs for graph, catalog, mapping preview, and app-scoped analysis artifacts,
+- a Go helper binary for contribution catalog, descriptor inspection, and mapping preview commands.
+
+## Flogo-native roadmap
+
+The main roadmap now is the Flogo-native runtime expansion. Start with:
+
+- [Documentation index](./docs/README.md)
+- [Flogo-Native Runtime Plan](./docs/flogo-native-runtime-plan.md)
+- [Capability Matrix](./docs/capability-matrix.md)
+
+Those documents are the standing reference for future Core/Flow-native implementation work.
 
 ## Workspace layout
 
 - `apps/control-plane`
-  - NestJS + Fastify public API.
-  - Owns public REST and SSE endpoints, in-memory task read models, approvals, artifact listing, graph lookup, and internal workflow sync endpoints.
+  - public NestJS + Fastify API
+  - task read models
+  - approvals
+  - internal sync endpoints
+  - direct Flogo app-analysis endpoints
 - `apps/orchestrator`
-  - Durable Functions definitions plus a Fastify development host.
-  - Owns long-running workflow sequencing, approval waits, runner dispatch, and synchronization back into the control-plane.
+  - orchestration host
+  - Durable Functions definitions
+  - local orchestration shim
 - `apps/runner-worker`
-  - Internal job dispatcher and status service.
-  - Normalizes finite job requests for build, run, log collection, and smoke-test generation/execution.
+  - internal job facade
+  - local execution and Container Apps Job bridge
 - `apps/web-console`
-  - Next.js operator UI.
-  - Provides task creation and task inspection views over the control-plane API.
-- `packages/contracts`
-  - Shared Zod schemas and runtime types.
-- `packages/flogo-graph`
-  - Flogo parsing, graph building, semantic checks, mapping validation, and diff summarization.
-- `packages/tools`
-  - Typed repo, Flogo, runner, test, and artifact helper implementations.
-- `packages/agent`
-  - Planner, lightweight policy engine, and model abstraction.
-- `packages/prompts`
-  - Versioned prompt catalog.
-- `packages/evals`
-  - Golden evaluation cases and scoring helpers.
-- `infra/local`
-  - Docker Compose local development environment.
-- `infra/azure`
-  - Azure Container Apps-first Bicep scaffold.
+  - Next.js operator UI
+- `go-runtime/flogo-helper`
+  - Go CLI helper for Flogo-native catalog and mapping work
 - `runner-images/flogo-runner`
-  - Runner image scaffold for local and Azure job execution.
+  - runner image used by finite execution paths
 - `examples`
-  - Example Flogo apps used for validation and testing.
+  - sample Flogo apps for tests and development
 
 ## Quick start
 
@@ -81,9 +81,9 @@ The repository also has a few explicit implementation boundaries that are import
 
 - Node.js 22+
 - pnpm 9+
-- Docker Desktop or compatible Docker runtime
-- Go toolchain if you extend the runner image or later add native Flogo build integration
-- Azure CLI if you plan to validate or deploy the Bicep templates
+- Docker
+- Go toolchain if you build the helper directly
+- Azure CLI if you validate or deploy Azure infrastructure
 
 ### Local bootstrap
 
@@ -100,89 +100,80 @@ The repository also has a few explicit implementation boundaries that are import
    pnpm db:generate
    ```
 
-4. Start dependencies with Docker Compose:
+4. Start the local dependency stack:
 
    ```bash
    pnpm compose:up
    ```
 
-5. Or run the apps directly from the workspace:
+5. Or run the workspace directly:
 
    ```bash
    pnpm dev
    ```
 
-### Default local ports
+### Primary verification commands
 
-- `3000`: web console
-- `3001`: control-plane API
-- `3010`: runner-worker internal job API
-- `5432`: PostgreSQL
-- `7071`: orchestrator development host
-- `10000` / `10001`: Azurite blob and queue endpoints
+```bash
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+`pnpm typecheck` is the authoritative workspace type gate. It rebuilds shared packages first so app-level package exports stay in sync.
 
 ## Public API
 
-The public API is exposed by the control-plane under the `/v1` prefix.
+The control-plane exposes `/v1` routes, including:
 
 - `POST /v1/tasks`
+- `GET /v1/tasks`
 - `GET /v1/tasks/:taskId`
 - `GET /v1/tasks/:taskId/stream`
-- `GET /v1/tasks/:taskId/events`
+- `GET /v1/tasks/:taskId/history`
+- `GET /v1/tasks/:taskId/runs`
 - `POST /v1/tasks/:taskId/approvals`
 - `GET /v1/tasks/:taskId/artifacts`
 - `GET /v1/projects/:projectId/apps/:appId/graph`
+- `GET /v1/projects/:projectId/apps/:appId/catalog`
+- `GET /v1/projects/:projectId/apps/:appId/artifacts`
+- `POST /v1/projects/:projectId/apps/:appId/mappings/preview`
 - `GET /v1/health`
 
 Swagger is available locally at `http://localhost:3001/docs`.
 
-## Environment variables
+## Documentation map
 
-The baseline variables are defined in [.env.example](C:/Users/aapicella/dev/flogo-agent-platform/.env.example):
-
-- `DATABASE_URL`
-- `PORT`
-- `CONTROL_PLANE_PORT`
-- `ORCHESTRATOR_PORT`
-- `RUNNER_WORKER_PORT`
-- `ORCHESTRATOR_BASE_URL`
-- `RUNNER_WORKER_BASE_URL`
-- `CONTROL_PLANE_INTERNAL_URL`
-- `NEXT_PUBLIC_API_BASE_URL`
-- `RUNNER_EXECUTION_MODE`
-- `RUNNER_JOB_TEMPLATE_NAME`
-- `DURABLE_TASK_HUB_NAME`
-- `AZURITE_CONNECTION_STRING`
-- `MODEL_PROVIDER`
-
-## Testing
-
-Run the main verification commands:
-
-```bash
-pnpm db:generate
-pnpm test
-pnpm build
-```
+- [Documentation index](./docs/README.md)
+- [Flogo-Native Runtime Plan](./docs/flogo-native-runtime-plan.md)
+- [Capability Matrix](./docs/capability-matrix.md)
+- [Architecture](./docs/architecture.md)
+- [API reference](./docs/api-reference.md)
+- [Data model](./docs/data-model.md)
+- [Development guide](./docs/development.md)
+- [Deployment guide](./docs/deployment.md)
+- [Operations guide](./docs/operations.md)
 
 ## Infrastructure
 
 ### Local
 
-- [infra/local/docker-compose.yml](C:/Users/aapicella/dev/flogo-agent-platform/infra/local/docker-compose.yml)
-- [infra/local/README.md](C:/Users/aapicella/dev/flogo-agent-platform/infra/local/README.md)
+- `infra/local/docker-compose.yml`
+- `infra/local/README.md`
 
 ### Azure
 
-- [infra/azure/main.bicep](C:/Users/aapicella/dev/flogo-agent-platform/infra/azure/main.bicep)
-- [infra/azure/parameters.example.json](C:/Users/aapicella/dev/flogo-agent-platform/infra/azure/parameters.example.json)
-- [infra/azure/README.md](C:/Users/aapicella/dev/flogo-agent-platform/infra/azure/README.md)
+- `infra/azure/main.bicep`
+- `infra/azure/parameters.example.json`
+- `infra/azure/README.md`
 
-## Known implementation gaps
+## Current boundaries
 
-- Task persistence is not yet backed by PostgreSQL at runtime.
-- Artifact and workspace snapshot persistence is not yet backed by Azure Blob APIs at runtime.
-- Azure Container Apps Job execution is represented by job contracts and infrastructure scaffolding; the runner-worker does not yet invoke Azure management APIs to create or poll actual ACA Job runs.
-- Durable Functions is implemented in the orchestrator app, but local development uses the Fastify host rather than the full Azure Functions host.
+The repo is beyond a pure scaffold, but it is not yet the full Flogo-native runtime described in the roadmap.
 
-These are current boundaries of the checked-in implementation, not hidden assumptions.
+Current notable gaps:
+
+- Blob-backed artifact persistence is not yet the default runtime path; many local artifacts still use logical URIs.
+- Go helper behavior is real for catalog/descriptor/mapping preview, but not yet for flow contracts, replay, or contribution scaffolding.
+- Flow-aware, runtime-aware, and extension-aware capabilities are still planned phases.
+- `next build` and Vitest can hit environment-specific `spawn EPERM` failures in restricted shells even when workspace typecheck is clean.

@@ -2,19 +2,19 @@
 
 ## Overview
 
-This guide covers monitoring, testing, troubleshooting, and known runtime limitations.
+This guide covers monitoring, verification, troubleshooting, and current runtime limits.
+
+Read this together with:
+
+- [Architecture](./architecture.md)
+- [API reference](./api-reference.md)
+- [Flogo-Native Runtime Plan](./flogo-native-runtime-plan.md)
 
 ## Health endpoints
 
 ### Control-plane
 
 - `GET /v1/health`
-
-Returns:
-
-- `ok`
-- `service`
-- `timestamp`
 
 ### Orchestrator local host
 
@@ -24,57 +24,72 @@ Returns:
 
 - `GET /health`
 
-## Observability
+## Operational inspection workflow
 
-The codebase and infrastructure are set up around the following observability model:
-
-- service logs emitted by each app,
-- Application Insights connection string wiring in Azure,
-- Log Analytics workspace in the Bicep deployment.
-
-Current implementation note:
-
-- the code does not yet include a full OpenTelemetry instrumentation pass,
-- but the deployment template and environment structure are already compatible with that direction.
-
-## Task lifecycle monitoring
-
-The most useful sources during local or early-stage operations are:
+For a running task, the main operator inspection path is:
 
 1. `GET /v1/tasks/:taskId`
-2. `GET /v1/tasks/:taskId/events`
-3. orchestrator status endpoint
-4. runner-worker job status endpoint
+2. `GET /v1/tasks/:taskId/history`
+3. `GET /v1/tasks/:taskId/runs`
+4. `GET /v1/tasks/:taskId/artifacts`
+5. orchestrator status endpoint
+6. runner-worker job status endpoint
 
-### What to inspect
+### Key fields to inspect
 
 - `status`
 - `summary`
 - `approvalStatus`
 - `activeJobRuns`
-- `artifacts`
-- event history for `approval`, `tool`, `artifact`, and `status` entries
+- `requiredApprovals`
+- persisted event history
+- build/test run summaries
+- published artifacts
 
-## Testing and verification
+## App-analysis inspection workflow
 
-### Unit and contract-style tests
+For graph/catalog/mapping-preview work:
 
-Run:
+1. `GET /v1/projects/:projectId/apps/:appId/graph`
+2. `GET /v1/projects/:projectId/apps/:appId/catalog`
+3. `POST /v1/projects/:projectId/apps/:appId/mappings/preview`
+4. `GET /v1/projects/:projectId/apps/:appId/artifacts`
+
+Use this to inspect:
+
+- contribution inventory,
+- mapping diagnostics,
+- property planning output,
+- persisted app-analysis artifacts.
+
+## Observability
+
+The infrastructure is wired for:
+
+- service logs,
+- Log Analytics,
+- Application Insights.
+
+Current implementation status:
+
+- infrastructure and env wiring are in place,
+- the codebase still needs a full OpenTelemetry pass for end-to-end correlated traces.
+
+## Verification commands
+
+### Primary workspace verification
+
+```bash
+pnpm typecheck
+```
+
+### Tests
 
 ```bash
 pnpm test
 ```
 
-Current test coverage includes:
-
-- Flogo parser and validation behavior,
-- runner executor behavior,
-- smoke-test generation,
-- control-plane orchestration submission.
-
-### Build verification
-
-Run:
+### Build
 
 ```bash
 pnpm build
@@ -82,41 +97,25 @@ pnpm build
 
 ### Prisma client generation
 
-Run:
-
 ```bash
 pnpm db:generate
 ```
 
-### Bicep validation
-
-Run:
+### Azure Bicep validation
 
 ```bash
 az bicep build --file infra/azure/main.bicep
 ```
 
-## Evaluation coverage
+## Known environment caveat
 
-Golden eval cases live in [packages/evals/src/index.ts](C:/Users/aapicella/dev/flogo-agent-platform/packages/evals/src/index.ts).
+In restricted Windows shells, `next build` and Vitest can fail with `spawn EPERM` even when the code is otherwise valid.
 
-The current eval dataset covers:
+If that happens:
 
-- create
-- update
-- debug
-- review
-
-Representative cases include:
-
-- REST hello world,
-- timer flow,
-- shared logic,
-- bad flow ref,
-- illegal mapping scope,
-- unused imports,
-- missing tests,
-- contract drift.
+1. trust `pnpm typecheck` as the primary correctness gate for the workspace,
+2. rerun `pnpm build` or the targeted test suite in CI or an unrestricted local shell,
+3. do not assume the failure is a code regression until it reproduces outside the restricted environment.
 
 ## Troubleshooting
 
@@ -124,70 +123,86 @@ Representative cases include:
 
 Check:
 
-- control-plane can reach the orchestrator,
-- orchestrator can reach runner-worker,
-- the task has an `orchestrationId`,
-- the orchestrator status endpoint returns the expected instance.
+- the control-plane created an `orchestrationId`,
+- the orchestrator status endpoint returns the instance,
+- the runner-worker received and stored the job run,
+- `GET /v1/tasks/:taskId/history` shows status/tool events,
+- `GET /v1/tasks/:taskId/runs` shows expected build/test projections.
 
 ### Task remains in `awaiting_approval`
 
 Check:
 
-- `requiredApprovals` on the task result,
+- `requiredApprovals`,
 - `approvalStatus`,
-- whether an approval was posted to `/v1/tasks/:taskId/approvals`.
+- whether an approval was posted to `POST /v1/tasks/:taskId/approvals`,
+- whether the orchestrator instance consumed the approval signal.
 
-### Job run cannot be found
-
-Check:
-
-- the `jobRunId` in `activeJobRuns`,
-- `GET /internal/jobs/:jobRunId` on the runner-worker,
-- whether the orchestrator successfully called `/internal/jobs/start`.
-
-### Graph endpoint returns `404`
-
-Current implementation only reads examples from `examples/<appId>/flogo.json`.
+### Runner job cannot be found
 
 Check:
 
-- `appId` matches an example directory,
-- the file exists.
+- `activeJobRuns` on the task result,
+- `GET /internal/jobs/:jobRunId` on runner-worker,
+- runner-worker logs,
+- whether the orchestrator created the expected step type and job kind.
 
-### State disappears after restart
+### Graph or catalog endpoint returns `404`
 
-This is expected today.
+Check app resolution order:
 
-Current task state is not yet persisted through Prisma at runtime.
+1. matching `FlogoApp` record for the `projectId + appId`,
+2. fallback example file under `examples/<appId>/flogo.json`.
 
-## Known limitations
+If neither exists, the `404` is expected.
 
-### Persistence
+### Artifacts exist but the URI is not Blob-backed
 
-- task state is in-memory
-- event history is in-memory
-- artifact references are in-memory
+This can still happen.
 
-### Execution
+Current behavior:
 
-- local runner execution uses local processes
-- Container Apps Job execution is not yet a live Azure integration
+- artifact metadata is persisted,
+- some URIs are still logical/local,
+- blob-backed storage remains an ongoing implementation area.
 
-### Orchestration
+### Container Apps Job execution does not complete in production mode
 
-- local development uses a Fastify shim rather than the Azure Functions host
-- the Durable Functions code path exists for deployment, but local runtime parity depends on the shim staying aligned
+Check:
+
+- `RUNNER_EXECUTION_MODE=container-apps-job`,
+- Azure subscription and resource group env vars,
+- managed identity/token acquisition path,
+- job template names,
+- runner-worker start/poll responses,
+- ARM/API permissions.
+
+## Current limitations
+
+### Flogo-native capability depth
+
+- contribution catalog and mapping preview are implemented,
+- deeper Core-native composition is not yet implemented,
+- flow contracts, replay, and contribution scaffolding are still roadmap items.
 
 ### Storage
 
-- blob containers are provisioned in Azure
-- artifact URIs and snapshot URIs are modeled in code
-- actual artifact upload/download paths are still incomplete
+- task/event/run/artifact metadata is persisted,
+- blob-backed payload storage is still incomplete in some flows.
+
+### Orchestration
+
+- Durable Functions definitions exist for deployment,
+- local development still uses the Fastify orchestration host.
+
+### UI
+
+- operator UI is intentionally thin and does not yet expose dedicated catalog/mapping/replay dashboards.
 
 ## Recommended next operational milestones
 
-1. Persist task state and events through Prisma.
-2. Persist artifact and snapshot metadata through Blob storage APIs.
-3. Replace the placeholder Container Apps Job executor with real Azure management calls.
-4. Add explicit OpenTelemetry tracing across control-plane, orchestrator, and runner-worker.
-5. Add integration tests that exercise the full local multi-service path.
+1. Add OpenTelemetry trace propagation across control-plane, orchestrator, and runner-worker.
+2. Move more artifact payloads to Blob/Azurite-backed storage.
+3. Add richer Flogo-native runtime outputs such as run traces and replay artifacts.
+4. Add UI views for app catalog, mapping preview, and later replay/contrib workflows.
+5. Expand eval coverage for catalog/mapping-specific workflows.

@@ -2,22 +2,70 @@
 
 ## Overview
 
-`flogo-agent-platform` is organized around four deployable applications and shared packages:
+`flogo-agent-platform` is organized around four deployable applications plus shared packages and a Go helper binary:
 
-- `control-plane`: public API and current task read-model owner
-- `orchestrator`: long-running workflow owner
-- `runner-worker`: finite job dispatcher and status API
-- `web-console`: operator UI
-- shared packages for contracts, Flogo graph logic, tools, prompts, and eval data
+- `control-plane`
+- `orchestrator`
+- `runner-worker`
+- `web-console`
+- `go-runtime/flogo-helper`
 
-The design goal is to keep `flogo.json` as the canonical artifact while providing a path for:
+The platform keeps `flogo.json` as the canonical application artifact while expanding toward a Flogo-native runtime model described in [Flogo-Native Runtime Plan](./flogo-native-runtime-plan.md).
 
-- natural-language task intake,
-- planning and policy checks,
-- structured validation,
-- isolated execution,
-- approval gates,
-- operator visibility.
+## Architectural stance
+
+### Control plane
+
+The platform remains a modular monolith at the public API layer.
+
+The control-plane owns:
+
+- public REST and SSE endpoints,
+- task intake and read models,
+- approval APIs,
+- direct app-analysis APIs,
+- internal synchronization endpoints,
+- Prisma-backed operational persistence.
+
+### Durable orchestration
+
+The orchestrator remains a separate application.
+
+It owns:
+
+- long-running workflow sequencing,
+- approval waits,
+- runner dispatch,
+- orchestration status,
+- synchronization back into the control-plane.
+
+### Finite execution
+
+The runner-worker is the only job-dispatch facade.
+
+It owns:
+
+- local-process execution,
+- Container Apps Job start/poll behavior,
+- job normalization,
+- helper command execution,
+- smoke-test helper behavior.
+
+### Flogo-native helper path
+
+The Go helper binary exists to bridge into Flogo Core/Flow-native capability without moving the control plane out of TypeScript.
+
+It currently supports:
+
+- contribution catalog generation,
+- descriptor inspection,
+- mapping preview.
+
+It is expected to grow into:
+
+- programmatic Core composition,
+- runtime trace and replay,
+- contribution scaffolding and validation.
 
 ## High-level topology
 
@@ -29,159 +77,177 @@ flowchart LR
   CP --> O[Orchestrator]
   O --> RW[Runner Worker]
   O --> CP
-  RW --> J[Local Process or ACA Job]
-  CP --> PG[(PostgreSQL schema target)]
-  CP --> AZ[(Blob / Azurite)]
+  RW --> H[Go Helper / Local Process / ACA Job]
+  CP --> PG[(PostgreSQL)]
+  CP --> BL[(Blob / Azurite target)]
 ```
 
 ## Service responsibilities
 
-### Control-plane
+## Control-plane
 
 Implementation:
 
-- [apps/control-plane/src/main.ts](C:/Users/aapicella/dev/flogo-agent-platform/apps/control-plane/src/main.ts)
-- [apps/control-plane/src/app.module.ts](C:/Users/aapicella/dev/flogo-agent-platform/apps/control-plane/src/app.module.ts)
-- [apps/control-plane/src/modules/agent/orchestration.service.ts](C:/Users/aapicella/dev/flogo-agent-platform/apps/control-plane/src/modules/agent/orchestration.service.ts)
+- `apps/control-plane/src/main.ts`
+- `apps/control-plane/src/modules/agent/orchestration.service.ts`
+- `apps/control-plane/src/modules/agent/task-store.service.ts`
+- `apps/control-plane/src/modules/flogo-apps/flogo-apps.service.ts`
 
 Responsibilities:
 
-- expose the public `/v1` API,
-- validate incoming task and approval payloads,
-- call the planner to build an execution plan,
-- start orchestration instances,
-- maintain the current in-memory task read model,
-- publish and stream task events,
-- expose artifacts and graph inspection endpoints,
-- accept internal event and state synchronization from the orchestrator.
+- validate public requests,
+- build execution plans,
+- start orchestrations,
+- store tasks, events, approvals, artifacts, build runs, and test runs through Prisma,
+- expose task history and run summaries,
+- expose direct app-analysis endpoints for graph, catalog, artifact listing, and mapping preview,
+- accept internal sync callbacks from the orchestrator and runner paths.
 
-Current implementation note:
+Important current behavior:
 
-- The control-plane is the current read-model owner, but it is not yet backed by Postgres at runtime.
+- task/event/artifact state is persisted in PostgreSQL through Prisma,
+- app-scoped analysis artifacts are persisted as hidden analysis task records,
+- example apps can be auto-resolved from `examples/<appId>/flogo.json` and registered into local persistence when needed.
 
-### Orchestrator
+## Orchestrator
 
 Implementation:
 
-- [apps/orchestrator/src/functions/task-orchestration.ts](C:/Users/aapicella/dev/flogo-agent-platform/apps/orchestrator/src/functions/task-orchestration.ts)
-- [apps/orchestrator/src/dev-server.ts](C:/Users/aapicella/dev/flogo-agent-platform/apps/orchestrator/src/dev-server.ts)
-- [apps/orchestrator/src/shared/orchestrator-http.ts](C:/Users/aapicella/dev/flogo-agent-platform/apps/orchestrator/src/shared/orchestrator-http.ts)
+- `apps/orchestrator/src/functions/task-orchestration.ts`
+- `apps/orchestrator/src/dev-server.ts`
+- `apps/orchestrator/src/shared/orchestrator-http.ts`
 
 Responsibilities:
 
-- own long-running workflow state,
-- wait for approvals,
-- create runner job specs,
-- start and poll runner jobs,
-- synchronize task status back into the control-plane,
-- publish workflow-driven events into the control-plane.
+- start and track workflow instances,
+- translate tasks into runner steps,
+- wait for and react to approval decisions,
+- publish task events and sync task state,
+- support both standard mutating workflows and analysis-only workflows.
 
-Current implementation note:
+Current workflow modes:
 
-- The repo ships both Durable Functions definitions and a Fastify-based local host.
-- The local host is what `pnpm dev` and Docker Compose currently use.
+- full create/update/debug/review workflow:
+  - `build`
+  - `run`
+  - `generate_smoke`
+  - `run_smoke`
+- analysis-only workflow modes:
+  - `catalog_contribs`
+  - `preview_mapping`
 
-### Runner-worker
+## Runner-worker
 
 Implementation:
 
-- [apps/runner-worker/src/index.ts](C:/Users/aapicella/dev/flogo-agent-platform/apps/runner-worker/src/index.ts)
-- [apps/runner-worker/src/services/runner-job.service.ts](C:/Users/aapicella/dev/flogo-agent-platform/apps/runner-worker/src/services/runner-job.service.ts)
-- [apps/runner-worker/src/services/runner-executor.service.ts](C:/Users/aapicella/dev/flogo-agent-platform/apps/runner-worker/src/services/runner-executor.service.ts)
+- `apps/runner-worker/src/index.ts`
+- `apps/runner-worker/src/services/runner-job.service.ts`
+- `apps/runner-worker/src/services/runner-executor.service.ts`
 
 Responsibilities:
 
-- expose an internal HTTP API for job start and status lookup,
-- normalize job payloads using shared schemas,
-- execute jobs in a local process mode today,
-- represent the intended Azure Container Apps Job path through job metadata and execution-mode selection,
-- generate smoke-test specs for `generate_smoke`.
+- expose internal HTTP endpoints for job start and status polling,
+- normalize `RunnerJobSpec` requests,
+- execute local helper/job commands,
+- start and poll Azure Container Apps Jobs in production mode,
+- translate command output into structured artifacts and diagnostics.
 
-Current implementation note:
+Current notable behavior:
 
-- The actual Azure management-plane calls to start ACA Jobs are not yet implemented.
-- The Container Apps execution mode is currently a placeholder adapter that returns normalized results.
+- local mode executes real helper commands for:
+  - `catalog_contribs`
+  - `inspect_descriptor`
+  - `preview_mapping`
+- Container Apps Job mode includes ARM start/poll logic and job-template routing,
+- build/smoke steps are still less Flogo-native than the catalog/preview slice and remain an ongoing implementation area.
 
-### Web console
+## Web console
 
 Implementation:
 
-- [apps/web-console/app/page.tsx](C:/Users/aapicella/dev/flogo-agent-platform/apps/web-console/app/page.tsx)
-- [apps/web-console/app/tasks/[taskId]/page.tsx](C:/Users/aapicella/dev/flogo-agent-platform/apps/web-console/app/tasks/[taskId]/page.tsx)
+- `apps/web-console/app/page.tsx`
+- `apps/web-console/app/tasks/[taskId]/page.tsx`
 
 Responsibilities:
 
-- submit tasks,
-- inspect task details,
-- display approvals, artifacts, and event-stream instructions.
+- task submission,
+- task detail viewing,
+- approval entry points,
+- artifact and event visibility.
+
+Current limitation:
+
+- the operator UI is still a thin shell and does not yet expose dedicated catalog, mapping preview, replay, or contribution-authoring views.
 
 ## Shared package responsibilities
 
-### `packages/contracts`
+## `packages/contracts`
 
-Defines the runtime schemas for:
+Defines runtime schemas and TypeScript types for:
 
-- task intake and task result shapes,
+- tasks,
 - approvals,
-- task events,
-- orchestration start and status objects,
-- runner job specs and results,
-- smoke-test specs,
-- Flogo app graph and validation results.
+- artifacts,
+- orchestration requests and status,
+- runner job specs/results/status,
+- Flogo graphs,
+- contribution catalogs and descriptors,
+- mapping preview requests and results.
 
-### `packages/flogo-graph`
+## `packages/flogo-graph`
+
+Implements the TypeScript-side Flogo domain model, including:
+
+- app parsing and normalization,
+- graph building,
+- structural, semantic, mapping, and dependency validation,
+- contribution catalog generation,
+- alias validation,
+- mapping classification and preview,
+- coercion suggestions,
+- property analysis,
+- app diff summarization.
+
+## `packages/tools`
+
+Provides capability-oriented tool wrappers for:
+
+- repo access,
+- Flogo core/model operations,
+- Flogo mapping operations,
+- runner dispatch,
+- test helpers,
+- artifact helpers.
+
+## `packages/agent`
 
 Implements:
 
-- `parseFlogoAppDocument`
-- `buildAppGraph`
-- `validateStructural`
-- `validateSemantic`
-- `validateMappings`
-- `validateDependencies`
-- `validateFlogoApp`
-- `summarizeAppDiff`
+- planner logic,
+- policy logic,
+- model abstraction,
+- analysis-only workflow branching,
+- execution plan generation.
 
-### `packages/tools`
+## `packages/prompts`
 
-Provides local helper implementations for:
+Stores prompt templates and versions used by the planner/model layer.
 
-- repo reads, searches, diffs, and writes,
-- Flogo app parsing and mutation helpers,
-- runner dispatch placeholders,
-- smoke-test generation,
-- artifact publication helpers.
+## `packages/evals`
 
-### `packages/agent`
+Stores eval fixtures and scoring helpers.
 
-Implements:
+## `go-runtime/flogo-helper`
 
-- `ModelClient` abstraction,
-- lightweight `PolicyEngine`,
-- `TaskPlanner`,
-- `OrchestratorAgent`,
-- `StaticModelClient`.
+Implements the current Go-side Flogo-native command surface:
 
-### `packages/prompts`
+- `catalog contribs`
+- `inspect descriptor`
+- `preview mapping`
 
-Stores versioned prompt templates for:
+## End-to-end runtime flows
 
-- orchestrator,
-- builder,
-- debugger,
-- reviewer,
-- policy.
-
-### `packages/evals`
-
-Provides:
-
-- golden task cases for create, update, debug, and review,
-- aggregate scoring helpers for eval runs.
-
-## End-to-end workflow
-
-### Task submission flow
+## Standard task flow
 
 ```mermaid
 sequenceDiagram
@@ -191,120 +257,99 @@ sequenceDiagram
   participant RW as Runner Worker
 
   Client->>CP: POST /v1/tasks
-  CP->>CP: Validate request and build plan
+  CP->>CP: Validate and persist task
   CP->>O: Start orchestration
-  O->>CP: Sync task state
-  O->>RW: Start runner job
-  RW-->>O: jobRunId
-  O->>RW: Poll status
-  RW-->>O: job result
-  O->>CP: Publish events and sync status
-  CP-->>Client: GET task / SSE updates
+  O->>RW: Start runner job(s)
+  RW-->>O: Job status / result
+  O->>CP: Sync status, events, artifacts, runs
+  CP-->>Client: GET task / SSE / history / runs
 ```
 
-### Approval flow
+## Direct app-analysis flow
+
+```mermaid
+sequenceDiagram
+  participant Client
+  participant CP as Control Plane
+  participant FG as Flogo Graph
+  participant DB as PostgreSQL
+
+  Client->>CP: GET /catalog or POST /mappings/preview
+  CP->>FG: Build catalog / preview result
+  CP->>DB: Persist hidden app-analysis task + artifact
+  CP-->>Client: Analysis payload + ArtifactRef
+```
+
+## Analysis task flow
 
 ```mermaid
 sequenceDiagram
   participant Client
   participant CP as Control Plane
   participant O as Orchestrator
+  participant RW as Runner Worker
+  participant H as Go Helper
 
-  Client->>CP: POST /v1/tasks/:taskId/approvals
-  CP->>O: Signal approval
-  O->>CP: Sync new task status
-  CP-->>Client: Updated task result
+  Client->>CP: POST /v1/tasks with inputs.mode
+  CP->>O: Start analysis-only orchestration
+  O->>RW: Start catalog or preview job
+  RW->>H: Execute helper command
+  H-->>RW: JSON result
+  RW-->>O: Structured job result
+  O->>CP: Sync artifact and completion state
+  CP-->>Client: Task result + artifacts
 ```
 
-## Workflow stages
+## Flogo-native capability baseline
 
-The current implementation normalizes all orchestration runs to a shared runner-step sequence:
+The platform is currently strongest in the Phase 1 capability area:
 
-1. `build`
-2. `run`
-3. `generate_smoke`
-4. `run_smoke`
+- contribution cataloging,
+- descriptor inspection,
+- mapping preview,
+- coercion suggestions,
+- property analysis,
+- analysis-only orchestration modes.
 
-That sequence is defined in [apps/orchestrator/src/shared/orchestrator-http.ts](C:/Users/aapicella/dev/flogo-agent-platform/apps/orchestrator/src/shared/orchestrator-http.ts).
-
-The planner in [packages/agent/src/index.ts](C:/Users/aapicella/dev/flogo-agent-platform/packages/agent/src/index.ts) is conceptually richer than the current runner-step loop. It reasons in terms of:
-
-- graph parse,
-- validation,
-- patch/generation,
-- build,
-- smoke validation.
-
-This is intentional. The plan model is already more expressive than the current execution bridge so the platform can grow into a fuller implementation without replacing the contracts again.
-
-## Validation model
-
-Flogo validation currently includes:
-
-- structural validation,
-- semantic validation,
-- mapping validation,
-- dependency validation.
-
-The validator does not yet execute:
-
-- actual Flogo CLI structural compile checks,
-- real dependency installation,
-- real runtime endpoint assertions against a running Flogo app binary.
-
-Those are planned by the architecture, but not yet fully implemented in code.
-
-## State model
-
-There are three state layers:
-
-1. Public task result state in the control-plane.
-2. Orchestration runtime state in the orchestrator.
-3. Runner job state in the runner-worker.
-
-Current behavior:
-
-- The orchestrator is the source of truth for a task while it is executing.
-- The control-plane is the source of truth for what operators can read through the public API.
-- The runner-worker is the source of truth for the current lifecycle of each job run.
+See [Capability Matrix](./capability-matrix.md) for the detailed breakdown.
 
 ## Persistence model
 
-Intended model:
+### Current runtime-backed persistence
 
-- PostgreSQL stores task, step, event, approval, artifact, and graph projection records.
-- Blob storage stores workspace snapshots, logs, binaries, and reports.
+Persisted through Prisma today:
 
-Current model:
+- tasks,
+- task events,
+- approvals,
+- artifacts,
+- build runs,
+- test runs.
 
-- Postgres schema exists, but the runtime path still stores task read models in memory.
-- Blob persistence is modeled in URIs and infrastructure but not yet fully wired at runtime.
+### Current partial persistence
 
-## Container Apps-first runtime model
+- app-scoped catalog and mapping-preview artifacts are persisted through hidden synthetic analysis tasks,
+- many artifact URIs are still logical/local URIs rather than Blob-backed object references.
 
-### Always-on services
+### Planned persistence growth
 
-- control-plane
-- orchestrator
-- runner-worker
-- web-console
+- blob-backed workspace snapshots,
+- blob-backed analysis artifacts,
+- runtime traces and replay artifacts,
+- richer Flogo graph projections,
+- contribution bundle artifacts.
 
-### Finite execution services
+## Key constraints
 
-- Azure Container Apps Jobs for the Flogo runner image
+- `flogo.json` is still the canonical artifact even as the Go helper path grows.
+- The Go helper is intentionally a finite execution binary, not a new always-on service.
+- The current helper uses normalized Flogo metadata and known-registry inference for part of the catalog/preview path; it is not yet a full Core/Flow-native runtime.
+- Flow-aware, runtime-aware, and extension-aware capabilities are still roadmap items.
+- In restricted shells on Windows, `next build` and Vitest can fail with `spawn EPERM` even when typecheck is clean.
 
-### Local substitute
+## Reference documents
 
-Local development uses:
-
-- Docker Compose for service startup,
-- the orchestrator Fastify host rather than the Azure Functions host,
-- local process execution in runner-worker.
-
-## Known architectural constraints
-
-- Public task and artifact reads are limited by in-memory storage until Postgres is fully integrated.
-- The local orchestrator host and Durable Functions definitions must stay behaviorally aligned.
-- Azure deployment is scaffolded around Container Apps and manual jobs, but management-plane automation is not complete.
-
-These constraints are important for anyone extending the platform. The repo is best understood as a concrete MVP scaffold with strong contracts and service boundaries, not as a complete production runtime yet.
+- [Flogo-Native Runtime Plan](./flogo-native-runtime-plan.md)
+- [Capability Matrix](./capability-matrix.md)
+- [API reference](./api-reference.md)
+- [Data model](./data-model.md)
