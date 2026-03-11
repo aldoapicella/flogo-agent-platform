@@ -113,11 +113,20 @@ Copy `.env.example` to `.env`.
 #### Storage and Azure integration
 
 - `DATABASE_URL`
+- `APP_ANALYSIS_STORAGE_CONNECTION_STRING`
+- `APP_ANALYSIS_BLOB_ENDPOINT`
+- `APP_ANALYSIS_STORAGE_CONTAINER`
 - `AZURITE_CONNECTION_STRING`
 - `AZURE_SUBSCRIPTION_ID`
 - `AZURE_RESOURCE_GROUP`
 - `AZURE_RESOURCE_MANAGER_ENDPOINT`
 - `CONTAINER_APPS_API_VERSION`
+
+#### Flogo-native analysis configuration
+
+- `FLOGO_DESCRIPTOR_SEARCH_PATHS`
+
+Use this when local descriptor metadata lives outside the app directory or repository root. Multiple paths can be provided using the platform path delimiter.
 
 #### Model integration
 
@@ -205,7 +214,7 @@ Use `pnpm compose:up` when:
 
 - you want Postgres and Azurite up together,
 - you want a closer approximation of the local multi-app stack,
-- you want to exercise environment wiring more realistically.
+- you want to exercise descriptor discovery and Blob/Azurite-backed app-analysis artifact persistence more realistically.
 
 ## Extending the codebase
 
@@ -300,6 +309,7 @@ Current important test areas:
 - Shared packages are consumed from `dist`, so stale package builds can look like app-level type errors.
 - `next build` and Vitest can hit environment-specific `spawn EPERM` failures in restricted Windows shells even when the code is type-correct.
 - Some artifact URIs are still logical/local rather than Blob-backed.
+- App-analysis catalog, descriptor, and mapping-preview artifacts are Blob/Azurite-backed, but broader runtime artifacts are not yet.
 - The Go helper currently covers only the Phase 1 catalog/descriptor/mapping-preview slice.
 
 If the environment blocks build/test execution, validate the same commands again in CI or an unrestricted local shell before assuming the code is broken.

@@ -181,7 +181,8 @@ export function validateStructural(document: string | FlogoApp | unknown): Valid
 
   try {
     const parsed = typeof document === "string" ? JSON.parse(document) : document;
-    FlogoAppSchema.parse(parsed);
+    const normalized = normalizeAppShape(parsed);
+    FlogoAppSchema.parse(normalized);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown structural validation failure";
     diagnostics.push(createDiagnostic("flogo.structural.invalid", message, "error"));
@@ -403,7 +404,7 @@ export function buildContribCatalog(document: string | FlogoApp | unknown, optio
 
   for (const trigger of app.triggers) {
     const resolved = resolveDescriptor(app, trigger.ref, inferAliasFromRef(trigger.ref), undefined, "trigger", options);
-    upsert(resolved.descriptor);
+    upsert(withCatalogRef(resolved.descriptor, trigger.ref));
     diagnostics.push(...resolved.diagnostics);
   }
 
@@ -437,7 +438,7 @@ export function buildContribCatalog(document: string | FlogoApp | unknown, optio
         continue;
       }
       const resolved = resolveDescriptor(app, task.activityRef, inferAliasFromRef(task.activityRef), undefined, undefined, options);
-      upsert(resolved.descriptor);
+      upsert(withCatalogRef(resolved.descriptor, task.activityRef));
       diagnostics.push(...resolved.diagnostics);
     }
   }
@@ -952,6 +953,17 @@ function normalizeDescriptorFields(value: unknown) {
 
 function normalizeStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+function withCatalogRef(descriptor: ContribDescriptor, ref: string): ContribDescriptor {
+  if (!ref.startsWith("#")) {
+    return descriptor;
+  }
+
+  return ContribDescriptorSchema.parse({
+    ...descriptor,
+    ref
+  });
 }
 
 function dedupeDiagnostics(diagnostics: Diagnostic[]) {

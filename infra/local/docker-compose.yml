@@ -33,10 +33,15 @@ services:
       ORCHESTRATOR_BASE_URL: http://orchestrator:7071/api
       DATABASE_URL: postgresql://flogo:flogo@postgres:5432/flogo_agent?schema=public
       INTERNAL_SERVICE_TOKEN: dev-internal-token
+      APP_ANALYSIS_STORAGE_CONNECTION_STRING: UseDevelopmentStorage=true
+      APP_ANALYSIS_BLOB_ENDPOINT: http://azurite:10000/devstoreaccount1
+      APP_ANALYSIS_STORAGE_CONTAINER: flogo-analysis
+      AZURITE_CONNECTION_STRING: UseDevelopmentStorage=true
     ports:
       - "3001:3001"
     depends_on:
       - postgres
+      - azurite
       - orchestrator
 
   orchestrator:
@@ -55,10 +60,14 @@ services:
       INTERNAL_SERVICE_TOKEN: dev-internal-token
       DURABLE_STORAGE_PROVIDER_TYPE: azureStorage
       DURABLE_BACKEND_CONNECTION_NAME: AzureWebJobsStorage
+      DURABLE_STORAGE_CONNECTION_STRING: UseDevelopmentStorage=true
+      AzureWebJobsStorage: UseDevelopmentStorage=true
+      AZURITE_CONNECTION_STRING: UseDevelopmentStorage=true
     ports:
       - "7071:7071"
     depends_on:
       - runner-worker
+      - azurite
 
   runner-worker:
     image: node:22-bookworm

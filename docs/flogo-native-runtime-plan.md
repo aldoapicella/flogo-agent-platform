@@ -177,11 +177,14 @@ Implemented in repo:
 
 - contribution catalog generation in `packages/flogo-graph`,
 - descriptor introspection contracts,
+- public descriptor inspection endpoint,
 - typed mapping preview contracts,
 - coercion suggestion heuristics,
-- property usage analysis,
+- richer property and environment planning,
 - direct app-analysis APIs for graph, catalog, artifact listing, and mapping preview,
+- direct app-analysis API for descriptor inspection,
 - app-scoped analysis artifact persistence using Prisma-backed hidden analysis tasks,
+- Blob/Azurite-backed JSON payload storage for catalog, descriptor, and mapping-preview artifacts,
 - Go helper skeleton with real command paths for catalog, descriptor inspection, and mapping preview,
 - runner-worker support for `catalog_contribs`, `inspect_descriptor`, and `preview_mapping`,
 - planner support for analysis-only task modes.
@@ -189,9 +192,7 @@ Implemented in repo:
 Still missing in Phase 1:
 
 - real `project-flogo/core` package introspection instead of the current normalized helper registry/fallback approach,
-- richer property/env design outputs,
 - programmatic app composition,
-- artifact/blob backing for analysis artifacts,
 - deeper alias/orphan/version governance.
 
 ## Phase 2: Flow-aware design
@@ -248,6 +249,7 @@ The current codebase already supports a narrow but real Phase 1 slice.
 - Direct control-plane APIs:
   - `GET /v1/projects/:projectId/apps/:appId/graph`
   - `GET /v1/projects/:projectId/apps/:appId/catalog`
+  - `GET /v1/projects/:projectId/apps/:appId/descriptors?ref=...`
   - `GET /v1/projects/:projectId/apps/:appId/artifacts`
   - `POST /v1/projects/:projectId/apps/:appId/mappings/preview`
 - Analysis-only planner modes:
@@ -277,11 +279,11 @@ Use this section as the working tracker for future implementation slices.
 | Area | Scope | Status | Code reference | Next step |
 | --- | --- | --- | --- | --- |
 | Shared contracts | Catalog and mapping preview contracts | Partial | `packages/contracts/src/index.ts` | Extend for flow contracts and replay when Phase 2 starts |
-| Graph engine | Contribution catalog, alias validation, mapping preview, coercion suggestions | Partial | `packages/flogo-graph/src/index.ts` | Add flow contract inference and richer scope/type checks |
+| Graph engine | Contribution catalog, alias validation, mapping preview, coercion suggestions, property planning | Partial | `packages/flogo-graph/src/index.ts` | Deepen descriptor evidence and add flow contract inference later |
 | Tool layer | Flogo core/mapping tools split | Partial | `packages/tools/src/*.ts` | Add flow/runtime/contrib tool modules |
 | Planner | Analysis-only modes and Flogo-aware step selection | Partial | `packages/agent/src/index.ts` | Add flow/runtime/contrib planners |
-| Control-plane APIs | Graph, catalog, mapping preview, app artifact listing | Partial | `apps/control-plane/src/modules/flogo-apps/*` | Add flow contract and replay APIs later |
-| Persistence | Prisma-backed task/event/artifact state plus hidden app-analysis records | Partial | `apps/control-plane/src/modules/agent/task-store.service.ts` | Replace logical URIs with blob-backed artifacts |
+| Control-plane APIs | Graph, catalog, descriptor inspection, mapping preview, app artifact listing | Partial | `apps/control-plane/src/modules/flogo-apps/*` | Add flow contract and replay APIs later |
+| Persistence | Prisma-backed task/event/artifact state plus hidden app-analysis records and Blob-backed analysis payloads | Partial | `apps/control-plane/src/modules/agent/task-store.service.ts`, `apps/control-plane/src/modules/flogo-apps/app-analysis-storage.service.ts` | Extend Blob-backed storage beyond app-analysis artifacts |
 | Runner-worker | Catalog and preview execution support | Partial | `apps/runner-worker/src/services/*` | Add runtime trace and contrib job kinds |
 | Go helper | Catalog, descriptor, mapping preview | Partial | `go-runtime/flogo-helper/main.go` | Integrate deeper Core/Flow-native logic |
 | Web console | Basic task UI only | Planned | `apps/web-console` | Add catalog, mapping preview, and later replay views |
@@ -305,10 +307,9 @@ The next implementation slice after the current baseline should continue Phase 1
 Recommended next items:
 
 1. Replace normalized helper catalog fallback with deeper Core-aware contribution introspection where feasible.
-2. Strengthen property/environment planning output and validation.
-3. Add programmatic app composition comparison paths.
-4. Persist app-analysis artifacts to Blob/Azurite instead of only logical URIs.
-5. Expand tests around app-backed cataloging, mapping preview diagnostics, and helper parity.
+2. Add programmatic app composition comparison paths.
+3. Expand alias/orphan/version governance using stronger contrib evidence.
+4. Expand tests around app-backed cataloging, descriptor resolution, mapping preview diagnostics, and helper parity.
 
 ## Source References
 

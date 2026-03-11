@@ -24,6 +24,7 @@ The control-plane owns:
 - task intake and read models,
 - approval APIs,
 - direct app-analysis APIs,
+- app-analysis Blob/Azurite persistence,
 - internal synchronization endpoints,
 - Prisma-backed operational persistence.
 
@@ -92,6 +93,7 @@ Implementation:
 - `apps/control-plane/src/modules/agent/orchestration.service.ts`
 - `apps/control-plane/src/modules/agent/task-store.service.ts`
 - `apps/control-plane/src/modules/flogo-apps/flogo-apps.service.ts`
+- `apps/control-plane/src/modules/flogo-apps/app-analysis-storage.service.ts`
 
 Responsibilities:
 
@@ -100,13 +102,14 @@ Responsibilities:
 - start orchestrations,
 - store tasks, events, approvals, artifacts, build runs, and test runs through Prisma,
 - expose task history and run summaries,
-- expose direct app-analysis endpoints for graph, catalog, artifact listing, and mapping preview,
+- expose direct app-analysis endpoints for graph, catalog, descriptor inspection, artifact listing, and mapping preview,
+- persist app-analysis payload JSON to Blob/Azurite-backed storage,
 - accept internal sync callbacks from the orchestrator and runner paths.
 
 Important current behavior:
 
 - task/event/artifact state is persisted in PostgreSQL through Prisma,
-- app-scoped analysis artifacts are persisted as hidden analysis task records,
+- app-scoped analysis artifacts are persisted as hidden analysis task records plus Blob/Azurite-backed JSON payloads,
 - example apps can be auto-resolved from `examples/<appId>/flogo.json` and registered into local persistence when needed.
 
 ## Orchestrator
@@ -308,7 +311,7 @@ The platform is currently strongest in the Phase 1 capability area:
 - descriptor inspection,
 - mapping preview,
 - coercion suggestions,
-- property analysis,
+- richer property/environment planning,
 - analysis-only orchestration modes.
 
 See [Capability Matrix](./capability-matrix.md) for the detailed breakdown.
@@ -328,13 +331,13 @@ Persisted through Prisma today:
 
 ### Current partial persistence
 
-- app-scoped catalog and mapping-preview artifacts are persisted through hidden synthetic analysis tasks,
-- many artifact URIs are still logical/local URIs rather than Blob-backed object references.
+- app-scoped catalog, descriptor, and mapping-preview artifacts are persisted through hidden synthetic analysis tasks,
+- those app-analysis payloads are stored in Blob/Azurite-backed JSON objects,
+- broader task artifacts outside the app-analysis slice still include logical/local URIs.
 
 ### Planned persistence growth
 
 - blob-backed workspace snapshots,
-- blob-backed analysis artifacts,
 - runtime traces and replay artifacts,
 - richer Flogo graph projections,
 - contribution bundle artifacts.

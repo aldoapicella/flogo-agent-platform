@@ -203,6 +203,41 @@ Key fields:
 - `catalog`
 - `artifact`
 
+Current implementation notes:
+
+- catalog entries include descriptor source information such as `descriptor`, `registry`, or `inferred`,
+- the response artifact is backed by Blob/Azurite JSON storage and Prisma metadata.
+
+### `GET /v1/projects/:projectId/apps/:appId/descriptors?ref=...`
+
+Returns a normalized descriptor inspection result for one contrib ref or alias.
+
+Request query:
+
+- `ref`
+
+Examples:
+
+- `#log`
+- `#rest`
+- `github.com/project-flogo/contrib/activity/log`
+
+Response shape:
+
+- `ContribDescriptorResponse`
+
+Key fields:
+
+- `descriptor`
+- `diagnostics`
+- `artifact`
+
+Current implementation notes:
+
+- refs are passed as a query parameter because contrib refs commonly contain `/`,
+- descriptor resolution prefers discovered descriptor metadata and falls back to normalized registry or inferred metadata with diagnostics,
+- the response artifact is backed by Blob/Azurite JSON storage and Prisma metadata.
+
 ### `GET /v1/projects/:projectId/apps/:appId/artifacts`
 
 Returns app-scoped analysis artifacts currently associated with the resolved app.
@@ -213,7 +248,7 @@ Response shape:
 
 Current implementation note:
 
-- app-scoped analysis artifacts are currently persisted through hidden synthetic review tasks.
+- app-scoped analysis artifacts are currently persisted through hidden synthetic review tasks plus Blob/Azurite-backed JSON payload storage.
 
 ### `POST /v1/projects/:projectId/apps/:appId/mappings/preview`
 
@@ -237,6 +272,11 @@ Key fields:
 - `preview`
 - `propertyPlan`
 - `artifact`
+
+Current implementation notes:
+
+- the preview artifact is backed by Blob/Azurite JSON storage and Prisma metadata,
+- `propertyPlan` now includes declared properties, undefined and unused refs, recommended properties, recommended environment variables, and deployment notes.
 
 ### `GET /v1/health`
 
@@ -431,6 +471,7 @@ The most important ones are:
 - `TaskStateSync`
 - `FlogoAppGraph`
 - `ContribDescriptor`
+- `ContribDescriptorResponse`
 - `ContribCatalog`
 - `ContribCatalogResponse`
 - `MappingPreviewRequest`

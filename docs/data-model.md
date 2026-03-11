@@ -149,6 +149,7 @@ Current artifact kinds:
 Important schemas:
 
 - `ContribDescriptor`
+- `ContribDescriptorResponse`
 - `ContribCatalog`
 - `ContribCatalogResponse`
 
@@ -156,6 +157,7 @@ These describe:
 
 - ref and alias,
 - contrib type,
+- descriptor source and diagnostics,
 - settings,
 - inputs,
 - outputs,
@@ -179,8 +181,22 @@ These describe:
 - resolved preview values,
 - diagnostics,
 - coercion suggestions,
-- property-analysis output,
+- richer property/environment planning output,
 - response artifact references.
+
+### Property planning contracts
+
+`MappingPreviewResponse.propertyPlan` now includes:
+
+- `declaredProperties`
+- `propertyRefs`
+- `envRefs`
+- `undefinedPropertyRefs`
+- `unusedProperties`
+- `recommendedProperties`
+- `recommendedEnv`
+- `deploymentNotes`
+- `diagnostics`
 
 ## Orchestration contracts
 
@@ -322,7 +338,8 @@ Current graph-level logic includes:
 - typed mapping preview classification,
 - unresolved-reference diagnostics,
 - coercion suggestion heuristics,
-- app property analysis.
+- descriptor-source-aware contribution introspection,
+- richer app property and environment planning.
 
 ## Prisma persistence schema
 
@@ -382,6 +399,7 @@ Current implementation detail:
 This allows:
 
 - app-level catalog artifact history,
+- app-level descriptor artifact history,
 - app-level mapping preview artifact history,
 - artifact lookup by resolved `FlogoApp`,
 
@@ -392,14 +410,15 @@ without adding a second artifact storage model yet.
 Current runtime behavior is mixed:
 
 - persisted metadata is stored in PostgreSQL,
-- many local artifacts still use logical or local URIs,
-- Blob/Azurite is the target backend but not yet the default artifact implementation for every path.
+- catalog, descriptor, and mapping-preview payloads are stored as Blob/Azurite-backed JSON objects,
+- many broader task artifacts still use logical or local URIs.
 
 This matters for operators:
 
 - task and analysis history survive restart,
 - artifact metadata survives restart,
-- artifact payload location may still be logical rather than object-storage-backed.
+- app-analysis payloads are object-storage-backed,
+- broader runtime artifact payload locations may still be logical rather than object-storage-backed.
 
 ## App resolution model
 
@@ -420,5 +439,6 @@ Examples:
 - `flow_contract`, `run_trace`, `replay_report`, and `contrib_bundle` are defined as artifact kinds, but the runtime features that produce them are not implemented yet.
 - graph projections in Prisma exist, but the current runtime does not fully maintain them.
 - task persistence is live, but workspace snapshots and blob-backed artifact content are still planned work.
+- task persistence is live, app-analysis payload storage is live, but workspace snapshots and broader blob-backed artifact content are still planned work.
 
 These are intentional roadmap placeholders, not accidental drift.
