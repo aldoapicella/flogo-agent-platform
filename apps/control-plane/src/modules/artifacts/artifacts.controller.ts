@@ -7,12 +7,11 @@ export class ArtifactsController {
   constructor(private readonly orchestrationService: OrchestrationService) {}
 
   @Get()
-  listArtifacts(@Param("taskId") taskId: string) {
-    const task = this.orchestrationService.getTask(taskId);
+  async listArtifacts(@Param("taskId") taskId: string) {
+    const task = await this.orchestrationService.getTask(taskId);
     if (!task) {
       throw new NotFoundException(`Unknown task ${taskId}`);
     }
     return this.orchestrationService.listArtifacts(taskId);
   }
 }
-

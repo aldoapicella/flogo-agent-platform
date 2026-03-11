@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "prisma generate",
+    "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "dev:control-plane": "pnpm --filter @flogo-agent/control-plane dev",
     "dev:orchestrator": "pnpm --filter @flogo-agent/orchestrator dev",

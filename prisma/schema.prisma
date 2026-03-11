@@ -19,7 +19,7 @@ enum TaskStatus {
   planning
   running
   awaiting_approval
-  succeeded
+  completed
   failed
   cancelled
 }
@@ -27,17 +27,17 @@ enum TaskStatus {
 enum TaskStepStatus {
   pending
   running
-  succeeded
+  completed
   failed
 }
 
 enum ApprovalType {
-  delete_resource
   delete_flow
+  delete_resource
+  change_public_contract
   dependency_upgrade
   custom_code
   external_endpoint_change
-  public_contract_change
   deploy
 }
 
@@ -48,13 +48,14 @@ enum ApprovalStatus {
 }
 
 enum ArtifactKind {
-  diff
+  flogo_json
   binary
   build_log
   runtime_log
-  report
-  snapshot
-  readme
+  test_report
+  patch_bundle
+  review_report
+  workspace_snapshot
 }
 
 model Organization {
@@ -94,29 +95,41 @@ model FlogoApp {
 }
 
 model Task {
-  id           String              @id @default(uuid())
-  projectId    String
-  project      Project             @relation(fields: [projectId], references: [id])
-  flogoAppId   String?
-  flogoApp     FlogoApp?           @relation(fields: [flogoAppId], references: [id])
-  type         TaskType
-  status       TaskStatus
-  requestedBy  String
-  prompt       String
-  inputPayload Json
-  planSummary  String?
-  riskScore    Decimal?
-  steps        TaskStep[]
-  events       TaskEvent[]
-  toolCalls    ToolCall[]
-  approvals    Approval[]
-  snapshots    WorkspaceSnapshot[]
-  patches      Patch[]
-  buildRuns    BuildRun[]
-  testRuns     TestRun[]
-  artifacts    Artifact[]
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
+  id                           String          @id @default(uuid())
+  projectId                    String
+  project                      Project         @relation(fields: [projectId], references: [id])
+  flogoAppId                   String?
+  flogoApp                     FlogoApp?       @relation(fields: [flogoAppId], references: [id])
+  type                         TaskType
+  status                       TaskStatus
+  requestedBy                  String
+  prompt                       String
+  summary                      String?
+  appPath                      String?
+  inputPayload                 Json
+  planSummary                  String?
+  riskScore                    Decimal?
+  orchestrationId              String?
+  orchestrationBackendProvider String?
+  orchestrationBackendInstance String?
+  orchestrationMetadata        Json?
+  approvalStatus               ApprovalStatus?
+  validationReport             Json?
+  activeJobRuns                Json?
+  requiredApprovals            Json?
+  nextActions                  Json?
+  rootCause                    String?
+  steps                        TaskStep[]
+  events                       TaskEvent[]
+  toolCalls                    ToolCall[]
+  approvals                    Approval[]
+  snapshots                    WorkspaceSnapshot[]
+  patches                      Patch[]
+  buildRuns                    BuildRun[]
+  testRuns                     TestRun[]
+  artifacts                    Artifact[]
+  createdAt                    DateTime        @default(now())
+  updatedAt                    DateTime        @updatedAt
 }
 
 model TaskStep {
@@ -136,7 +149,8 @@ model TaskEvent {
   taskId    String
   task      Task     @relation(fields: [taskId], references: [id])
   type      String
-  payload   Json
+  message   String
+  payload   Json?
   createdAt DateTime @default(now())
 }
 
@@ -171,6 +185,7 @@ model WorkspaceSnapshot {
   repoCommit  String?
   branchName  String
   snapshotUri String
+  blobPath    String?
   createdAt   DateTime @default(now())
 }
 
@@ -186,32 +201,49 @@ model Patch {
 }
 
 model BuildRun {
-  id          String   @id @default(uuid())
-  taskId      String
-  task        Task     @relation(fields: [taskId], references: [id])
-  jobId       String
-  commandLine String
-  status      String
-  binaryUri   String?
-  logUri      String?
-  exitCode    Int?
-  startedAt   DateTime?
-  finishedAt  DateTime?
-  testRuns    TestRun[]
+  id                    String    @id @default(uuid())
+  taskId                String
+  task                  Task      @relation(fields: [taskId], references: [id])
+  jobId                 String
+  jobRunId              String?
+  jobTemplateName       String?
+  stepType              String
+  commandLine           String?
+  status                String
+  summary               String?
+  binaryUri             String?
+  logUri                String?
+  reportUri             String?
+  azureJobExecutionName String?
+  azureJobResourceId    String?
+  result                Json?
+  exitCode              Int?
+  startedAt             DateTime?
+  finishedAt            DateTime?
+  testRuns              TestRun[]
 }
 
 model TestRun {
-  id         String    @id @default(uuid())
-  taskId     String
-  task       Task      @relation(fields: [taskId], references: [id])
-  buildRunId String?
-  buildRun   BuildRun? @relation(fields: [buildRunId], references: [id])
-  type       String
-  status     String
-  reportUri  String?
-  summary    Json?
-  startedAt  DateTime?
-  finishedAt DateTime?
+  id                    String    @id @default(uuid())
+  taskId                String
+  task                  Task      @relation(fields: [taskId], references: [id])
+  buildRunId            String?
+  buildRun              BuildRun? @relation(fields: [buildRunId], references: [id])
+  jobId                 String?
+  jobRunId              String?
+  jobTemplateName       String?
+  stepType              String?
+  type                  String
+  status                String
+  summaryText           String?
+  reportUri             String?
+  logUri                String?
+  azureJobExecutionName String?
+  azureJobResourceId    String?
+  summary               Json?
+  exitCode              Int?
+  startedAt             DateTime?
+  finishedAt            DateTime?
 }
 
 model Artifact {
@@ -221,6 +253,7 @@ model Artifact {
   kind      ArtifactKind
   name      String
   uri       String
+  metadata  Json?
   createdAt DateTime     @default(now())
 }
 
@@ -258,6 +291,7 @@ model AppImport {
   flogoApp   FlogoApp @relation(fields: [flogoAppId], references: [id])
   alias      String
   ref        String
+  version    String?
 }
 
 model AppTrigger {

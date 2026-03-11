@@ -28,6 +28,9 @@
     },
     "runnerJobImage": {
       "value": "myregistry.azurecr.io/flogo-agent/flogo-runner:latest"
+    },
+    "durableBackendProvider": {
+      "value": "dts"
     }
   }
 }

@@ -7,6 +7,7 @@ describe("SmokeTestService", () => {
     const service = new SmokeTestService();
     const smokeTest = service.generate({
       taskId: "task-1",
+      jobKind: "smoke_test",
       stepType: "generate_smoke",
       snapshotUri: "workspace://task-1",
       appPath: "flogo.json",

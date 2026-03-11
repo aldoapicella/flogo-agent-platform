@@ -26,11 +26,13 @@ services:
       bash -lc "corepack enable &&
       pnpm install &&
       pnpm db:generate &&
+      pnpm db:push &&
       pnpm --filter @flogo-agent/control-plane dev"
     environment:
       CONTROL_PLANE_PORT: 3001
       ORCHESTRATOR_BASE_URL: http://orchestrator:7071/api
       DATABASE_URL: postgresql://flogo:flogo@postgres:5432/flogo_agent?schema=public
+      INTERNAL_SERVICE_TOKEN: dev-internal-token
     ports:
       - "3001:3001"
     depends_on:
@@ -50,6 +52,9 @@ services:
       ORCHESTRATOR_PORT: 7071
       RUNNER_WORKER_BASE_URL: http://runner-worker:3010
       CONTROL_PLANE_INTERNAL_URL: http://control-plane:3001/v1
+      INTERNAL_SERVICE_TOKEN: dev-internal-token
+      DURABLE_STORAGE_PROVIDER_TYPE: azureStorage
+      DURABLE_BACKEND_CONNECTION_NAME: AzureWebJobsStorage
     ports:
       - "7071:7071"
     depends_on:
@@ -67,6 +72,7 @@ services:
     environment:
       RUNNER_WORKER_PORT: 3010
       RUNNER_EXECUTION_MODE: local-process
+      INTERNAL_SERVICE_TOKEN: dev-internal-token
     ports:
       - "3010:3010"
     depends_on:

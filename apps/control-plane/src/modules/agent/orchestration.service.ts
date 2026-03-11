@@ -3,42 +3,33 @@ import { randomUUID } from "node:crypto";
 
 import { OrchestratorAgent, StaticModelClient } from "@flogo-agent/agent";
 import {
-  type ActiveJobRun,
   type ApprovalDecision,
-  type ApprovalType,
   type ArtifactRef,
   type OrchestratorStatus,
   TaskEventPublishSchema,
   TaskRequestSchema,
   TaskResultSchema,
   TaskStateSyncSchema,
+  type TaskEvent,
+  type TaskRuns,
   type TaskStep,
-  type TaskRequest,
-  type TaskResult,
-  type TaskStatus
+  type TaskSummary
 } from "@flogo-agent/contracts";
 
 import { TaskEventsService } from "../events/task-events.service.js";
 import { ToolsetService } from "../tools/toolset.service.js";
 import { OrchestratorClientService } from "./orchestrator-client.service.js";
-
-export interface StoredTask {
-  id: string;
-  request: TaskRequest;
-  result: TaskResult;
-  approvals: ApprovalType[];
-  artifacts: ArtifactRef[];
-}
+import { type StoredTask, TaskStoreService } from "./task-store.service.js";
 
 @Injectable()
 export class OrchestrationService {
-  private readonly tasks = new Map<string, StoredTask>();
   private readonly orchestrator: OrchestratorAgent;
 
   constructor(
     private readonly toolsetService: ToolsetService,
     private readonly orchestratorClient: OrchestratorClientService,
-    private readonly eventsService: TaskEventsService
+    private readonly eventsService: TaskEventsService,
+    private readonly taskStore: TaskStoreService
   ) {
     this.orchestrator = new OrchestratorAgent({
       modelClient: new StaticModelClient(),
@@ -68,45 +59,58 @@ export class OrchestrationService {
       nextActions: plan.steps.map((step) => step.label)
     });
 
-    const storedTask: StoredTask = {
+    await this.taskStore.createTaskRecord({
       id,
       request: {
         ...request,
         taskId: id
       },
       result,
-      approvals: plan.requiredApprovals,
-      artifacts: []
-    };
+      planSummary: plan.summary,
+      steps,
+      requiredApprovals: plan.requiredApprovals
+    });
 
-    this.tasks.set(id, storedTask);
-    this.eventsService.publish(id, "status", `Task created: ${request.summary}`, { status: result.status });
-    this.eventsService.publish(id, "tool", "Execution plan prepared", { steps: plan.steps });
+    await this.publishEvent(id, "status", `Task created: ${request.summary}`, { status: result.status });
+    await this.publishEvent(id, "tool", "Execution plan prepared", { steps: plan.steps });
+
     const orchestration = await this.orchestratorClient.startWorkflow({
       taskId: id,
-      request: storedTask.request,
+      request: {
+        ...request,
+        taskId: id
+      },
       requiredApprovals: plan.requiredApprovals,
       planSummary: plan.summary,
       steps
     });
 
-    storedTask.result = {
-      ...storedTask.result,
+    const updated = await this.taskStore.syncTaskState(id, {
       orchestrationId: orchestration.orchestrationId,
       status: plan.requiredApprovals.length > 0 ? "awaiting_approval" : "running",
       summary: orchestration.summary,
+      approvalStatus: plan.requiredApprovals.length > 0 ? "pending" : undefined,
       activeJobRuns: orchestration.activeJobRuns
-    };
-    this.eventsService.publish(id, "status", orchestration.summary, {
-      orchestrationId: orchestration.orchestrationId,
-      status: storedTask.result.status
     });
 
-    return storedTask;
+    await this.publishEvent(id, "status", orchestration.summary, {
+      orchestrationId: orchestration.orchestrationId,
+      status: updated?.result.status ?? (plan.requiredApprovals.length > 0 ? "awaiting_approval" : "running")
+    });
+
+    return updated ?? (await this.requireTask(id));
   }
 
-  listTaskEvents(taskId: string) {
-    return this.eventsService.list(taskId);
+  listTaskEvents(taskId: string): Promise<TaskEvent[]> {
+    return this.taskStore.listTaskEvents(taskId);
+  }
+
+  listTasks(): Promise<TaskSummary[]> {
+    return this.taskStore.listTasks();
+  }
+
+  listTaskRuns(taskId: string): Promise<TaskRuns> {
+    return this.taskStore.listTaskRuns(taskId);
   }
 
   streamTask(taskId: string) {
@@ -114,7 +118,7 @@ export class OrchestrationService {
   }
 
   async approveTask(taskId: string, decision: ApprovalDecision): Promise<StoredTask | undefined> {
-    const task = this.tasks.get(taskId);
+    const task = await this.taskStore.getTask(taskId);
     if (!task) {
       return undefined;
     }
@@ -126,94 +130,75 @@ export class OrchestrationService {
 
     const status = await this.orchestratorClient.signalApproval(orchestrationId, decision);
 
-    task.result = {
-      ...task.result,
+    await this.taskStore.applyApprovalDecision(taskId, decision);
+
+    const updated = await this.taskStore.syncTaskState(taskId, {
       status: decision.status === "approved" ? "running" : "failed",
       summary: status?.summary ?? (decision.status === "approved" ? "Approval recorded; task resumed" : "Approval rejected"),
       approvalStatus: decision.status,
       activeJobRuns: status?.activeJobRuns ?? task.result.activeJobRuns,
       requiredApprovals: []
-    };
-    task.approvals = [];
-    this.eventsService.publish(taskId, "approval", task.result.summary, { rationale: decision.rationale, status: decision.status });
+    });
+
+    await this.publishEvent(taskId, "approval", updated?.result.summary ?? "Approval decision recorded", {
+      rationale: decision.rationale,
+      status: decision.status
+    });
+
+    return updated;
+  }
+
+  getTask(taskId: string): Promise<StoredTask | undefined> {
+    return this.taskStore.getTask(taskId);
+  }
+
+  listArtifacts(taskId: string): Promise<ArtifactRef[]> {
+    return this.taskStore.listArtifacts(taskId);
+  }
+
+  async completeTask(taskId: string, status: TaskSummary["state"], summary: string): Promise<StoredTask | undefined> {
+    const task = await this.taskStore.updateTaskStatus(taskId, status, summary);
+    if (task) {
+      await this.publishEvent(taskId, "status", summary, { status });
+    }
     return task;
   }
 
-  getTask(taskId: string): StoredTask | undefined {
-    return this.tasks.get(taskId);
+  async attachArtifact(taskId: string, artifact: ArtifactRef): Promise<void> {
+    await this.taskStore.syncTaskState(taskId, { artifact });
+    await this.publishEvent(taskId, "artifact", `Artifact published: ${artifact.name}`, { artifact });
   }
 
-  listArtifacts(taskId: string): ArtifactRef[] {
-    return this.tasks.get(taskId)?.artifacts ?? [];
-  }
-
-  completeTask(taskId: string, status: TaskStatus, summary: string): StoredTask | undefined {
-    const task = this.tasks.get(taskId);
-    if (!task) {
-      return undefined;
-    }
-
-    task.result = {
-      ...task.result,
-      status,
-      summary
-    };
-    this.eventsService.publish(taskId, "status", summary, { status });
-    return task;
-  }
-
-  attachArtifact(taskId: string, artifact: ArtifactRef): void {
-    const task = this.tasks.get(taskId);
-    if (!task) {
-      return;
-    }
-
-    task.artifacts.push(artifact);
-    task.result = {
-      ...task.result,
-      artifacts: [...task.artifacts]
-    };
-    this.eventsService.publish(taskId, "artifact", `Artifact published: ${artifact.name}`, { artifact });
-  }
-
-  publishExternalEvent(taskId: string, payload: unknown): StoredTask | undefined {
-    const task = this.tasks.get(taskId);
+  async publishExternalEvent(taskId: string, payload: unknown): Promise<StoredTask | undefined> {
+    const task = await this.taskStore.getTask(taskId);
     if (!task) {
       return undefined;
     }
 
     const event = TaskEventPublishSchema.parse(payload);
-    this.eventsService.publish(taskId, event.type, event.message, event.payload);
-    return task;
+    await this.publishEvent(taskId, event.type, event.message, event.payload);
+    return this.taskStore.getTask(taskId);
   }
 
-  syncTaskState(taskId: string, payload: unknown): StoredTask | undefined {
-    const task = this.tasks.get(taskId);
+  async syncTaskState(taskId: string, payload: unknown): Promise<StoredTask | undefined> {
+    const sync = TaskStateSyncSchema.parse(payload);
+    const task = await this.taskStore.syncTaskState(taskId, sync);
     if (!task) {
       return undefined;
     }
 
-    const sync = TaskStateSyncSchema.parse(payload);
-    task.result = {
-      ...task.result,
-      orchestrationId: sync.orchestrationId ?? task.result.orchestrationId,
-      status: sync.status ?? task.result.status,
-      summary: sync.summary ?? task.result.summary,
-      approvalStatus: sync.approvalStatus ?? task.result.approvalStatus,
-      activeJobRuns: sync.activeJobRuns ?? task.result.activeJobRuns,
-      validationReport: sync.validationReport ?? task.result.validationReport,
-      requiredApprovals: sync.requiredApprovals ?? task.result.requiredApprovals,
-      nextActions: sync.nextActions ?? task.result.nextActions
-    };
-
     if (sync.artifact) {
-      this.attachArtifact(taskId, sync.artifact);
+      await this.publishEvent(taskId, "artifact", `Artifact published: ${sync.artifact.name}`, {
+        artifact: sync.artifact
+      });
     }
-    if (sync.summary || sync.status || sync.approvalStatus || sync.activeJobRuns) {
-      this.eventsService.publish(taskId, "status", task.result.summary, {
+
+    if (sync.summary || sync.status || sync.approvalStatus || sync.activeJobRuns || sync.jobRunStatus) {
+      await this.publishEvent(taskId, "status", task.result.summary, {
         status: task.result.status,
         approvalStatus: task.result.approvalStatus,
-        activeJobRuns: task.result.activeJobRuns
+        activeJobRuns: task.result.activeJobRuns,
+        latestJobRun: sync.jobRunStatus
       });
     }
 
@@ -221,7 +206,7 @@ export class OrchestrationService {
   }
 
   async refreshStatus(taskId: string): Promise<StoredTask | undefined> {
-    const task = this.tasks.get(taskId);
+    const task = await this.taskStore.getTask(taskId);
     if (!task?.result.orchestrationId) {
       return task;
     }
@@ -234,25 +219,17 @@ export class OrchestrationService {
     return this.applyOrchestratorStatus(task.id, status);
   }
 
-  private applyOrchestratorStatus(taskId: string, status: OrchestratorStatus): StoredTask | undefined {
-    const task = this.tasks.get(taskId);
-    if (!task) {
-      return undefined;
-    }
-
-    task.result = {
-      ...task.result,
+  private async applyOrchestratorStatus(taskId: string, status: OrchestratorStatus): Promise<StoredTask | undefined> {
+    return this.taskStore.syncTaskState(taskId, {
       orchestrationId: status.orchestrationId,
       status: this.mapRuntimeStatus(status.runtimeStatus, status.approvalStatus),
       summary: status.summary,
       approvalStatus: status.approvalStatus,
       activeJobRuns: status.activeJobRuns
-    };
-
-    return task;
+    });
   }
 
-  private mapRuntimeStatus(runtimeStatus: OrchestratorStatus["runtimeStatus"], approvalStatus?: OrchestratorStatus["approvalStatus"]): TaskStatus {
+  private mapRuntimeStatus(runtimeStatus: OrchestratorStatus["runtimeStatus"], approvalStatus?: OrchestratorStatus["approvalStatus"]) {
     if (approvalStatus === "pending") {
       return "awaiting_approval";
     }
@@ -265,8 +242,29 @@ export class OrchestrationService {
         return "failed";
       case "running":
         return "running";
+      case "pending":
+        return "planning";
       default:
         return "planning";
     }
+  }
+
+  private async publishEvent(
+    taskId: string,
+    type: TaskEvent["type"],
+    message: string,
+    payload?: Record<string, unknown>
+  ): Promise<TaskEvent> {
+    const event = await this.taskStore.appendEvent(taskId, type, message, payload);
+    this.eventsService.emit(event);
+    return event;
+  }
+
+  private async requireTask(taskId: string): Promise<StoredTask> {
+    const task = await this.taskStore.getTask(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} was not persisted`);
+    }
+    return task;
   }
 }

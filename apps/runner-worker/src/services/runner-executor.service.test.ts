@@ -6,6 +6,7 @@ describe("RunnerExecutorService", () => {
     const service = new RunnerExecutorService();
     const result = await service.execute({
       taskId: "task-1",
+      jobKind: "build",
       stepType: "build",
       snapshotUri: ".",
       appPath: "flogo.json",

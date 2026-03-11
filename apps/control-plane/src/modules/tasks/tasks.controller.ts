@@ -15,13 +15,38 @@ export class TasksController {
     return task.result;
   }
 
+  @Get()
+  async listTasks() {
+    return this.orchestrationService.listTasks();
+  }
+
   @Get(":taskId")
   async getTask(@Param("taskId") taskId: string) {
-    const task = (await this.orchestrationService.refreshStatus(taskId)) ?? this.orchestrationService.getTask(taskId);
+    const task = (await this.orchestrationService.refreshStatus(taskId)) ?? (await this.orchestrationService.getTask(taskId));
     if (!task) {
       throw new NotFoundException(`Unknown task ${taskId}`);
     }
     return task.result;
+  }
+
+  @Get(":taskId/history")
+  async getTaskHistory(@Param("taskId") taskId: string) {
+    const task = await this.orchestrationService.getTask(taskId);
+    if (!task) {
+      throw new NotFoundException(`Unknown task ${taskId}`);
+    }
+
+    return this.orchestrationService.listTaskEvents(taskId);
+  }
+
+  @Get(":taskId/runs")
+  async getTaskRuns(@Param("taskId") taskId: string) {
+    const task = await this.orchestrationService.getTask(taskId);
+    if (!task) {
+      throw new NotFoundException(`Unknown task ${taskId}`);
+    }
+
+    return this.orchestrationService.listTaskRuns(taskId);
   }
 
   @Sse(":taskId/stream")

@@ -1,14 +1,19 @@
-import { Body, Controller, NotFoundException, Param, Post } from "@nestjs/common";
+import { Body, Controller, Headers, NotFoundException, Param, Post } from "@nestjs/common";
 
 import { OrchestrationService } from "../agent/orchestration.service.js";
+import { InternalAuthService } from "../auth/internal-auth.service.js";
 
 @Controller("internal/tasks/:taskId")
 export class InternalTasksController {
-  constructor(private readonly orchestrationService: OrchestrationService) {}
+  constructor(
+    private readonly orchestrationService: OrchestrationService,
+    private readonly internalAuthService: InternalAuthService
+  ) {}
 
   @Post("events")
-  publishEvent(@Param("taskId") taskId: string, @Body() body: unknown) {
-    const task = this.orchestrationService.publishExternalEvent(taskId, body);
+  async publishEvent(@Param("taskId") taskId: string, @Headers() headers: Record<string, unknown>, @Body() body: unknown) {
+    this.internalAuthService.assert(headers);
+    const task = await this.orchestrationService.publishExternalEvent(taskId, body);
     if (!task) {
       throw new NotFoundException(`Unknown task ${taskId}`);
     }
@@ -19,8 +24,9 @@ export class InternalTasksController {
   }
 
   @Post("sync")
-  syncTask(@Param("taskId") taskId: string, @Body() body: unknown) {
-    const task = this.orchestrationService.syncTaskState(taskId, body);
+  async syncTask(@Param("taskId") taskId: string, @Headers() headers: Record<string, unknown>, @Body() body: unknown) {
+    this.internalAuthService.assert(headers);
+    const task = await this.orchestrationService.syncTaskState(taskId, body);
     if (!task) {
       throw new NotFoundException(`Unknown task ${taskId}`);
     }

@@ -27,13 +27,41 @@ param webConsoleImage string = 'mcr.microsoft.com/azuredocs/containerapps-hellow
 @description('Container image for the flogo runner job template')
 param runnerJobImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
+@description('Container image for the smoke test runner job template')
+param smokeRunnerJobImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+
+@description('Container image for the custom contrib runner job template')
+param customContribRunnerJobImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+
+@description('Container image for the eval runner job template')
+param evalRunnerJobImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+
+@description('Durable backend provider profile')
+@allowed([
+  'dts'
+  'azure_storage'
+])
+param durableBackendProvider string = 'dts'
+
+@description('Internal shared token used for local-style service-to-service auth fallback')
+@secure()
+param internalServiceToken string = ''
+
+@secure()
+@description('Connection string or endpoint profile used by the Durable Task Scheduler backend')
+param durableTaskSchedulerConnection string = ''
+
 var logAnalyticsName = '${namePrefix}-law'
 var managedEnvironmentName = '${namePrefix}-aca-env'
-var acrName = take(replace('${namePrefix}acr', '-', ''), 50)
-var storageName = take(replace('${namePrefix}st', '-', ''), 24)
+var normalizedNamePrefix = replace(namePrefix, '-', '')
+var acrName = take('${normalizedNamePrefix}flogoagentacr', 50)
+var storageName = take('${normalizedNamePrefix}flogoagentst', 24)
 var keyVaultName = take(replace('${namePrefix}-kv', '_', '-'), 24)
 var postgresServerName = '${namePrefix}-pg'
 var postgresDatabaseName = 'flogoagent'
+var storageConnectionString = 'DefaultEndpointsProtocol=https;AccountName=${storage.name};AccountKey=${storage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+var durableStorageProviderType = durableBackendProvider == 'dts' ? 'azureManaged' : 'azureStorage'
+var durableBackendConnectionName = durableBackendProvider == 'dts' ? 'DurableTaskScheduler' : 'AzureWebJobsStorage'
 
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: logAnalyticsName
@@ -151,7 +179,7 @@ resource managedEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
       destination: 'log-analytics'
       logAnalyticsConfiguration: {
         customerId: logAnalytics.properties.customerId
-        sharedKey: listKeys(logAnalytics.id, logAnalytics.apiVersion).primarySharedKey
+        sharedKey: logAnalytics.listKeys().primarySharedKey
       }
     }
   }
@@ -194,8 +222,36 @@ resource runnerWorkerApp 'Microsoft.App/containerApps@2024-03-01' = {
               value: 'container-apps-job'
             }
             {
+              name: 'RUNNER_BUILD_JOB_TEMPLATE_NAME'
+              value: '${namePrefix}-flogo-build-job'
+            }
+            {
+              name: 'RUNNER_SMOKE_JOB_TEMPLATE_NAME'
+              value: '${namePrefix}-flogo-test-job'
+            }
+            {
+              name: 'RUNNER_CUSTOM_CONTRIB_JOB_TEMPLATE_NAME'
+              value: '${namePrefix}-flogo-custom-contrib-job'
+            }
+            {
+              name: 'RUNNER_EVAL_JOB_TEMPLATE_NAME'
+              value: '${namePrefix}-flogo-eval-job'
+            }
+            {
               name: 'RUNNER_JOB_TEMPLATE_NAME'
-              value: '${namePrefix}-flogo-runner'
+              value: '${namePrefix}-flogo-build-job'
+            }
+            {
+              name: 'INTERNAL_SERVICE_TOKEN'
+              value: internalServiceToken
+            }
+            {
+              name: 'AZURE_SUBSCRIPTION_ID'
+              value: subscription().subscriptionId
+            }
+            {
+              name: 'AZURE_RESOURCE_GROUP'
+              value: resourceGroup().name
             }
             {
               name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
@@ -257,8 +313,32 @@ resource orchestratorApp 'Microsoft.App/containerApps@2024-03-01' = {
               value: 'https://${namePrefix}-control-plane.${managedEnvironment.properties.defaultDomain}/v1'
             }
             {
+              name: 'INTERNAL_SERVICE_TOKEN'
+              value: internalServiceToken
+            }
+            {
+              name: 'DURABLE_BACKEND_PROVIDER'
+              value: durableBackendProvider
+            }
+            {
               name: 'DURABLE_TASK_HUB_NAME'
               value: 'flogoAgent'
+            }
+            {
+              name: 'DURABLE_STORAGE_PROVIDER_TYPE'
+              value: durableStorageProviderType
+            }
+            {
+              name: 'DURABLE_BACKEND_CONNECTION_NAME'
+              value: durableBackendConnectionName
+            }
+            {
+              name: 'AzureWebJobsStorage'
+              value: storageConnectionString
+            }
+            {
+              name: 'DurableTaskScheduler'
+              value: durableTaskSchedulerConnection
             }
             {
               name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
@@ -320,12 +400,16 @@ resource controlPlaneApp 'Microsoft.App/containerApps@2024-03-01' = {
               value: 'postgresql://${postgresAdminUsername}:${postgresAdminPassword}@${postgres.name}.postgres.database.azure.com:5432/${postgresDatabaseName}?sslmode=require'
             }
             {
-              name: 'AZURITE_CONNECTION_STRING'
-              value: 'DefaultEndpointsProtocol=https;AccountName=${storage.name};EndpointSuffix=${environment().suffixes.storage}'
+              name: 'AZURE_STORAGE_CONNECTION_STRING'
+              value: storageConnectionString
             }
             {
               name: 'KEY_VAULT_NAME'
               value: keyVault.name
+            }
+            {
+              name: 'INTERNAL_SERVICE_TOKEN'
+              value: internalServiceToken
             }
             {
               name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
@@ -397,8 +481,8 @@ resource webConsoleApp 'Microsoft.App/containerApps@2024-03-01' = {
   }
 }
 
-resource flogoRunnerJob 'Microsoft.App/jobs@2024-03-01' = {
-  name: '${namePrefix}-flogo-runner'
+resource flogoBuildJob 'Microsoft.App/jobs@2024-03-01' = {
+  name: '${namePrefix}-flogo-build-job'
   location: location
   identity: {
     type: 'SystemAssigned'
@@ -431,8 +515,184 @@ resource flogoRunnerJob 'Microsoft.App/jobs@2024-03-01' = {
               value: storage.name
             }
             {
+              name: 'AZURE_STORAGE_CONNECTION_STRING'
+              value: storageConnectionString
+            }
+            {
               name: 'BLOB_CONTAINER_ARTIFACTS'
               value: artifactContainer.name
+            }
+            {
+              name: 'BLOB_CONTAINER_WORKSPACES'
+              value: workspaceContainer.name
+            }
+            {
+              name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+              value: appInsights.properties.ConnectionString
+            }
+          ]
+          resources: {
+            cpu: json('1.0')
+            memory: '2Gi'
+          }
+        }
+      ]
+    }
+  }
+}
+
+resource flogoSmokeJob 'Microsoft.App/jobs@2024-03-01' = {
+  name: '${namePrefix}-flogo-test-job'
+  location: location
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    environmentId: managedEnvironment.id
+    configuration: {
+      triggerType: 'Manual'
+      replicaTimeout: 1800
+      replicaRetryLimit: 1
+      manualTriggerConfig: {
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      registries: [
+        {
+          server: containerRegistry.properties.loginServer
+          identity: 'system'
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'flogo-runner'
+          image: smokeRunnerJobImage
+          env: [
+            {
+              name: 'AZURE_STORAGE_CONNECTION_STRING'
+              value: storageConnectionString
+            }
+            {
+              name: 'BLOB_CONTAINER_ARTIFACTS'
+              value: artifactContainer.name
+            }
+            {
+              name: 'BLOB_CONTAINER_WORKSPACES'
+              value: workspaceContainer.name
+            }
+            {
+              name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+              value: appInsights.properties.ConnectionString
+            }
+          ]
+          resources: {
+            cpu: json('1.0')
+            memory: '2Gi'
+          }
+        }
+      ]
+    }
+  }
+}
+
+resource flogoCustomContribJob 'Microsoft.App/jobs@2024-03-01' = {
+  name: '${namePrefix}-flogo-custom-contrib-job'
+  location: location
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    environmentId: managedEnvironment.id
+    configuration: {
+      triggerType: 'Manual'
+      replicaTimeout: 1800
+      replicaRetryLimit: 1
+      manualTriggerConfig: {
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      registries: [
+        {
+          server: containerRegistry.properties.loginServer
+          identity: 'system'
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'flogo-runner'
+          image: customContribRunnerJobImage
+          env: [
+            {
+              name: 'AZURE_STORAGE_CONNECTION_STRING'
+              value: storageConnectionString
+            }
+            {
+              name: 'BLOB_CONTAINER_ARTIFACTS'
+              value: artifactContainer.name
+            }
+            {
+              name: 'BLOB_CONTAINER_WORKSPACES'
+              value: workspaceContainer.name
+            }
+            {
+              name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+              value: appInsights.properties.ConnectionString
+            }
+          ]
+          resources: {
+            cpu: json('1.0')
+            memory: '2Gi'
+          }
+        }
+      ]
+    }
+  }
+}
+
+resource flogoEvalJob 'Microsoft.App/jobs@2024-03-01' = {
+  name: '${namePrefix}-flogo-eval-job'
+  location: location
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    environmentId: managedEnvironment.id
+    configuration: {
+      triggerType: 'Manual'
+      replicaTimeout: 1800
+      replicaRetryLimit: 1
+      manualTriggerConfig: {
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      registries: [
+        {
+          server: containerRegistry.properties.loginServer
+          identity: 'system'
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'flogo-runner'
+          image: evalRunnerJobImage
+          env: [
+            {
+              name: 'AZURE_STORAGE_CONNECTION_STRING'
+              value: storageConnectionString
+            }
+            {
+              name: 'BLOB_CONTAINER_ARTIFACTS'
+              value: artifactContainer.name
+            }
+            {
+              name: 'BLOB_CONTAINER_WORKSPACES'
+              value: workspaceContainer.name
             }
             {
               name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
@@ -490,10 +750,40 @@ resource acrPullWebConsole 'Microsoft.Authorization/roleAssignments@2022-04-01' 
 }
 
 resource acrPullRunnerJob 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(flogoRunnerJob.id, 'acrPull')
+  name: guid(flogoBuildJob.id, 'acrPull')
   scope: containerRegistry
   properties: {
-    principalId: flogoRunnerJob.identity.principalId
+    principalId: flogoBuildJob.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+  }
+}
+
+resource acrPullSmokeJob 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(flogoSmokeJob.id, 'acrPull')
+  scope: containerRegistry
+  properties: {
+    principalId: flogoSmokeJob.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+  }
+}
+
+resource acrPullCustomContribJob 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(flogoCustomContribJob.id, 'acrPull')
+  scope: containerRegistry
+  properties: {
+    principalId: flogoCustomContribJob.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+  }
+}
+
+resource acrPullEvalJob 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(flogoEvalJob.id, 'acrPull')
+  scope: containerRegistry
+  properties: {
+    principalId: flogoEvalJob.identity.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
   }
@@ -503,6 +793,9 @@ output containerAppsEnvironmentName string = managedEnvironment.name
 output containerRegistryLoginServer string = containerRegistry.properties.loginServer
 output controlPlaneUrl string = 'https://${controlPlaneApp.properties.configuration.ingress.fqdn}'
 output webConsoleUrl string = 'https://${webConsoleApp.properties.configuration.ingress.fqdn}'
-output runnerJobName string = flogoRunnerJob.name
+output buildRunnerJobName string = flogoBuildJob.name
+output smokeRunnerJobName string = flogoSmokeJob.name
+output customContribRunnerJobName string = flogoCustomContribJob.name
+output evalRunnerJobName string = flogoEvalJob.name
 output storageAccountName string = storage.name
 output keyVaultName string = keyVault.name

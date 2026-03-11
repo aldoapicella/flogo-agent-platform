@@ -6,7 +6,11 @@
   },
   "extensions": {
     "durableTask": {
-      "hubName": "%DURABLE_TASK_HUB_NAME%"
+      "hubName": "%DURABLE_TASK_HUB_NAME%",
+      "storageProvider": {
+        "type": "%DURABLE_STORAGE_PROVIDER_TYPE%",
+        "connectionStringName": "%DURABLE_BACKEND_CONNECTION_NAME%"
+      }
     }
   }
 }

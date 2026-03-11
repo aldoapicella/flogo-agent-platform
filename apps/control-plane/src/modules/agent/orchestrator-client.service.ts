@@ -14,7 +14,16 @@ import {
 @Injectable()
 export class OrchestratorClientService {
   private readonly baseUrl = process.env.ORCHESTRATOR_BASE_URL?.replace(/\/$/, "");
+  private readonly internalServiceToken = process.env.INTERNAL_SERVICE_TOKEN;
   private readonly localStates = new Map<string, OrchestratorStatus>();
+
+  private buildHeaders(): Record<string, string> {
+    return this.internalServiceToken
+      ? {
+          "x-internal-service-token": this.internalServiceToken
+        }
+      : {};
+  }
 
   async startWorkflow(payload: OrchestratorStartRequest): Promise<OrchestratorStartResponse> {
     const request = OrchestratorStartRequestSchema.parse(payload);
@@ -45,7 +54,8 @@ export class OrchestratorClientService {
     const response = await fetch(`${this.baseUrl}/orchestrations/tasks`, {
       method: "POST",
       headers: {
-        "content-type": "application/json"
+        "content-type": "application/json",
+        ...this.buildHeaders()
       },
       body: JSON.stringify(request)
     });
@@ -80,7 +90,8 @@ export class OrchestratorClientService {
     const response = await fetch(`${this.baseUrl}/orchestrations/${orchestrationId}/approvals`, {
       method: "POST",
       headers: {
-        "content-type": "application/json"
+        "content-type": "application/json",
+        ...this.buildHeaders()
       },
       body: JSON.stringify(signal)
     });
@@ -97,7 +108,9 @@ export class OrchestratorClientService {
       return this.localStates.get(orchestrationId);
     }
 
-    const response = await fetch(`${this.baseUrl}/orchestrations/${orchestrationId}`);
+    const response = await fetch(`${this.baseUrl}/orchestrations/${orchestrationId}`, {
+      headers: this.buildHeaders()
+    });
     if (response.status === 404) {
       return undefined;
     }

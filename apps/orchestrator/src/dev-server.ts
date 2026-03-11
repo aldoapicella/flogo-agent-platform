@@ -29,6 +29,19 @@ type LocalOrchestrationState = OrchestratorStatus & {
 
 const states = new Map<string, LocalOrchestrationState>();
 
+function assertInternalAccess(headers: Record<string, unknown>): void {
+  const token = process.env.INTERNAL_SERVICE_TOKEN;
+  if (!token) {
+    return;
+  }
+
+  const candidate = headers["x-internal-service-token"];
+  const value = Array.isArray(candidate) ? candidate[0] : candidate;
+  if (typeof value !== "string" || value !== token) {
+    throw new Error("Missing or invalid internal service token");
+  }
+}
+
 function mapStatus(state: LocalOrchestrationState) {
   return OrchestratorStatusSchema.parse({
     orchestrationId: state.orchestrationId,
@@ -80,7 +93,16 @@ async function runPipeline(state: LocalOrchestrationState): Promise<void> {
     state.summary = `Runner step started: ${stepType}`;
     state.lastUpdatedAt = new Date().toISOString();
 
-    await syncState(state);
+    await syncTaskState(state.taskId, {
+      orchestrationId: state.orchestrationId,
+      status: "running",
+      summary: state.summary,
+      approvalStatus: state.approvalStatus,
+      activeJobRuns: state.activeJobRuns,
+      jobRunStatus: startedJob,
+      requiredApprovals: state.approvalStatus === "pending" ? state.request.requiredApprovals : [],
+      nextActions: state.request.steps.map((step) => step.summary)
+    });
     await publishTaskEvent(state.taskId, "tool", `Runner job started for ${stepType}`, {
       jobRunId: startedJob.jobRunId,
       stepType
@@ -96,14 +118,32 @@ async function runPipeline(state: LocalOrchestrationState): Promise<void> {
       ];
       state.summary = currentJob.summary;
       state.lastUpdatedAt = new Date().toISOString();
-      await syncState(state);
+      await syncTaskState(state.taskId, {
+        orchestrationId: state.orchestrationId,
+        status: "running",
+        summary: state.summary,
+        approvalStatus: state.approvalStatus,
+        activeJobRuns: state.activeJobRuns,
+        jobRunStatus: currentJob,
+        requiredApprovals: state.approvalStatus === "pending" ? state.request.requiredApprovals : [],
+        nextActions: state.request.steps.map((step) => step.summary)
+      });
     }
 
     if (!currentJob.result?.ok) {
       state.runtimeStatus = "failed";
       state.summary = currentJob.summary;
       state.lastUpdatedAt = new Date().toISOString();
-      await syncState(state);
+      await syncTaskState(state.taskId, {
+        orchestrationId: state.orchestrationId,
+        status: "failed",
+        summary: state.summary,
+        approvalStatus: state.approvalStatus,
+        activeJobRuns: state.activeJobRuns,
+        jobRunStatus: currentJob,
+        requiredApprovals: [],
+        nextActions: state.request.steps.map((step) => step.summary)
+      });
       await publishTaskEvent(state.taskId, "status", currentJob.summary, {
         stepType,
         result: currentJob.result
@@ -138,6 +178,7 @@ async function bootstrap(): Promise<void> {
   }));
 
   app.post("/api/orchestrations/tasks", async (request, reply) => {
+    assertInternalAccess(request.headers as Record<string, unknown>);
     const body = OrchestratorStartRequestSchema.parse(request.body);
     const orchestrationId = `local-${body.taskId}-${randomUUID()}`;
     const state: LocalOrchestrationState = {
@@ -174,6 +215,7 @@ async function bootstrap(): Promise<void> {
   });
 
   app.get<{ Params: { orchestrationId: string } }>("/api/orchestrations/:orchestrationId", async (request, reply) => {
+    assertInternalAccess(request.headers as Record<string, unknown>);
     const state = states.get(request.params.orchestrationId);
     if (!state) {
       return reply.code(404).send({
@@ -187,6 +229,7 @@ async function bootstrap(): Promise<void> {
   app.post<{ Params: { orchestrationId: string } }>(
     "/api/orchestrations/:orchestrationId/approvals",
     async (request, reply) => {
+      assertInternalAccess(request.headers as Record<string, unknown>);
       const state = states.get(request.params.orchestrationId);
       if (!state) {
         return reply.code(404).send({

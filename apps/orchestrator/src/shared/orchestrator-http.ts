@@ -12,6 +12,7 @@ import {
 
 const runnerWorkerBaseUrl = (process.env.RUNNER_WORKER_BASE_URL ?? "http://localhost:3010").replace(/\/$/, "");
 const controlPlaneInternalUrl = process.env.CONTROL_PLANE_INTERNAL_URL?.replace(/\/$/, "");
+const internalServiceToken = process.env.INTERNAL_SERVICE_TOKEN;
 
 export const workflowRunnerSteps: RunnerStepType[] = ["build", "run", "generate_smoke", "run_smoke"];
 
@@ -38,10 +39,19 @@ export function toTaskStatus(runtimeStatus: string, approvalStatus?: string): Ta
 }
 
 export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: RunnerStepType): RunnerJobSpec {
+  const jobKind =
+    stepType === "generate_smoke" || stepType === "run_smoke"
+      ? "smoke_test"
+      : stepType === "build" || stepType === "run"
+        ? "build"
+        : "eval";
+
   return {
     taskId: start.taskId,
+    jobKind,
     stepType,
     snapshotUri: `workspace://${start.request.projectId}/${start.taskId}`,
+    workspaceBlobPrefix: `workspace-snapshots/${start.taskId}`,
     appPath: start.request.appPath ?? "flogo.json",
     env: {
       TARGET_ENV: start.request.constraints.targetEnv
@@ -49,6 +59,7 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
     envSecretRefs: {},
     timeoutSeconds: 900,
     artifactOutputUri: `artifact://${start.taskId}/${stepType}`,
+    artifactBlobPrefix: `artifacts/${start.taskId}/${stepType}`,
     jobTemplateName: process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-runner",
     correlationId: start.taskId,
     command: [],
@@ -65,20 +76,33 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+function buildInternalHeaders(includeContentType = false): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (includeContentType) {
+    headers["content-type"] = "application/json";
+  }
+  if (internalServiceToken) {
+    headers["x-internal-service-token"] = internalServiceToken;
+  }
+  return headers;
+}
+
 export async function startRunnerJob(spec: RunnerJobSpec): Promise<RunnerJobStatus> {
   return RunnerJobStatusSchema.parse(
     await fetchJson(`${runnerWorkerBaseUrl}/internal/jobs/start`, {
       method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
+      headers: buildInternalHeaders(true),
       body: JSON.stringify(spec)
     })
   );
 }
 
 export async function getRunnerJobStatus(jobRunId: string): Promise<RunnerJobStatus> {
-  return RunnerJobStatusSchema.parse(await fetchJson(`${runnerWorkerBaseUrl}/internal/jobs/${jobRunId}`));
+  return RunnerJobStatusSchema.parse(
+    await fetchJson(`${runnerWorkerBaseUrl}/internal/jobs/${jobRunId}`, {
+      headers: buildInternalHeaders()
+    })
+  );
 }
 
 export async function publishTaskEvent(
@@ -93,9 +117,7 @@ export async function publishTaskEvent(
 
   await fetch(`${controlPlaneInternalUrl}/internal/tasks/${taskId}/events`, {
     method: "POST",
-    headers: {
-      "content-type": "application/json"
-    },
+    headers: buildInternalHeaders(true),
     body: JSON.stringify(
       TaskEventPublishSchema.parse({
         taskId,
@@ -114,9 +136,7 @@ export async function syncTaskState(taskId: string, payload: Record<string, unkn
 
   await fetch(`${controlPlaneInternalUrl}/internal/tasks/${taskId}/sync`, {
     method: "POST",
-    headers: {
-      "content-type": "application/json"
-    },
+    headers: buildInternalHeaders(true),
     body: JSON.stringify(TaskStateSyncSchema.parse(payload))
   });
 }

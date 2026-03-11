@@ -1,6 +1,24 @@
-import Fastify from "fastify";
+import Fastify, { type FastifyReply } from "fastify";
 
 import { RunnerJobService } from "./services/runner-job.service.js";
+
+function assertInternalAccess(headers: Record<string, unknown>, reply: FastifyReply): boolean {
+  const token = process.env.INTERNAL_SERVICE_TOKEN;
+  if (!token) {
+    return true;
+  }
+
+  const candidate = headers["x-internal-service-token"];
+  const value = Array.isArray(candidate) ? candidate[0] : candidate;
+  if (typeof value !== "string" || value !== token) {
+    void reply.code(401).send({
+      message: "Missing or invalid internal service token"
+    });
+    return false;
+  }
+
+  return true;
+}
 
 async function bootstrap(): Promise<void> {
   const app = Fastify({
@@ -13,10 +31,18 @@ async function bootstrap(): Promise<void> {
     service: "runner-worker"
   }));
 
-  app.post("/internal/jobs/start", async (request) => jobs.start(request.body));
+  app.post("/internal/jobs/start", async (request, reply) => {
+    if (!assertInternalAccess(request.headers as Record<string, unknown>, reply)) {
+      return reply;
+    }
+    return jobs.start(request.body);
+  });
 
   app.get<{ Params: { jobRunId: string } }>("/internal/jobs/:jobRunId", async (request, reply) => {
-    const job = jobs.get(request.params.jobRunId);
+    if (!assertInternalAccess(request.headers as Record<string, unknown>, reply)) {
+      return reply;
+    }
+    const job = await jobs.get(request.params.jobRunId);
     if (!job) {
       return reply.code(404).send({
         message: `Unknown job run ${request.params.jobRunId}`

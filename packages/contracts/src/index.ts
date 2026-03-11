@@ -16,6 +16,7 @@ export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 
 export const ApprovalTypeSchema = z.enum([
   "delete_flow",
+  "delete_resource",
   "change_public_contract",
   "dependency_upgrade",
   "custom_code",
@@ -288,6 +289,9 @@ export const RunnerStepTypeSchema = z.enum([
 ]);
 export type RunnerStepType = z.infer<typeof RunnerStepTypeSchema>;
 
+export const RunnerJobKindSchema = z.enum(["build", "smoke_test", "custom_contrib", "eval"]);
+export type RunnerJobKind = z.infer<typeof RunnerJobKindSchema>;
+
 export const RunnerJobStateSchema = z.enum(["pending", "running", "succeeded", "failed", "cancelled"]);
 export type RunnerJobState = z.infer<typeof RunnerJobStateSchema>;
 
@@ -304,13 +308,16 @@ export type ActiveJobRun = z.infer<typeof ActiveJobRunSchema>;
 
 export const RunnerJobSpecSchema = z.object({
   taskId: z.string(),
+  jobKind: RunnerJobKindSchema.default("build"),
   stepType: RunnerStepTypeSchema,
   snapshotUri: z.string(),
+  workspaceBlobPrefix: z.string().optional(),
   appPath: z.string(),
   env: z.record(z.string(), z.string()).default({}),
   envSecretRefs: z.record(z.string(), z.string()).default({}),
   timeoutSeconds: z.number().int().positive().default(900),
   artifactOutputUri: z.string(),
+  artifactBlobPrefix: z.string().optional(),
   jobTemplateName: z.string().default("flogo-runner"),
   jobRunId: z.string().optional(),
   correlationId: z.string().optional(),
@@ -322,6 +329,8 @@ export type RunnerJobSpec = z.infer<typeof RunnerJobSpecSchema>;
 export const RunnerJobResultSchema = z.object({
   jobId: z.string(),
   jobRunId: z.string().optional(),
+  azureJobExecutionName: z.string().optional(),
+  azureJobResourceId: z.string().optional(),
   ok: z.boolean(),
   status: RunnerJobStateSchema.default("succeeded"),
   summary: z.string(),
@@ -340,9 +349,38 @@ export const RunnerJobStatusSchema = z.object({
   status: RunnerJobStateSchema,
   summary: z.string(),
   spec: RunnerJobSpecSchema,
+  azureJobExecutionName: z.string().optional(),
+  azureJobResourceId: z.string().optional(),
   result: RunnerJobResultSchema.optional()
 });
 export type RunnerJobStatus = z.infer<typeof RunnerJobStatusSchema>;
+
+export const TaskRunSchema = z.object({
+  id: z.string(),
+  category: z.enum(["build", "test"]),
+  stepType: RunnerStepTypeSchema,
+  jobRunId: z.string().optional(),
+  jobTemplateName: z.string().optional(),
+  status: RunnerJobStateSchema,
+  summary: z.string(),
+  exitCode: z.number().int().optional(),
+  startedAt: z.string().optional(),
+  finishedAt: z.string().optional(),
+  logUri: z.string().optional(),
+  reportUri: z.string().optional(),
+  binaryUri: z.string().optional(),
+  azureJobExecutionName: z.string().optional(),
+  azureJobResourceId: z.string().optional(),
+  artifacts: z.array(ArtifactRefSchema).default([])
+});
+export type TaskRun = z.infer<typeof TaskRunSchema>;
+
+export const TaskRunsSchema = z.object({
+  taskId: z.string(),
+  buildRuns: z.array(TaskRunSchema).default([]),
+  testRuns: z.array(TaskRunSchema).default([])
+});
+export type TaskRuns = z.infer<typeof TaskRunsSchema>;
 
 export const OrchestratorStartRequestSchema = z.object({
   taskId: z.string(),
@@ -419,8 +457,10 @@ export const TaskStateSyncSchema = z.object({
   summary: z.string().optional(),
   approvalStatus: ApprovalStatusSchema.optional(),
   activeJobRuns: z.array(ActiveJobRunSchema).optional(),
+  jobRunStatus: RunnerJobStatusSchema.optional(),
   artifact: ArtifactRefSchema.optional(),
   validationReport: ValidationReportSchema.optional(),
+  rootCause: z.string().optional(),
   requiredApprovals: z.array(ApprovalTypeSchema).optional(),
   nextActions: z.array(z.string()).optional()
 });

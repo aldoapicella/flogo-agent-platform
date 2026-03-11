@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "879078976047569215"
+      "templateHash": "3299904336988672523"
     }
   },
   "parameters": {
@@ -71,16 +71,65 @@
       "metadata": {
         "description": "Container image for the flogo runner job template"
       }
+    },
+    "smokeRunnerJobImage": {
+      "type": "string",
+      "defaultValue": "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest",
+      "metadata": {
+        "description": "Container image for the smoke test runner job template"
+      }
+    },
+    "customContribRunnerJobImage": {
+      "type": "string",
+      "defaultValue": "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest",
+      "metadata": {
+        "description": "Container image for the custom contrib runner job template"
+      }
+    },
+    "evalRunnerJobImage": {
+      "type": "string",
+      "defaultValue": "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest",
+      "metadata": {
+        "description": "Container image for the eval runner job template"
+      }
+    },
+    "durableBackendProvider": {
+      "type": "string",
+      "defaultValue": "dts",
+      "allowedValues": [
+        "dts",
+        "azure_storage"
+      ],
+      "metadata": {
+        "description": "Durable backend provider profile"
+      }
+    },
+    "internalServiceToken": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Internal shared token used for local-style service-to-service auth fallback"
+      }
+    },
+    "durableTaskSchedulerConnection": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Connection string or endpoint profile used by the Durable Task Scheduler backend"
+      }
     }
   },
   "variables": {
     "logAnalyticsName": "[format('{0}-law', parameters('namePrefix'))]",
     "managedEnvironmentName": "[format('{0}-aca-env', parameters('namePrefix'))]",
-    "acrName": "[take(replace(format('{0}acr', parameters('namePrefix')), '-', ''), 50)]",
-    "storageName": "[take(replace(format('{0}st', parameters('namePrefix')), '-', ''), 24)]",
+    "normalizedNamePrefix": "[replace(parameters('namePrefix'), '-', '')]",
+    "acrName": "[take(format('{0}flogoagentacr', variables('normalizedNamePrefix')), 50)]",
+    "storageName": "[take(format('{0}flogoagentst', variables('normalizedNamePrefix')), 24)]",
     "keyVaultName": "[take(replace(format('{0}-kv', parameters('namePrefix')), '_', '-'), 24)]",
     "postgresServerName": "[format('{0}-pg', parameters('namePrefix'))]",
-    "postgresDatabaseName": "flogoagent"
+    "postgresDatabaseName": "flogoagent",
+    "durableStorageProviderType": "[if(equals(parameters('durableBackendProvider'), 'dts'), 'azureManaged', 'azureStorage')]",
+    "durableBackendConnectionName": "[if(equals(parameters('durableBackendProvider'), 'dts'), 'DurableTaskScheduler', 'AzureWebJobsStorage')]"
   },
   "resources": [
     {
@@ -269,8 +318,36 @@
                   "value": "container-apps-job"
                 },
                 {
+                  "name": "RUNNER_BUILD_JOB_TEMPLATE_NAME",
+                  "value": "[format('{0}-flogo-build-job', parameters('namePrefix'))]"
+                },
+                {
+                  "name": "RUNNER_SMOKE_JOB_TEMPLATE_NAME",
+                  "value": "[format('{0}-flogo-test-job', parameters('namePrefix'))]"
+                },
+                {
+                  "name": "RUNNER_CUSTOM_CONTRIB_JOB_TEMPLATE_NAME",
+                  "value": "[format('{0}-flogo-custom-contrib-job', parameters('namePrefix'))]"
+                },
+                {
+                  "name": "RUNNER_EVAL_JOB_TEMPLATE_NAME",
+                  "value": "[format('{0}-flogo-eval-job', parameters('namePrefix'))]"
+                },
+                {
                   "name": "RUNNER_JOB_TEMPLATE_NAME",
-                  "value": "[format('{0}-flogo-runner', parameters('namePrefix'))]"
+                  "value": "[format('{0}-flogo-build-job', parameters('namePrefix'))]"
+                },
+                {
+                  "name": "INTERNAL_SERVICE_TOKEN",
+                  "value": "[parameters('internalServiceToken')]"
+                },
+                {
+                  "name": "AZURE_SUBSCRIPTION_ID",
+                  "value": "[subscription().subscriptionId]"
+                },
+                {
+                  "name": "AZURE_RESOURCE_GROUP",
+                  "value": "[resourceGroup().name]"
                 },
                 {
                   "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
@@ -338,8 +415,32 @@
                   "value": "[format('https://{0}-control-plane.{1}/v1', parameters('namePrefix'), reference(resourceId('Microsoft.App/managedEnvironments', variables('managedEnvironmentName')), '2024-03-01').defaultDomain)]"
                 },
                 {
+                  "name": "INTERNAL_SERVICE_TOKEN",
+                  "value": "[parameters('internalServiceToken')]"
+                },
+                {
+                  "name": "DURABLE_BACKEND_PROVIDER",
+                  "value": "[parameters('durableBackendProvider')]"
+                },
+                {
                   "name": "DURABLE_TASK_HUB_NAME",
                   "value": "flogoAgent"
+                },
+                {
+                  "name": "DURABLE_STORAGE_PROVIDER_TYPE",
+                  "value": "[variables('durableStorageProviderType')]"
+                },
+                {
+                  "name": "DURABLE_BACKEND_CONNECTION_NAME",
+                  "value": "[variables('durableBackendConnectionName')]"
+                },
+                {
+                  "name": "AzureWebJobsStorage",
+                  "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', variables('storageName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').keys[0].value, environment().suffixes.storage)]"
+                },
+                {
+                  "name": "DurableTaskScheduler",
+                  "value": "[parameters('durableTaskSchedulerConnection')]"
                 },
                 {
                   "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
@@ -362,7 +463,8 @@
         "[resourceId('Microsoft.Insights/components', format('{0}-appi', parameters('namePrefix')))]",
         "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
         "[resourceId('Microsoft.App/managedEnvironments', variables('managedEnvironmentName'))]",
-        "[resourceId('Microsoft.App/containerApps', format('{0}-runner-worker', parameters('namePrefix')))]"
+        "[resourceId('Microsoft.App/containerApps', format('{0}-runner-worker', parameters('namePrefix')))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]"
       ]
     },
     {
@@ -408,12 +510,16 @@
                   "value": "[format('postgresql://{0}:{1}@{2}.postgres.database.azure.com:5432/{3}?sslmode=require', parameters('postgresAdminUsername'), parameters('postgresAdminPassword'), variables('postgresServerName'), variables('postgresDatabaseName'))]"
                 },
                 {
-                  "name": "AZURITE_CONNECTION_STRING",
-                  "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};EndpointSuffix={1}', variables('storageName'), environment().suffixes.storage)]"
+                  "name": "AZURE_STORAGE_CONNECTION_STRING",
+                  "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', variables('storageName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').keys[0].value, environment().suffixes.storage)]"
                 },
                 {
                   "name": "KEY_VAULT_NAME",
                   "value": "[variables('keyVaultName')]"
+                },
+                {
+                  "name": "INTERNAL_SERVICE_TOKEN",
+                  "value": "[parameters('internalServiceToken')]"
                 },
                 {
                   "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
@@ -503,7 +609,7 @@
     {
       "type": "Microsoft.App/jobs",
       "apiVersion": "2024-03-01",
-      "name": "[format('{0}-flogo-runner', parameters('namePrefix'))]",
+      "name": "[format('{0}-flogo-build-job', parameters('namePrefix'))]",
       "location": "[parameters('location')]",
       "identity": {
         "type": "SystemAssigned"
@@ -536,8 +642,16 @@
                   "value": "[variables('storageName')]"
                 },
                 {
+                  "name": "AZURE_STORAGE_CONNECTION_STRING",
+                  "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', variables('storageName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').keys[0].value, environment().suffixes.storage)]"
+                },
+                {
                   "name": "BLOB_CONTAINER_ARTIFACTS",
                   "value": "artifacts"
+                },
+                {
+                  "name": "BLOB_CONTAINER_WORKSPACES",
+                  "value": "workspace-snapshots"
                 },
                 {
                   "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
@@ -557,7 +671,203 @@
         "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageName'), 'default', 'artifacts')]",
         "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
         "[resourceId('Microsoft.App/managedEnvironments', variables('managedEnvironmentName'))]",
-        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]"
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageName'), 'default', 'workspace-snapshots')]"
+      ]
+    },
+    {
+      "type": "Microsoft.App/jobs",
+      "apiVersion": "2024-03-01",
+      "name": "[format('{0}-flogo-test-job', parameters('namePrefix'))]",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('managedEnvironmentName'))]",
+        "configuration": {
+          "triggerType": "Manual",
+          "replicaTimeout": 1800,
+          "replicaRetryLimit": 1,
+          "manualTriggerConfig": {
+            "parallelism": 1,
+            "replicaCompletionCount": 1
+          },
+          "registries": [
+            {
+              "server": "[reference(resourceId('Microsoft.ContainerRegistry/registries', variables('acrName')), '2023-07-01').loginServer]",
+              "identity": "system"
+            }
+          ]
+        },
+        "template": {
+          "containers": [
+            {
+              "name": "flogo-runner",
+              "image": "[parameters('smokeRunnerJobImage')]",
+              "env": [
+                {
+                  "name": "AZURE_STORAGE_CONNECTION_STRING",
+                  "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', variables('storageName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').keys[0].value, environment().suffixes.storage)]"
+                },
+                {
+                  "name": "BLOB_CONTAINER_ARTIFACTS",
+                  "value": "artifacts"
+                },
+                {
+                  "name": "BLOB_CONTAINER_WORKSPACES",
+                  "value": "workspace-snapshots"
+                },
+                {
+                  "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                  "value": "[reference(resourceId('Microsoft.Insights/components', format('{0}-appi', parameters('namePrefix'))), '2020-02-02').ConnectionString]"
+                }
+              ],
+              "resources": {
+                "cpu": "[json('1.0')]",
+                "memory": "2Gi"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/components', format('{0}-appi', parameters('namePrefix')))]",
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageName'), 'default', 'artifacts')]",
+        "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
+        "[resourceId('Microsoft.App/managedEnvironments', variables('managedEnvironmentName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageName'), 'default', 'workspace-snapshots')]"
+      ]
+    },
+    {
+      "type": "Microsoft.App/jobs",
+      "apiVersion": "2024-03-01",
+      "name": "[format('{0}-flogo-custom-contrib-job', parameters('namePrefix'))]",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('managedEnvironmentName'))]",
+        "configuration": {
+          "triggerType": "Manual",
+          "replicaTimeout": 1800,
+          "replicaRetryLimit": 1,
+          "manualTriggerConfig": {
+            "parallelism": 1,
+            "replicaCompletionCount": 1
+          },
+          "registries": [
+            {
+              "server": "[reference(resourceId('Microsoft.ContainerRegistry/registries', variables('acrName')), '2023-07-01').loginServer]",
+              "identity": "system"
+            }
+          ]
+        },
+        "template": {
+          "containers": [
+            {
+              "name": "flogo-runner",
+              "image": "[parameters('customContribRunnerJobImage')]",
+              "env": [
+                {
+                  "name": "AZURE_STORAGE_CONNECTION_STRING",
+                  "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', variables('storageName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').keys[0].value, environment().suffixes.storage)]"
+                },
+                {
+                  "name": "BLOB_CONTAINER_ARTIFACTS",
+                  "value": "artifacts"
+                },
+                {
+                  "name": "BLOB_CONTAINER_WORKSPACES",
+                  "value": "workspace-snapshots"
+                },
+                {
+                  "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                  "value": "[reference(resourceId('Microsoft.Insights/components', format('{0}-appi', parameters('namePrefix'))), '2020-02-02').ConnectionString]"
+                }
+              ],
+              "resources": {
+                "cpu": "[json('1.0')]",
+                "memory": "2Gi"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/components', format('{0}-appi', parameters('namePrefix')))]",
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageName'), 'default', 'artifacts')]",
+        "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
+        "[resourceId('Microsoft.App/managedEnvironments', variables('managedEnvironmentName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageName'), 'default', 'workspace-snapshots')]"
+      ]
+    },
+    {
+      "type": "Microsoft.App/jobs",
+      "apiVersion": "2024-03-01",
+      "name": "[format('{0}-flogo-eval-job', parameters('namePrefix'))]",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('managedEnvironmentName'))]",
+        "configuration": {
+          "triggerType": "Manual",
+          "replicaTimeout": 1800,
+          "replicaRetryLimit": 1,
+          "manualTriggerConfig": {
+            "parallelism": 1,
+            "replicaCompletionCount": 1
+          },
+          "registries": [
+            {
+              "server": "[reference(resourceId('Microsoft.ContainerRegistry/registries', variables('acrName')), '2023-07-01').loginServer]",
+              "identity": "system"
+            }
+          ]
+        },
+        "template": {
+          "containers": [
+            {
+              "name": "flogo-runner",
+              "image": "[parameters('evalRunnerJobImage')]",
+              "env": [
+                {
+                  "name": "AZURE_STORAGE_CONNECTION_STRING",
+                  "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', variables('storageName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').keys[0].value, environment().suffixes.storage)]"
+                },
+                {
+                  "name": "BLOB_CONTAINER_ARTIFACTS",
+                  "value": "artifacts"
+                },
+                {
+                  "name": "BLOB_CONTAINER_WORKSPACES",
+                  "value": "workspace-snapshots"
+                },
+                {
+                  "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                  "value": "[reference(resourceId('Microsoft.Insights/components', format('{0}-appi', parameters('namePrefix'))), '2020-02-02').ConnectionString]"
+                }
+              ],
+              "resources": {
+                "cpu": "[json('1.0')]",
+                "memory": "2Gi"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/components', format('{0}-appi', parameters('namePrefix')))]",
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageName'), 'default', 'artifacts')]",
+        "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
+        "[resourceId('Microsoft.App/managedEnvironments', variables('managedEnvironmentName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageName'), 'default', 'workspace-snapshots')]"
       ]
     },
     {
@@ -624,15 +934,60 @@
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
       "scope": "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
-      "name": "[guid(resourceId('Microsoft.App/jobs', format('{0}-flogo-runner', parameters('namePrefix'))), 'acrPull')]",
+      "name": "[guid(resourceId('Microsoft.App/jobs', format('{0}-flogo-build-job', parameters('namePrefix'))), 'acrPull')]",
       "properties": {
-        "principalId": "[reference(resourceId('Microsoft.App/jobs', format('{0}-flogo-runner', parameters('namePrefix'))), '2024-03-01', 'full').identity.principalId]",
+        "principalId": "[reference(resourceId('Microsoft.App/jobs', format('{0}-flogo-build-job', parameters('namePrefix'))), '2024-03-01', 'full').identity.principalId]",
         "principalType": "ServicePrincipal",
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]"
       },
       "dependsOn": [
         "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
-        "[resourceId('Microsoft.App/jobs', format('{0}-flogo-runner', parameters('namePrefix')))]"
+        "[resourceId('Microsoft.App/jobs', format('{0}-flogo-build-job', parameters('namePrefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
+      "name": "[guid(resourceId('Microsoft.App/jobs', format('{0}-flogo-test-job', parameters('namePrefix'))), 'acrPull')]",
+      "properties": {
+        "principalId": "[reference(resourceId('Microsoft.App/jobs', format('{0}-flogo-test-job', parameters('namePrefix'))), '2024-03-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal",
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
+        "[resourceId('Microsoft.App/jobs', format('{0}-flogo-test-job', parameters('namePrefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
+      "name": "[guid(resourceId('Microsoft.App/jobs', format('{0}-flogo-custom-contrib-job', parameters('namePrefix'))), 'acrPull')]",
+      "properties": {
+        "principalId": "[reference(resourceId('Microsoft.App/jobs', format('{0}-flogo-custom-contrib-job', parameters('namePrefix'))), '2024-03-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal",
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
+        "[resourceId('Microsoft.App/jobs', format('{0}-flogo-custom-contrib-job', parameters('namePrefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
+      "name": "[guid(resourceId('Microsoft.App/jobs', format('{0}-flogo-eval-job', parameters('namePrefix'))), 'acrPull')]",
+      "properties": {
+        "principalId": "[reference(resourceId('Microsoft.App/jobs', format('{0}-flogo-eval-job', parameters('namePrefix'))), '2024-03-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal",
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
+        "[resourceId('Microsoft.App/jobs', format('{0}-flogo-eval-job', parameters('namePrefix')))]"
       ]
     }
   ],
@@ -653,9 +1008,21 @@
       "type": "string",
       "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', format('{0}-web-console', parameters('namePrefix'))), '2024-03-01').configuration.ingress.fqdn)]"
     },
-    "runnerJobName": {
+    "buildRunnerJobName": {
       "type": "string",
-      "value": "[format('{0}-flogo-runner', parameters('namePrefix'))]"
+      "value": "[format('{0}-flogo-build-job', parameters('namePrefix'))]"
+    },
+    "smokeRunnerJobName": {
+      "type": "string",
+      "value": "[format('{0}-flogo-test-job', parameters('namePrefix'))]"
+    },
+    "customContribRunnerJobName": {
+      "type": "string",
+      "value": "[format('{0}-flogo-custom-contrib-job', parameters('namePrefix'))]"
+    },
+    "evalRunnerJobName": {
+      "type": "string",
+      "value": "[format('{0}-flogo-eval-job', parameters('namePrefix'))]"
     },
     "storageAccountName": {
       "type": "string",

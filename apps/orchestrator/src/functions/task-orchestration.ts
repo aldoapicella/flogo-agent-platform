@@ -86,6 +86,12 @@ df.app.orchestration("taskWorkflow", function* (context: any) {
       approvalStatus
     )
   } satisfies SyncTaskStateActivityInput);
+  context.df.setCustomStatus({
+    taskId: start.taskId,
+    activeJobRuns,
+    summary: approvalStatus === "pending" ? "Workflow paused for approval" : "Workflow started",
+    approvalStatus
+  });
 
   if (approvalStatus === "pending") {
     yield context.df.callActivity("publishTaskEventActivity", {
@@ -99,6 +105,12 @@ df.app.orchestration("taskWorkflow", function* (context: any) {
 
     const approval = ApprovalDecisionSchema.parse(yield context.df.waitForExternalEvent("approval-decision"));
     approvalStatus = approval.status;
+    context.df.setCustomStatus({
+      taskId: start.taskId,
+      activeJobRuns,
+      summary: approval.status === "approved" ? "Approval recorded; workflow resumed" : "Approval rejected",
+      approvalStatus
+    });
 
     if (approval.status !== "approved") {
       const rejectedPayload = buildSyncPayload(
@@ -135,7 +147,10 @@ df.app.orchestration("taskWorkflow", function* (context: any) {
 
     yield context.df.callActivity("syncTaskStateActivity", {
       taskId: start.taskId,
-      payload: buildSyncPayload(start, orchestrationId, "running", `Runner step started: ${stepType}`, activeJobRuns, "approved")
+      payload: {
+        ...buildSyncPayload(start, orchestrationId, "running", `Runner step started: ${stepType}`, activeJobRuns, "approved"),
+        jobRunStatus: job
+      }
     } satisfies SyncTaskStateActivityInput);
 
     let current = job;
@@ -150,14 +165,25 @@ df.app.orchestration("taskWorkflow", function* (context: any) {
       context.df.setCustomStatus({
         taskId: start.taskId,
         activeJobRuns,
-        summary: current.summary
+        summary: current.summary,
+        approvalStatus: "approved"
       });
+      yield context.df.callActivity("syncTaskStateActivity", {
+        taskId: start.taskId,
+        payload: {
+          ...buildSyncPayload(start, orchestrationId, "running", current.summary, activeJobRuns, "approved"),
+          jobRunStatus: current
+        }
+      } satisfies SyncTaskStateActivityInput);
     }
 
     if (!current.result?.ok) {
       yield context.df.callActivity("syncTaskStateActivity", {
         taskId: start.taskId,
-        payload: buildSyncPayload(start, orchestrationId, "failed", current.summary, activeJobRuns, "approved")
+        payload: {
+          ...buildSyncPayload(start, orchestrationId, "failed", current.summary, activeJobRuns, "approved"),
+          jobRunStatus: current
+        }
       } satisfies SyncTaskStateActivityInput);
 
       return OrchestratorStatusSchema.parse({
