@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, NotFoundException, Param, Post, Query } from "@nestjs/common";
 
 import { FlogoAppsService } from "./flogo-apps.service.js";
 
@@ -31,6 +31,19 @@ export class FlogoAppsController {
       throw new NotFoundException(`Unknown app ${appId}`);
     }
     return artifacts;
+  }
+
+  @Get(":appId/descriptors")
+  async getDescriptor(
+    @Param("projectId") projectId: string,
+    @Param("appId") appId: string,
+    @Query("ref") ref: string
+  ) {
+    const descriptor = await this.flogoAppsService.getDescriptor(projectId, appId, ref);
+    if (!descriptor) {
+      throw new NotFoundException(`Unknown descriptor ${ref} for app ${appId}`);
+    }
+    return descriptor;
   }
 
   @Post(":appId/mappings/preview")

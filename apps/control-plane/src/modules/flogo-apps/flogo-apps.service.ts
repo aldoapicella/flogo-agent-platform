@@ -5,6 +5,7 @@ import path from "node:path";
 
 import {
   ArtifactRefSchema,
+  ContribDescriptorResponseSchema,
   ContribCatalogResponseSchema,
   MappingPreviewRequestSchema,
   MappingPreviewResponseSchema
@@ -13,11 +14,13 @@ import {
   analyzePropertyUsage,
   buildAppGraph,
   buildContribCatalog,
+  inspectContribDescriptor,
   parseFlogoAppDocument,
   previewMapping,
   suggestCoercions
 } from "@flogo-agent/flogo-graph";
 
+import { AppAnalysisStorageService } from "./app-analysis-storage.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 const defaultOrganizationId = process.env.DEFAULT_ORGANIZATION_ID ?? "local-organization";
@@ -43,7 +46,10 @@ type ResolvedApp = {
 
 @Injectable()
 export class FlogoAppsService {
-  constructor(private readonly prisma?: PrismaService) {}
+  constructor(
+    private readonly storage: AppAnalysisStorageService,
+    private readonly prisma?: PrismaService
+  ) {}
 
   async getGraph(projectId: string, appId: string) {
     const resolved = await this.resolveApp(projectId, appId);
@@ -60,7 +66,7 @@ export class FlogoAppsService {
       return undefined;
     }
 
-    const catalog = buildContribCatalog(resolved.content);
+    const catalog = buildContribCatalog(resolved.content, { appPath: resolved.appPath });
     const artifact = await this.persistArtifact(
       resolved,
       "contrib_catalog",
@@ -116,6 +122,39 @@ export class FlogoAppsService {
             : undefined
       })
     );
+  }
+
+  async getDescriptor(projectId: string, appId: string, refOrAlias: string) {
+    const resolved = await this.resolveApp(projectId, appId);
+    if (!resolved) {
+      return undefined;
+    }
+
+    const descriptorResponse = inspectContribDescriptor(resolved.content, refOrAlias, { appPath: resolved.appPath });
+    if (!descriptorResponse) {
+      return undefined;
+    }
+
+    const artifact = await this.persistArtifact(
+      resolved,
+      "descriptor",
+      `${appId}-${this.sanitizeArtifactName(refOrAlias)}-descriptor.json`,
+      {
+        analysisType: "descriptor",
+        appId,
+        refOrAlias,
+        sourceType: resolved.sourceType
+      },
+      {
+        descriptor: descriptorResponse.descriptor,
+        diagnostics: descriptorResponse.diagnostics
+      }
+    );
+
+    return ContribDescriptorResponseSchema.parse({
+      ...descriptorResponse,
+      artifact
+    });
   }
 
   async previewMapping(projectId: string, appId: string, payload: unknown) {
@@ -268,24 +307,36 @@ export class FlogoAppsService {
 
   private async persistArtifact(
     resolved: ResolvedApp,
-    type: "contrib_catalog" | "mapping_preview",
+    type: "contrib_catalog" | "mapping_preview" | "descriptor",
     name: string,
     metadata: Record<string, unknown>,
     payload: Record<string, unknown>
   ) {
+    const artifactId = randomUUID();
+    const stored = await this.storage.storeJsonArtifact({
+      projectId: resolved.projectId,
+      appId: resolved.recordId ?? resolved.requestedAppId,
+      artifactId,
+      kind: type,
+      payload
+    });
     if (!this.prisma) {
       return ArtifactRefSchema.parse({
-        id: `${type}-${resolved.requestedAppId}-${randomUUID()}`,
-        type,
+        id: artifactId,
+        type: type === "descriptor" ? "contrib_catalog" : type,
         name,
-        uri: `memory://apps/${resolved.requestedAppId}/${type}/${randomUUID()}`,
-        metadata
+        uri: stored.uri,
+        metadata: {
+          ...metadata,
+          blobPath: stored.blobPath,
+          contentType: stored.contentType,
+          producer: "control-plane.app-analysis"
+        }
       });
     }
 
     const prisma = this.prisma as any;
     const taskId = randomUUID();
-    const artifactId = randomUUID();
     const summary = `${type} analysis for ${resolved.requestedAppId}`;
     await prisma.task.create({
       data: {
@@ -313,12 +364,14 @@ export class FlogoAppsService {
 
     const artifact = ArtifactRefSchema.parse({
       id: artifactId,
-      type,
+      type: type === "descriptor" ? "contrib_catalog" : type,
       name,
-      uri: `artifact://apps/${resolved.recordId ?? resolved.requestedAppId}/${artifactId}`,
+      uri: stored.uri,
       metadata: {
         ...metadata,
-        payload
+        blobPath: stored.blobPath,
+        contentType: stored.contentType,
+        producer: "control-plane.app-analysis"
       }
     });
 
@@ -339,5 +392,9 @@ export class FlogoAppsService {
   private buildStableAppId(projectId: string, appId: string): string {
     const normalized = `${projectId}-${appId}`.replace(/[^a-zA-Z0-9_-]/g, "-");
     return `flogo-app-${normalized}`.slice(0, 120);
+  }
+
+  private sanitizeArtifactName(value: string) {
+    return value.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
   }
 }

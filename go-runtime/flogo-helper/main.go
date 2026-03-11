@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -43,6 +44,11 @@ type contribCatalog struct {
 	AppName     string              `json:"appName,omitempty"`
 	Entries     []contribDescriptor `json:"entries"`
 	Diagnostics []diagnostic        `json:"diagnostics"`
+}
+
+type contribDescriptorResponse struct {
+	Descriptor  contribDescriptor `json:"descriptor"`
+	Diagnostics []diagnostic      `json:"diagnostics"`
 }
 
 type mappingPreviewContext struct {
@@ -201,17 +207,20 @@ func main() {
 
 	switch command {
 	case "catalog contribs":
-		encode(buildContribCatalog(app))
+		encode(buildContribCatalog(app, appPath))
 	case "inspect descriptor":
 		ref := lookupFlag("--ref")
 		if ref == "" {
 			fail("missing required --ref flag")
 		}
-		descriptor, ok := introspectContrib(app, ref)
+		descriptor, diagnostics, ok := introspectContrib(app, appPath, ref)
 		if !ok {
 			fail(fmt.Sprintf("descriptor %q was not found", ref))
 		}
-		encode(descriptor)
+		encode(contribDescriptorResponse{
+			Descriptor:  descriptor,
+			Diagnostics: diagnostics,
+		})
 	case "preview mapping":
 		nodeID := lookupFlag("--node")
 		if nodeID == "" {
@@ -479,19 +488,24 @@ func normalizeTasks(value any) []flogoTask {
 	return tasks
 }
 
-func buildContribCatalog(app flogoApp) contribCatalog {
+func buildContribCatalog(app flogoApp, appPath string) contribCatalog {
 	entries := map[string]contribDescriptor{}
+	diagnostics := []diagnostic{}
 	upsert := func(descriptor contribDescriptor) {
 		key := descriptor.Type + ":" + valueOrFallback(descriptor.Alias, descriptor.Ref)
 		entries[key] = descriptor
 	}
 
 	for _, entry := range app.Imports {
-		upsert(buildDescriptor(entry.Ref, entry.Alias, entry.Version, ""))
+		descriptor, entryDiagnostics := buildDescriptorForApp(app, appPath, entry.Ref, entry.Alias, entry.Version, "")
+		upsert(descriptor)
+		diagnostics = append(diagnostics, entryDiagnostics...)
 	}
 
 	for _, trigger := range app.Triggers {
-		upsert(buildDescriptor(trigger.Ref, inferAlias(trigger.Ref), "", "trigger"))
+		descriptor, entryDiagnostics := buildDescriptorForApp(app, appPath, trigger.Ref, inferAlias(trigger.Ref), "", "trigger")
+		upsert(descriptor)
+		diagnostics = append(diagnostics, entryDiagnostics...)
 	}
 
 	for _, flow := range app.Resources {
@@ -513,7 +527,9 @@ func buildContribCatalog(app flogoApp) contribCatalog {
 
 		for _, task := range flow.Tasks {
 			if task.ActivityRef != "" {
-				upsert(buildDescriptor(task.ActivityRef, inferAlias(task.ActivityRef), "", ""))
+				descriptor, entryDiagnostics := buildDescriptorForApp(app, appPath, task.ActivityRef, inferAlias(task.ActivityRef), "", "")
+				upsert(descriptor)
+				diagnostics = append(diagnostics, entryDiagnostics...)
 			}
 		}
 	}
@@ -529,7 +545,7 @@ func buildContribCatalog(app flogoApp) contribCatalog {
 	return contribCatalog{
 		AppName:     app.Name,
 		Entries:     sorted,
-		Diagnostics: []diagnostic{},
+		Diagnostics: dedupeDiagnostics(diagnostics),
 	}
 }
 
@@ -549,15 +565,34 @@ func metadataFieldsToContrib(fields []map[string]any, prefix string) []contribFi
 	return result
 }
 
-func introspectContrib(app flogoApp, refOrAlias string) (contribDescriptor, bool) {
-	catalog := buildContribCatalog(app)
-	normalized := normalizeAlias(refOrAlias)
-	for _, entry := range catalog.Entries {
-		if entry.Ref == refOrAlias || entry.Alias == normalized {
-			return entry, true
+func introspectContrib(app flogoApp, appPath string, refOrAlias string) (contribDescriptor, []diagnostic, bool) {
+	if strings.HasPrefix(refOrAlias, "#flow:") {
+		flowID := strings.TrimPrefix(refOrAlias, "#flow:")
+		for _, flow := range app.Resources {
+			if flow.ID == flowID {
+				return contribDescriptor{
+					Ref:   "#flow:" + flow.ID,
+					Alias: "flow",
+					Type:  "action",
+					Name:  valueOrFallback(flow.Name, flow.ID),
+					Title: valueOrFallback(flow.Name, flow.ID),
+					Inputs:  metadataFieldsToContrib(flow.MetadataInput, "input"),
+					Outputs: metadataFieldsToContrib(flow.MetadataOutput, "output"),
+					Examples: []string{"Invoke reusable flow " + flow.ID},
+					CompatibilityNotes: []string{"Flow resources behave like reusable actions"},
+					Source: "flow-resource",
+				}, []diagnostic{}, true
+			}
 		}
 	}
-	return contribDescriptor{}, false
+
+	ref, alias, version, forcedType, ok := resolveAppRef(app, refOrAlias)
+	if !ok {
+		return contribDescriptor{}, []diagnostic{}, false
+	}
+
+	descriptor, diagnostics := buildDescriptorForApp(app, appPath, ref, alias, version, forcedType)
+	return descriptor, diagnostics, true
 }
 
 func previewMapping(app flogoApp, nodeID string, context mappingPreviewContext) mappingPreviewResult {
@@ -811,6 +846,253 @@ func resolveByPath(value map[string]any, path string) (any, bool) {
 	}
 
 	return current, true
+}
+
+func buildDescriptorForApp(
+	app flogoApp,
+	appPath string,
+	ref string,
+	alias string,
+	version string,
+	forcedType string,
+) (contribDescriptor, []diagnostic) {
+	resolvedRef := resolveImportRef(app, ref, alias)
+	normalizedAlias := alias
+	if normalizedAlias == "" {
+		normalizedAlias = inferAlias(resolvedRef)
+	}
+
+	descriptorPath := findDescriptorFile(appPath, resolvedRef)
+	if descriptorPath != "" {
+		return parseDescriptorFile(descriptorPath, resolvedRef, normalizedAlias, version, forcedType), []diagnostic{}
+	}
+
+	descriptor := buildDescriptor(resolvedRef, normalizedAlias, version, forcedType)
+	code := "flogo.contrib.registry_fallback"
+	message := fmt.Sprintf("Descriptor metadata for %q was not found on disk; using registry fallback metadata", resolvedRef)
+	severity := "info"
+	if descriptor.Source == "inferred" {
+		code = "flogo.contrib.inferred_metadata"
+		message = fmt.Sprintf("Descriptor metadata for %q was not found on disk; using inferred metadata", resolvedRef)
+		severity = "warning"
+	}
+
+	return descriptor, []diagnostic{
+		{
+			Code:     code,
+			Message:  message,
+			Severity: severity,
+			Path:     normalizedAlias,
+		},
+	}
+}
+
+func resolveAppRef(app flogoApp, refOrAlias string) (string, string, string, string, bool) {
+	normalized := normalizeAlias(refOrAlias)
+	for _, entry := range app.Imports {
+		if entry.Alias == normalized || entry.Ref == refOrAlias || entry.Ref == normalized {
+			return entry.Ref, entry.Alias, entry.Version, "", true
+		}
+	}
+
+	for _, trigger := range app.Triggers {
+		if trigger.Ref == refOrAlias || normalizeAlias(trigger.Ref) == normalized {
+			return resolveImportRef(app, trigger.Ref, inferAlias(trigger.Ref)), inferAlias(trigger.Ref), "", "trigger", true
+		}
+	}
+
+	for _, flow := range app.Resources {
+		for _, task := range flow.Tasks {
+			if task.ActivityRef != "" && (task.ActivityRef == refOrAlias || normalizeAlias(task.ActivityRef) == normalized) {
+				return resolveImportRef(app, task.ActivityRef, inferAlias(task.ActivityRef)), inferAlias(task.ActivityRef), "", "", true
+			}
+		}
+	}
+
+	if strings.HasPrefix(refOrAlias, "#") || refOrAlias != "" {
+		return resolveImportRef(app, refOrAlias, normalized), normalized, "", "", true
+	}
+
+	return "", "", "", "", false
+}
+
+func resolveImportRef(app flogoApp, ref string, alias string) string {
+	if !strings.HasPrefix(ref, "#") {
+		return ref
+	}
+	normalizedAlias := normalizeAlias(alias)
+	for _, entry := range app.Imports {
+		if entry.Alias == normalizedAlias {
+			return entry.Ref
+		}
+	}
+	return ref
+}
+
+func findDescriptorFile(appPath string, ref string) string {
+	normalizedRef := strings.TrimPrefix(ref, "#")
+	normalizedRef = strings.ReplaceAll(normalizedRef, "\\", "/")
+	roots := buildSearchRoots(appPath)
+	refBase := filepath.Base(normalizedRef)
+
+	for _, root := range roots {
+		candidates := []string{
+			filepath.Join(root, filepath.FromSlash(normalizedRef), "descriptor.json"),
+			filepath.Join(root, "vendor", filepath.FromSlash(normalizedRef), "descriptor.json"),
+			filepath.Join(root, ".flogo", "descriptors", filepath.FromSlash(normalizedRef), "descriptor.json"),
+			filepath.Join(root, "descriptors", filepath.FromSlash(normalizedRef), "descriptor.json"),
+		}
+		if refBase != "" {
+			candidates = append(candidates,
+				filepath.Join(root, refBase, "descriptor.json"),
+				filepath.Join(root, "descriptors", refBase, "descriptor.json"),
+			)
+		}
+
+		for _, candidate := range candidates {
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+		}
+	}
+
+	return ""
+}
+
+func buildSearchRoots(appPath string) []string {
+	roots := map[string]struct{}{}
+	cwd, err := os.Getwd()
+	if err == nil {
+		roots[cwd] = struct{}{}
+	}
+
+	if appPath != "" {
+		appDir := filepath.Dir(appPath)
+		roots[appDir] = struct{}{}
+		roots[filepath.Dir(appDir)] = struct{}{}
+	}
+
+	for _, root := range strings.Split(os.Getenv("FLOGO_DESCRIPTOR_SEARCH_PATHS"), string(os.PathListSeparator)) {
+		trimmed := strings.TrimSpace(root)
+		if trimmed != "" {
+			roots[trimmed] = struct{}{}
+		}
+	}
+
+	result := make([]string, 0, len(roots))
+	for root := range roots {
+		result = append(result, root)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func parseDescriptorFile(descriptorPath string, ref string, alias string, version string, forcedType string) contribDescriptor {
+	contents, err := os.ReadFile(descriptorPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(contents, &raw); err != nil {
+		fail(err.Error())
+	}
+
+	descriptorType := normalizeDescriptorType(raw["type"])
+	if descriptorType == "" {
+		descriptorType = forcedType
+	}
+	if descriptorType == "" {
+		descriptorType = inferContribType(ref)
+	}
+
+	return contribDescriptor{
+		Ref:                ref,
+		Alias:              alias,
+		Type:               descriptorType,
+		Name:               valueOrFallback(stringValue(raw["name"]), valueOrFallback(alias, inferAlias(ref))),
+		Version:            valueOrFallback(stringValue(raw["version"]), version),
+		Title:              stringValue(raw["title"]),
+		Settings:           normalizeDescriptorFields(raw["settings"]),
+		Inputs:             normalizeDescriptorFields(firstNonNil(raw["input"], raw["inputs"])),
+		Outputs:            normalizeDescriptorFields(firstNonNil(raw["output"], raw["outputs"])),
+		Examples:           normalizeStringArray(raw["examples"]),
+		CompatibilityNotes: normalizeStringArray(raw["compatibilityNotes"]),
+		Source:             "descriptor",
+	}
+}
+
+func normalizeDescriptorType(value any) string {
+	if typed, ok := value.(string); ok && (typed == "trigger" || typed == "activity" || typed == "action") {
+		return typed
+	}
+	return ""
+}
+
+func normalizeDescriptorFields(value any) []contribField {
+	items, ok := value.([]any)
+	if !ok {
+		return []contribField{}
+	}
+
+	fields := make([]contribField, 0, len(items))
+	for index, item := range items {
+		switch typed := item.(type) {
+		case string:
+			fields = append(fields, contribField{Name: typed, Required: false})
+		case map[string]any:
+			name := stringValue(typed["name"])
+			if name == "" {
+				name = fmt.Sprintf("field_%d", index)
+			}
+			fields = append(fields, contribField{
+				Name:        name,
+				Type:        stringValue(typed["type"]),
+				Required:    boolValue(typed["required"]),
+				Description: stringValue(typed["description"]),
+			})
+		}
+	}
+
+	return fields
+}
+
+func normalizeStringArray(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return []string{}
+	}
+
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if typed, ok := item.(string); ok {
+			result = append(result, typed)
+		}
+	}
+	return result
+}
+
+func firstNonNil(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func dedupeDiagnostics(items []diagnostic) []diagnostic {
+	seen := map[string]bool{}
+	result := make([]diagnostic, 0, len(items))
+	for _, item := range items {
+		key := item.Code + ":" + item.Path + ":" + item.Message
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, item)
+	}
+	return result
 }
 
 func buildDescriptor(ref string, alias string, version string, forcedType string) contribDescriptor {

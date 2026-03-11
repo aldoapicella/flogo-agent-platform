@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { afterAll, describe, expect, it } from "vitest";
 
+import { AppAnalysisStorageService } from "./app-analysis-storage.service.js";
 import { FlogoAppsService } from "./flogo-apps.service.js";
 
 describe("FlogoAppsService", () => {
@@ -16,6 +17,31 @@ describe("FlogoAppsService", () => {
   const createService = (options?: { storedAppPath?: string; storedAppId?: string; storedAppName?: string }) => {
     const artifacts: Array<{ id: string; taskId: string; kind: string; name: string; uri: string; metadata?: unknown }> = [];
     const tasks = new Map<string, { flogoAppId?: string; requestedBy?: string }>();
+    const storedPayloads: Array<{ blobPath: string; payload: Record<string, unknown> }> = [];
+
+    const storage = {
+      storeJsonArtifact: async ({
+        projectId,
+        appId,
+        artifactId,
+        kind,
+        payload
+      }: {
+        projectId: string;
+        appId: string;
+        artifactId: string;
+        kind: string;
+        payload: Record<string, unknown>;
+      }) => {
+        const blobPath = `app-analysis/${projectId}/${appId}/${kind}/${artifactId}.json`;
+        storedPayloads.push({ blobPath, payload });
+        return {
+          uri: `http://storage.test/flogo-analysis/${blobPath}`,
+          blobPath,
+          contentType: "application/json"
+        };
+      }
+    } satisfies Pick<AppAnalysisStorageService, "storeJsonArtifact">;
 
     const prisma = {
       organization: {
@@ -77,7 +103,10 @@ describe("FlogoAppsService", () => {
       }
     };
 
-    return new FlogoAppsService(prisma as any);
+    return {
+      service: new FlogoAppsService(storage as AppAnalysisStorageService, prisma as any),
+      storedPayloads
+    };
   };
 
   async function createStoredAppFile() {
@@ -137,7 +166,7 @@ describe("FlogoAppsService", () => {
   }
 
   it("returns a contribution catalog for example apps", async () => {
-    const service = createService();
+    const { service, storedPayloads } = createService();
     const response = await service.getCatalog("demo", "hello-rest");
 
     expect(response).toBeDefined();
@@ -145,10 +174,12 @@ describe("FlogoAppsService", () => {
     expect(response?.catalog.entries.some((entry) => entry.type === "activity" && entry.name === "log")).toBe(true);
     expect(response?.catalog.entries.some((entry) => entry.type === "action" && entry.ref === "#flow:hello")).toBe(true);
     expect(response?.artifact?.type).toBe("contrib_catalog");
+    expect(response?.artifact?.metadata?.blobPath).toBeDefined();
+    expect(storedPayloads).toHaveLength(1);
   });
 
   it("previews mappings for example apps and returns an artifact ref", async () => {
-    const service = createService();
+    const { service } = createService();
     const preview = await service.previewMapping("demo", "hello-rest", {
       nodeId: "log-request",
       sampleInput: {
@@ -164,10 +195,12 @@ describe("FlogoAppsService", () => {
     expect(preview?.preview.flowId).toBe("hello");
     expect(preview?.preview.fields.find((field) => field.path === "input.message")?.resolved).toBe("received hello request");
     expect(preview?.artifact?.type).toBe("mapping_preview");
+    expect(preview?.propertyPlan.declaredProperties).toEqual([]);
+    expect(preview?.artifact?.metadata?.blobPath).toBeDefined();
   });
 
   it("lists persisted app-scoped analysis artifacts", async () => {
-    const service = createService();
+    const { service } = createService();
     await service.getCatalog("demo", "hello-rest");
     await service.previewMapping("demo", "hello-rest", {
       nodeId: "log-request",
@@ -188,7 +221,7 @@ describe("FlogoAppsService", () => {
 
   it("prefers DB-backed app records when the app exists in persistence", async () => {
     const storedAppPath = await createStoredAppFile();
-    const service = createService({
+    const { service } = createService({
       storedAppPath,
       storedAppId: "stored-app",
       storedAppName: "stored-rest"
@@ -202,10 +235,22 @@ describe("FlogoAppsService", () => {
   });
 
   it("returns undefined for unknown apps", async () => {
-    const service = createService();
+    const { service } = createService();
 
     await expect(service.getGraph("demo", "missing-app")).resolves.toBeUndefined();
     await expect(service.getCatalog("demo", "missing-app")).resolves.toBeUndefined();
     await expect(service.listArtifacts("demo", "missing-app")).resolves.toBeUndefined();
+  });
+
+  it("returns a descriptor response and persists a descriptor artifact", async () => {
+    const { service, storedPayloads } = createService();
+
+    const descriptor = await service.getDescriptor("demo", "hello-rest", "#log");
+
+    expect(descriptor).toBeDefined();
+    expect(descriptor?.descriptor.name).toBe("log");
+    expect(descriptor?.artifact?.type).toBe("contrib_catalog");
+    expect(descriptor?.artifact?.metadata?.analysisType).toBe("descriptor");
+    expect(storedPayloads.some((entry) => entry.blobPath.includes("/descriptor/"))).toBe(true);
   });
 });

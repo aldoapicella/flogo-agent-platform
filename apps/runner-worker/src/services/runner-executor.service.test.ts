@@ -104,6 +104,46 @@ describe("RunnerExecutorService", () => {
     expect(result.ok).toBe(true);
     expect(result.artifacts.some((artifact) => artifact.type === "mapping_preview")).toBe(true);
   });
+
+  it("executes helper-backed descriptor inspection and publishes a descriptor artifact", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        descriptor: {
+          ref: "github.com/project-flogo/contrib/activity/log",
+          alias: "log",
+          type: "activity",
+          name: "log",
+          settings: [],
+          inputs: [],
+          outputs: [],
+          examples: [],
+          compatibilityNotes: [],
+          source: "registry"
+        },
+        diagnostics: []
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-4",
+      jobKind: "catalog",
+      stepType: "inspect_descriptor",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://descriptor",
+      jobTemplateName: "flogo-runner",
+      targetRef: "#log",
+      command: [],
+      containerArgs: []
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.artifacts.some((artifact) => artifact.name.includes("descriptor"))).toBe(true);
+  });
 });
 
 async function createHelperScript(stdout: string) {

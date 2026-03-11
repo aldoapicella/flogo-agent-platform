@@ -8,6 +8,7 @@ import {
   type ArtifactRef,
   type ContribCatalog,
   type ContribDescriptor,
+  type ContribDescriptorResponse,
   type Diagnostic,
   type MappingPreviewResult,
   type RunnerJobResult,
@@ -156,11 +157,12 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
     }
 
     if (spec.stepType === "inspect_descriptor") {
-      const descriptor = JSON.parse(stdout) as ContribDescriptor;
+      const response = JSON.parse(stdout) as ContribDescriptorResponse;
+      const descriptor = response.descriptor as ContribDescriptor;
       return [
         createAnalysisArtifact(spec, "contrib_catalog", `descriptor-${spec.targetRef ?? "target"}`, {
           descriptor,
-          diagnostics
+          diagnostics: [...(response.diagnostics ?? []), ...diagnostics]
         })
       ];
     }

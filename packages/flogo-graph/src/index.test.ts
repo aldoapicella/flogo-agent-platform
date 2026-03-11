@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { afterAll, describe, expect, it } from "vitest";
 
 import {
   analyzePropertyUsage,
   buildAppGraph,
   buildContribCatalog,
+  inspectContribDescriptor,
   previewMapping,
   suggestCoercions,
   summarizeAppDiff,
@@ -125,6 +130,12 @@ const legacyShapeApp = {
 };
 
 describe("flogo graph", () => {
+  const tempPaths: string[] = [];
+
+  afterAll(async () => {
+    await Promise.all(tempPaths.map((tempPath) => fs.rm(tempPath, { recursive: true, force: true })));
+  });
+
   it("builds a graph from a valid app", () => {
     const graph = buildAppGraph(validApp);
     expect(graph.resourceIds).toContain("hello_flow");
@@ -240,5 +251,58 @@ describe("flogo graph", () => {
 
     expect(plan.propertyRefs).toContain("retryCount");
     expect(plan.envRefs).toContain("REGION");
+    expect(plan.declaredProperties).toContain("retryCount");
+    expect(plan.recommendedEnv.some((entry) => entry.name === "REGION")).toBe(true);
+  });
+
+  it("reports undefined and unused properties in the property plan", () => {
+    const app = structuredClone(validApp);
+    app.resources[0].data.tasks[0].input = {
+      missingValue: "$property.apiBaseUrl"
+    };
+
+    const plan = analyzePropertyUsage(app);
+
+    expect(plan.undefinedPropertyRefs).toContain("apiBaseUrl");
+    expect(plan.unusedProperties).toContain("retryCount");
+    expect(plan.recommendedProperties.some((entry) => entry.name === "apiBaseUrl")).toBe(true);
+  });
+
+  it("prefers descriptor metadata from descriptor.json when available", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "flogo-descriptor-"));
+    tempPaths.push(tempDir);
+    const descriptorPath = path.join(
+      tempDir,
+      "github.com",
+      "project-flogo",
+      "contrib",
+      "activity",
+      "log",
+      "descriptor.json"
+    );
+    await fs.mkdir(path.dirname(descriptorPath), { recursive: true });
+    await fs.writeFile(
+      descriptorPath,
+      JSON.stringify(
+        {
+          name: "workspace-log",
+          type: "activity",
+          version: "2.0.0",
+          title: "Workspace Log",
+          input: [{ name: "message", type: "string", required: true }],
+          output: []
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const catalog = buildContribCatalog(validApp, { searchRoots: [tempDir] });
+    const descriptor = inspectContribDescriptor(validApp, "#log", { searchRoots: [tempDir] });
+
+    expect(catalog.entries.find((entry) => entry.alias === "log")?.name).toBe("workspace-log");
+    expect(descriptor?.descriptor.source).toBe("descriptor");
+    expect(descriptor?.diagnostics).toEqual([]);
   });
 });

@@ -335,6 +335,13 @@ export const ContribCatalogResponseSchema = z.object({
 });
 export type ContribCatalogResponse = z.infer<typeof ContribCatalogResponseSchema>;
 
+export const ContribDescriptorResponseSchema = z.object({
+  descriptor: ContribDescriptorSchema,
+  diagnostics: z.array(DiagnosticSchema).default([]),
+  artifact: ArtifactRefSchema.optional()
+});
+export type ContribDescriptorResponse = z.infer<typeof ContribDescriptorResponseSchema>;
+
 export const MappingKindSchema = z.enum(["literal", "expression", "object", "array"]);
 export type MappingKind = z.infer<typeof MappingKindSchema>;
 
@@ -379,10 +386,29 @@ export const PropertyPlanRecommendationSchema = z.object({
 });
 export type PropertyPlanRecommendation = z.infer<typeof PropertyPlanRecommendationSchema>;
 
+export const PropertyDefinitionRecommendationSchema = z.object({
+  name: z.string(),
+  rationale: z.string(),
+  inferredType: z.string().optional()
+});
+export type PropertyDefinitionRecommendation = z.infer<typeof PropertyDefinitionRecommendationSchema>;
+
+export const EnvRecommendationSchema = z.object({
+  name: z.string(),
+  rationale: z.string()
+});
+export type EnvRecommendation = z.infer<typeof EnvRecommendationSchema>;
+
 export const PropertyPlanSchema = z.object({
+  declaredProperties: z.array(z.string()).default([]),
   propertyRefs: z.array(z.string()).default([]),
   envRefs: z.array(z.string()).default([]),
+  undefinedPropertyRefs: z.array(z.string()).default([]),
+  unusedProperties: z.array(z.string()).default([]),
   recommendations: z.array(PropertyPlanRecommendationSchema).default([]),
+  recommendedProperties: z.array(PropertyDefinitionRecommendationSchema).default([]),
+  recommendedEnv: z.array(EnvRecommendationSchema).default([]),
+  deploymentNotes: z.array(z.string()).default([]),
   diagnostics: z.array(DiagnosticSchema).default([])
 });
 export type PropertyPlan = z.infer<typeof PropertyPlanSchema>;

@@ -88,4 +88,17 @@ export class RunnerTools {
       retryable: false
     });
   }
+
+  async inspectDescriptor(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({ ...parsed, stepType: "inspect_descriptor", jobKind: "catalog" });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued descriptor inspection job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
 }

@@ -1,8 +1,13 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+
 import {
   ContribCatalogSchema,
   type ContribCatalog,
   ContribDescriptorSchema,
   type ContribDescriptor,
+  ContribDescriptorResponseSchema,
+  type ContribDescriptorResponse,
   type Diagnostic,
   FlogoAppGraphSchema,
   FlogoAppSchema,
@@ -43,6 +48,16 @@ type LocatedTask = {
   flowId: string;
   flow: FlogoFlow;
   task: FlogoFlow["data"]["tasks"][number];
+};
+
+export interface ContribLookupOptions {
+  appPath?: string;
+  searchRoots?: string[];
+}
+
+type ResolvedDescriptor = {
+  descriptor: ContribDescriptor;
+  diagnostics: Diagnostic[];
 };
 
 const knownDescriptorRegistry = new Map<string, Omit<ContribDescriptor, "ref" | "alias">>([
@@ -370,9 +385,10 @@ export function validateFlogoApp(document: string | FlogoApp | unknown): Validat
   });
 }
 
-export function buildContribCatalog(document: string | FlogoApp | unknown): ContribCatalog {
+export function buildContribCatalog(document: string | FlogoApp | unknown, options?: ContribLookupOptions): ContribCatalog {
   const app = parseFlogoAppDocument(document);
   const entries = new Map<string, ContribDescriptor>();
+  const diagnostics: Diagnostic[] = [];
 
   const upsert = (entry: ContribDescriptor) => {
     const key = `${entry.type}:${entry.alias ?? entry.ref}`;
@@ -380,11 +396,15 @@ export function buildContribCatalog(document: string | FlogoApp | unknown): Cont
   };
 
   for (const entry of app.imports) {
-    upsert(buildDescriptorFromRef(entry.ref, entry.alias, entry.version));
+    const resolved = resolveDescriptor(app, entry.ref, entry.alias, entry.version, undefined, options);
+    upsert(resolved.descriptor);
+    diagnostics.push(...resolved.diagnostics);
   }
 
   for (const trigger of app.triggers) {
-    upsert(buildDescriptorFromRef(trigger.ref, inferAliasFromRef(trigger.ref), undefined, "trigger"));
+    const resolved = resolveDescriptor(app, trigger.ref, inferAliasFromRef(trigger.ref), undefined, "trigger", options);
+    upsert(resolved.descriptor);
+    diagnostics.push(...resolved.diagnostics);
   }
 
   for (const resource of app.resources) {
@@ -416,20 +436,51 @@ export function buildContribCatalog(document: string | FlogoApp | unknown): Cont
       if (!task.activityRef) {
         continue;
       }
-      upsert(buildDescriptorFromRef(task.activityRef, inferAliasFromRef(task.activityRef)));
+      const resolved = resolveDescriptor(app, task.activityRef, inferAliasFromRef(task.activityRef), undefined, undefined, options);
+      upsert(resolved.descriptor);
+      diagnostics.push(...resolved.diagnostics);
     }
   }
 
   return ContribCatalogSchema.parse({
     appName: app.name,
     entries: Array.from(entries.values()).sort((left, right) => left.name.localeCompare(right.name)),
-    diagnostics: []
+    diagnostics: dedupeDiagnostics(diagnostics)
   });
 }
 
-export function introspectContrib(document: string | FlogoApp | unknown, refOrAlias: string): ContribDescriptor | undefined {
-  const catalog = buildContribCatalog(document);
-  return catalog.entries.find((entry) => entry.ref === refOrAlias || entry.alias === normalizeAlias(refOrAlias));
+export function inspectContribDescriptor(
+  document: string | FlogoApp | unknown,
+  refOrAlias: string,
+  options?: ContribLookupOptions
+): ContribDescriptorResponse | undefined {
+  const app = parseFlogoAppDocument(document);
+  const flowDescriptor = resolveFlowDescriptor(app, refOrAlias);
+  if (flowDescriptor) {
+    return ContribDescriptorResponseSchema.parse({
+      descriptor: flowDescriptor,
+      diagnostics: []
+    });
+  }
+
+  const appRef = resolveAppRef(app, refOrAlias);
+  if (!appRef) {
+    return undefined;
+  }
+
+  const resolved = resolveDescriptor(app, appRef.ref, appRef.alias, appRef.version, appRef.forcedType, options);
+  return ContribDescriptorResponseSchema.parse({
+    descriptor: resolved.descriptor,
+    diagnostics: dedupeDiagnostics(resolved.diagnostics)
+  });
+}
+
+export function introspectContrib(
+  document: string | FlogoApp | unknown,
+  refOrAlias: string,
+  options?: ContribLookupOptions
+): ContribDescriptor | undefined {
+  return inspectContribDescriptor(document, refOrAlias, options)?.descriptor;
 }
 
 export function classifyMappingValue(value: unknown) {
@@ -506,6 +557,7 @@ export function analyzePropertyUsage(document: string | FlogoApp | unknown): Pro
   const propertyRefs = new Set<string>();
   const envRefs = new Set<string>();
   const diagnostics: Diagnostic[] = [];
+  const undefinedPropertyRefs = new Set<string>();
 
   for (const resource of app.resources) {
     for (const task of resource.data.tasks) {
@@ -519,6 +571,7 @@ export function analyzePropertyUsage(document: string | FlogoApp | unknown): Pro
   const declaredProperties = new Set(app.properties.map((property) => property.name));
   for (const propertyRef of propertyRefs) {
     if (!declaredProperties.has(propertyRef)) {
+      undefinedPropertyRefs.add(propertyRef);
       diagnostics.push(
         createDiagnostic(
           "flogo.property.undefined",
@@ -530,6 +583,9 @@ export function analyzePropertyUsage(document: string | FlogoApp | unknown): Pro
     }
   }
 
+  const unusedProperties = Array.from(declaredProperties)
+    .filter((property) => !propertyRefs.has(property))
+    .sort();
   for (const property of app.properties) {
     if (!propertyRefs.has(property.name)) {
       diagnostics.push(
@@ -544,8 +600,11 @@ export function analyzePropertyUsage(document: string | FlogoApp | unknown): Pro
   }
 
   return PropertyPlanSchema.parse({
+    declaredProperties: Array.from(declaredProperties).sort(),
     propertyRefs: Array.from(propertyRefs).sort(),
     envRefs: Array.from(envRefs).sort(),
+    undefinedPropertyRefs: Array.from(undefinedPropertyRefs).sort(),
+    unusedProperties,
     recommendations: [
       ...Array.from(propertyRefs)
         .sort()
@@ -562,6 +621,20 @@ export function analyzePropertyUsage(document: string | FlogoApp | unknown): Pro
           rationale: "Referenced through $env and suitable for deployment-specific configuration"
         }))
     ],
+    recommendedProperties: Array.from(undefinedPropertyRefs)
+      .sort()
+      .map((name) => ({
+        name,
+        rationale: "This property is referenced in mappings but is not declared on the app.",
+        inferredType: inferPropertyType(app, name)
+      })),
+    recommendedEnv: Array.from(envRefs)
+      .sort()
+      .map((name) => ({
+        name,
+        rationale: "This environment variable is referenced through $env and should be supplied per deployment environment."
+      })),
+    deploymentNotes: buildDeploymentNotes(propertyRefs, envRefs, undefinedPropertyRefs, unusedProperties),
     diagnostics
   });
 }
@@ -619,6 +692,327 @@ function buildDescriptorFromRef(ref: string, alias?: string, version?: string, f
     compatibilityNotes: registryMatch?.compatibilityNotes ?? [],
     source: registryMatch?.source ?? "inferred"
   });
+}
+
+function resolveDescriptor(
+  app: FlogoApp,
+  ref: string,
+  alias?: string,
+  version?: string,
+  forcedType?: ContribDescriptor["type"],
+  options?: ContribLookupOptions
+): ResolvedDescriptor {
+  const resolvedRef = resolveImportRef(app, ref, alias);
+  const normalizedAlias = alias ?? inferAliasFromRef(ref) ?? inferAliasFromRef(resolvedRef);
+  const descriptorFile = findDescriptorFile(resolvedRef, options);
+
+  if (descriptorFile) {
+    return {
+      descriptor: parseDescriptorFile(descriptorFile, resolvedRef, normalizedAlias, version, forcedType),
+      diagnostics: []
+    };
+  }
+
+  const registryDescriptor = buildDescriptorFromRef(resolvedRef, normalizedAlias, version, forcedType);
+  const sourceCode = knownDescriptorRegistry.has(normalizeAlias(normalizedAlias ?? "")) ? "flogo.contrib.registry_fallback" : "flogo.contrib.inferred_metadata";
+  const sourceMessage =
+    sourceCode === "flogo.contrib.registry_fallback"
+      ? `Descriptor metadata for "${resolvedRef}" was not found on disk; using registry fallback metadata`
+      : `Descriptor metadata for "${resolvedRef}" was not found on disk; using inferred metadata`;
+
+  return {
+    descriptor: registryDescriptor,
+    diagnostics: [
+      createDiagnostic(
+        sourceCode,
+        sourceMessage,
+        sourceCode === "flogo.contrib.inferred_metadata" ? "warning" : "info",
+        normalizedAlias ? `imports.${normalizedAlias}` : resolvedRef
+      )
+    ]
+  };
+}
+
+function resolveFlowDescriptor(app: FlogoApp, refOrAlias: string): ContribDescriptor | undefined {
+  const normalized = normalizeAlias(refOrAlias);
+  const flowId = refOrAlias.startsWith("#flow:")
+    ? refOrAlias.replace("#flow:", "")
+    : normalized === "flow"
+      ? undefined
+      : normalized;
+
+  if (normalized === "flow") {
+    return undefined;
+  }
+
+  const resource = app.resources.find((entry) => entry.id === flowId);
+  if (!resource) {
+    return undefined;
+  }
+
+  return ContribDescriptorSchema.parse({
+    ref: `#flow:${resource.id}`,
+    alias: "flow",
+    type: "action",
+    name: resource.data.name ?? resource.id,
+    title: resource.data.name ?? resource.id,
+    settings: [],
+    inputs: (resource.data.metadata?.input ?? []).map((item, index) => ({
+      name: typeof item.name === "string" ? item.name : `input_${index}`,
+      type: typeof item.type === "string" ? item.type : undefined,
+      required: Boolean(item.required)
+    })),
+    outputs: (resource.data.metadata?.output ?? []).map((item, index) => ({
+      name: typeof item.name === "string" ? item.name : `output_${index}`,
+      type: typeof item.type === "string" ? item.type : undefined,
+      required: Boolean(item.required)
+    })),
+    examples: [`Invoke reusable flow ${resource.id}`],
+    compatibilityNotes: ["Flow resources behave like reusable actions"],
+    source: "flow-resource"
+  });
+}
+
+function resolveAppRef(
+  app: FlogoApp,
+  refOrAlias: string
+): { ref: string; alias?: string; version?: string; forcedType?: ContribDescriptor["type"] } | undefined {
+  if (refOrAlias.startsWith("#flow:")) {
+    const flowDescriptor = resolveFlowDescriptor(app, refOrAlias);
+    if (flowDescriptor) {
+      return {
+        ref: flowDescriptor.ref,
+        alias: flowDescriptor.alias,
+        forcedType: flowDescriptor.type
+      };
+    }
+  }
+
+  const normalized = normalizeAlias(refOrAlias);
+  const importMatch = app.imports.find((entry) => entry.alias === normalized || entry.ref === refOrAlias || entry.ref === normalized);
+  if (importMatch) {
+    return {
+      ref: importMatch.ref,
+      alias: importMatch.alias,
+      version: importMatch.version
+    };
+  }
+
+  const triggerMatch = app.triggers.find((entry) => entry.ref === refOrAlias || normalizeAlias(entry.ref) === normalized);
+  if (triggerMatch) {
+    return {
+      ref: resolveImportRef(app, triggerMatch.ref, inferAliasFromRef(triggerMatch.ref)),
+      alias: inferAliasFromRef(triggerMatch.ref),
+      forcedType: "trigger"
+    };
+  }
+
+  for (const resource of app.resources) {
+    const taskMatch = resource.data.tasks.find(
+      (task) => task.activityRef && (task.activityRef === refOrAlias || normalizeAlias(task.activityRef) === normalized)
+    );
+    if (taskMatch?.activityRef) {
+      return {
+        ref: resolveImportRef(app, taskMatch.activityRef, inferAliasFromRef(taskMatch.activityRef)),
+        alias: inferAliasFromRef(taskMatch.activityRef)
+      };
+    }
+  }
+
+  if (refOrAlias.startsWith("#")) {
+    return {
+      ref: resolveImportRef(app, refOrAlias, normalized),
+      alias: normalized
+    };
+  }
+
+  if (refOrAlias.length > 0) {
+    return {
+      ref: refOrAlias,
+      alias: inferAliasFromRef(refOrAlias)
+    };
+  }
+
+  return undefined;
+}
+
+function resolveImportRef(app: FlogoApp, ref: string, alias?: string) {
+  if (!ref.startsWith("#")) {
+    return ref;
+  }
+
+  const normalizedAlias = normalizeAlias(alias ?? ref);
+  const match = app.imports.find((entry) => entry.alias === normalizedAlias);
+  return match?.ref ?? ref;
+}
+
+function findDescriptorFile(ref: string, options?: ContribLookupOptions) {
+  const normalizedRef = ref.replace(/^#/, "").replace(/\\/g, "/");
+  const searchRoots = buildSearchRoots(options);
+  const refBasename = normalizedRef.split("/").filter(Boolean).at(-1);
+
+  for (const root of searchRoots) {
+    const candidates = [
+      path.join(root, normalizedRef, "descriptor.json"),
+      path.join(root, "vendor", normalizedRef, "descriptor.json"),
+      path.join(root, ".flogo", "descriptors", normalizedRef, "descriptor.json"),
+      path.join(root, "descriptors", normalizedRef, "descriptor.json"),
+      refBasename ? path.join(root, refBasename, "descriptor.json") : undefined,
+      refBasename ? path.join(root, "descriptors", refBasename, "descriptor.json") : undefined
+    ].filter((candidate): candidate is string => Boolean(candidate));
+
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function buildSearchRoots(options?: ContribLookupOptions) {
+  const roots = new Set<string>();
+  roots.add(process.cwd());
+
+  if (options?.appPath) {
+    const appDir = path.dirname(path.resolve(options.appPath));
+    roots.add(appDir);
+    roots.add(path.dirname(appDir));
+  }
+
+  for (const root of options?.searchRoots ?? []) {
+    roots.add(path.resolve(root));
+  }
+
+  const envSearchRoots = process.env.FLOGO_DESCRIPTOR_SEARCH_PATHS
+    ?.split(path.delimiter)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  for (const root of envSearchRoots ?? []) {
+    roots.add(path.resolve(root));
+  }
+
+  return Array.from(roots);
+}
+
+function parseDescriptorFile(
+  descriptorPath: string,
+  ref: string,
+  alias?: string,
+  version?: string,
+  forcedType?: ContribDescriptor["type"]
+): ContribDescriptor {
+  const raw = JSON.parse(readFileSync(descriptorPath, "utf8")) as Record<string, unknown>;
+  const fieldSet = (value: unknown) => normalizeDescriptorFields(value);
+  const descriptorType = normalizeDescriptorType(raw.type) ?? forcedType ?? inferContribType(ref);
+
+  return ContribDescriptorSchema.parse({
+    ref,
+    alias,
+    type: descriptorType,
+    name: typeof raw.name === "string" ? raw.name : alias ?? inferNameFromRef(ref),
+    version: typeof raw.version === "string" ? raw.version : version,
+    title: typeof raw.title === "string" ? raw.title : undefined,
+    settings: fieldSet(raw.settings),
+    inputs: fieldSet(raw.input ?? raw.inputs),
+    outputs: fieldSet(raw.output ?? raw.outputs),
+    examples: normalizeStringArray(raw.examples),
+    compatibilityNotes: normalizeStringArray(raw.compatibilityNotes),
+    source: "descriptor"
+  });
+}
+
+function normalizeDescriptorType(value: unknown): ContribDescriptor["type"] | undefined {
+  return value === "trigger" || value === "activity" || value === "action" ? value : undefined;
+}
+
+function normalizeDescriptorFields(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((field, index) => {
+    if (typeof field === "string") {
+      return {
+        name: field,
+        required: false
+      };
+    }
+
+    const record = (field ?? {}) as Record<string, unknown>;
+    return {
+      name: typeof record.name === "string" ? record.name : `field_${index}`,
+      type: typeof record.type === "string" ? record.type : undefined,
+      required: Boolean(record.required),
+      description: typeof record.description === "string" ? record.description : undefined
+    };
+  });
+}
+
+function normalizeStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+function dedupeDiagnostics(diagnostics: Diagnostic[]) {
+  const seen = new Set<string>();
+  const result: Diagnostic[] = [];
+  for (const diagnostic of diagnostics) {
+    const key = `${diagnostic.code}:${diagnostic.path ?? ""}:${diagnostic.message}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(diagnostic);
+  }
+  return result;
+}
+
+function inferPropertyType(app: FlogoApp, propertyName: string) {
+  const declared = app.properties.find((property) => property.name === propertyName);
+  if (typeof declared?.type === "string") {
+    return declared.type;
+  }
+  if (typeof declared?.value === "number") {
+    return "number";
+  }
+  if (typeof declared?.value === "boolean") {
+    return "boolean";
+  }
+  if (typeof declared?.value === "string") {
+    return "string";
+  }
+
+  const lowerName = propertyName.toLowerCase();
+  if (/(count|size|length|timeout|interval|port|code|status|limit)/i.test(lowerName)) {
+    return "number";
+  }
+  if (/(enabled|disabled|success|retry|dryrun|debug|active)/i.test(lowerName)) {
+    return "boolean";
+  }
+  return "string";
+}
+
+function buildDeploymentNotes(
+  propertyRefs: Set<string>,
+  envRefs: Set<string>,
+  undefinedPropertyRefs: Set<string>,
+  unusedProperties: string[]
+) {
+  const notes: string[] = [];
+  if (propertyRefs.size > 0) {
+    notes.push("Property-backed configuration should be declared on the app so flows can be reused across trigger types.");
+  }
+  if (envRefs.size > 0) {
+    notes.push("Environment-backed configuration should be supplied per deployment target rather than embedded in flogo.json.");
+  }
+  if (undefinedPropertyRefs.size > 0) {
+    notes.push("Undefined property references should be declared before promoting the app beyond development.");
+  }
+  if (unusedProperties.length > 0) {
+    notes.push("Unused declared properties should be removed or wired into mappings to keep configuration intentional.");
+  }
+  return notes;
 }
 
 function inferContribType(ref: string): ContribDescriptor["type"] {

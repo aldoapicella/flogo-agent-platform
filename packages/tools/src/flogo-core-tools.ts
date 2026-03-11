@@ -2,7 +2,7 @@ import type { TaskRequest, ToolResponse, FlogoApp, ContribCatalog, ContribDescri
 import {
   buildContribCatalog,
   defineProperties,
-  introspectContrib,
+  inspectContribDescriptor,
   parseFlogoAppDocument,
   summarizeAppDiff,
   validateAliases,
@@ -74,13 +74,14 @@ export class FlogoCoreTools {
   }
 
   introspectDescriptor(raw: string | FlogoApp | unknown, refOrAlias: string): ToolResponse {
-    const descriptor: ContribDescriptor | undefined = introspectContrib(raw, refOrAlias);
+    const result = inspectContribDescriptor(raw, refOrAlias);
+    const descriptor: ContribDescriptor | undefined = result?.descriptor;
     return toolResponse({
       ok: Boolean(descriptor),
       summary: descriptor ? `Resolved descriptor for ${descriptor.name}` : `Unable to resolve descriptor for ${refOrAlias}`,
       data: { descriptor },
       diagnostics: descriptor
-        ? []
+        ? result?.diagnostics ?? []
         : [
             {
               code: "flogo.catalog.missing_descriptor",
