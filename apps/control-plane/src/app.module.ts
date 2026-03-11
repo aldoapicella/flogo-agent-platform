@@ -9,7 +9,6 @@ import { FlogoAppsModule } from "./modules/flogo-apps/flogo-apps.module.js";
 import { HealthModule } from "./modules/health/health.module.js";
 import { PrismaModule } from "./modules/prisma/prisma.module.js";
 import { PromptsModule } from "./modules/prompts/prompts.module.js";
-import { QueueModule } from "./modules/queue/queue.module.js";
 import { TasksModule } from "./modules/tasks/tasks.module.js";
 import { ToolsModule } from "./modules/tools/tools.module.js";
 
@@ -20,7 +19,7 @@ import { ToolsModule } from "./modules/tools/tools.module.js";
       load: [
         () => ({
           port: Number(process.env.PORT ?? process.env.CONTROL_PLANE_PORT ?? 3000),
-          redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
+          orchestratorBaseUrl: process.env.ORCHESTRATOR_BASE_URL ?? "http://localhost:7071/api",
           workspaceRoot: process.cwd()
         })
       ]
@@ -28,7 +27,6 @@ import { ToolsModule } from "./modules/tools/tools.module.js";
     HealthModule,
     EventsModule,
     PrismaModule,
-    QueueModule,
     ToolsModule,
     PromptsModule,
     AgentModule,

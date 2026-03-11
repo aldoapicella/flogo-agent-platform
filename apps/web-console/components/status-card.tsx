@@ -15,7 +15,10 @@ export function StatusCard({ task }: { task: TaskResult | null }) {
       <div className="pill">{task.status}</div>
       <h3>{task.summary}</h3>
       <p className="meta">Type: {task.type}</p>
+      <p className="meta">Orchestration: {task.orchestrationId ?? "pending"}</p>
+      <p className="meta">Approval state: {task.approvalStatus ?? "n/a"}</p>
       <p className="meta">Approvals: {task.requiredApprovals.join(", ") || "none"}</p>
+      <p className="meta">Active jobs: {task.activeJobRuns.length}</p>
       <div className="list">
         {task.nextActions.map((action) => (
           <div key={action}>{action}</div>
@@ -24,4 +27,3 @@ export function StatusCard({ task }: { task: TaskResult | null }) {
     </div>
   );
 }
-

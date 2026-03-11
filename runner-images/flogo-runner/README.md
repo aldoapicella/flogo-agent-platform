@@ -1,6 +1,6 @@
 # flogo-runner
 
-Container image used for local Docker execution and AKS Jobs.
+Container image used for local runner execution and Azure Container Apps Jobs.
 
 ## Included tools
 
@@ -16,4 +16,3 @@ Container image used for local Docker execution and AKS Jobs.
 docker build -t flogo-runner runner-images/flogo-runner
 docker run --rm -it flogo-runner flogo version
 ```
-

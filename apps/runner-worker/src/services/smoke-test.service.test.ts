@@ -11,9 +11,12 @@ describe("SmokeTestService", () => {
       snapshotUri: "workspace://task-1",
       appPath: "flogo.json",
       env: {},
+      envSecretRefs: {},
       timeoutSeconds: 60,
       artifactOutputUri: "artifact://task-1",
-      command: []
+      jobTemplateName: "flogo-runner",
+      command: [],
+      containerArgs: []
     });
 
     expect(smokeTest.assertions[0]?.expected).toBe(200);

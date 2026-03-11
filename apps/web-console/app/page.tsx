@@ -22,8 +22,8 @@ export default function HomePage() {
         <div className="card">
           <h2>Operator notes</h2>
           <p className="meta">
-            The control-plane exposes REST, SSE, and artifact endpoints. The runner-worker consumes BullMQ jobs and the
-            web console tracks task state via shared contracts.
+            The control-plane exposes REST, SSE, and artifact endpoints. The orchestrator owns long-running workflow
+            state, and the runner-worker normalizes finite build, run, and smoke-test job runs.
           </p>
           <div className="list">
             <Link href="/tasks/example-task">Open task detail shell</Link>
@@ -34,4 +34,3 @@ export default function HomePage() {
     </main>
   );
 }
-

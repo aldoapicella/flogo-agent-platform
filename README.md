@@ -4,8 +4,9 @@ Foundation-first AI agent platform for creating, updating, debugging, and review
 
 ## Workspace
 
-- `apps/control-plane`: Fastify-based NestJS control plane and orchestration entrypoint
-- `apps/runner-worker`: BullMQ worker for isolated build, run, and smoke-test execution
+- `apps/control-plane`: Fastify-based NestJS control plane and public API
+- `apps/orchestrator`: Node-based workflow host with Durable Functions definitions and a local orchestration shim
+- `apps/runner-worker`: internal job dispatcher and status service for isolated build, run, and smoke-test execution
 - `apps/web-console`: Next.js operator console
 - `packages/contracts`: shared Zod contracts
 - `packages/flogo-graph`: Flogo parser and validators
@@ -25,6 +26,7 @@ Foundation-first AI agent platform for creating, updating, debugging, and review
 
 - `flogo.json` is the canonical application artifact.
 - PostgreSQL is the system of record.
-- Redis is used for BullMQ queues and short-lived stream state.
 - Blob storage is Azurite locally and Azure Blob in production.
-- AKS is the primary production target, with AKS Jobs running the Flogo runner image.
+- Azure Container Apps hosts the always-on services.
+- Azure Container Apps Jobs host the isolated Flogo runner executions.
+- Managed identity and Key Vault are the default secret and identity model.

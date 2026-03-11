@@ -10,9 +10,12 @@ describe("RunnerExecutorService", () => {
       snapshotUri: ".",
       appPath: "flogo.json",
       env: {},
+      envSecretRefs: {},
       timeoutSeconds: 60,
       artifactOutputUri: "memory://build",
-      command: []
+      jobTemplateName: "flogo-runner",
+      command: [],
+      containerArgs: []
     });
 
     expect(result.ok).toBe(true);

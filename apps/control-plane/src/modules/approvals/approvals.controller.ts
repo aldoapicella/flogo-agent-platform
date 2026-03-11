@@ -16,11 +16,10 @@ export class ApprovalsController {
       status: ((body as Record<string, unknown>)?.status as string | undefined) ?? "approved",
       type: ((body as Record<string, unknown>)?.type as string | undefined) ?? "change_public_contract"
     });
-    const task = await this.orchestrationService.approveTask(taskId, decision.rationale);
+    const task = await this.orchestrationService.approveTask(taskId, decision);
     if (!task) {
       throw new NotFoundException(`Unknown task ${taskId}`);
     }
     return task.result;
   }
 }
-

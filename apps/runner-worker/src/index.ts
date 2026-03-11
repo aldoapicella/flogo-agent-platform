@@ -1,14 +1,36 @@
-import { createRunnerWorker } from "./processors/runner-job.processor.js";
+import Fastify from "fastify";
+
+import { RunnerJobService } from "./services/runner-job.service.js";
 
 async function bootstrap(): Promise<void> {
-  const worker = createRunnerWorker();
-  worker.on("completed", (job) => {
-    console.log(`runner-worker completed ${job.id}`);
+  const app = Fastify({
+    logger: true
   });
-  worker.on("failed", (job, error) => {
-    console.error(`runner-worker failed ${job?.id}:`, error);
+  const jobs = new RunnerJobService();
+
+  app.get("/health", async () => ({
+    ok: true,
+    service: "runner-worker"
+  }));
+
+  app.post("/internal/jobs/start", async (request) => jobs.start(request.body));
+
+  app.get<{ Params: { jobRunId: string } }>("/internal/jobs/:jobRunId", async (request, reply) => {
+    const job = jobs.get(request.params.jobRunId);
+    if (!job) {
+      return reply.code(404).send({
+        message: `Unknown job run ${request.params.jobRunId}`
+      });
+    }
+
+    return reply.send(job);
   });
-  console.log("runner-worker listening for runner-jobs");
+
+  const port = Number(process.env.RUNNER_WORKER_PORT ?? 3010);
+  await app.listen({
+    port,
+    host: "0.0.0.0"
+  });
 }
 
 bootstrap().catch((error: unknown) => {

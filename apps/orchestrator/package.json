@@ -1,17 +1,18 @@
 {
-  "name": "@flogo-agent/runner-worker",
+  "name": "@flogo-agent/orchestrator",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "tsc --project tsconfig.json",
-    "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
+    "dev": "tsx watch src/dev-server.ts",
+    "start": "node dist/dev-server.js",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@azure/functions": "^4.11.2",
     "@flogo-agent/contracts": "workspace:*",
-    "@flogo-agent/tools": "workspace:*",
+    "durable-functions": "^3.3.0",
     "fastify": "^5.2.1"
   }
 }

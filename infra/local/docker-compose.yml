@@ -10,11 +10,6 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
-  redis:
-    image: redis:7.4
-    ports:
-      - "6379:6379"
-
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite:3.33.0
     command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0
@@ -34,30 +29,48 @@ services:
       pnpm --filter @flogo-agent/control-plane dev"
     environment:
       CONTROL_PLANE_PORT: 3001
-      REDIS_URL: redis://redis:6379
+      ORCHESTRATOR_BASE_URL: http://orchestrator:7071/api
       DATABASE_URL: postgresql://flogo:flogo@postgres:5432/flogo_agent?schema=public
     ports:
       - "3001:3001"
     depends_on:
       - postgres
-      - redis
+      - orchestrator
+
+  orchestrator:
+    image: node:22-bookworm
+    working_dir: /workspace
+    volumes:
+      - ../../:/workspace
+    command: >
+      bash -lc "corepack enable &&
+      pnpm install &&
+      pnpm --filter @flogo-agent/orchestrator dev"
+    environment:
+      ORCHESTRATOR_PORT: 7071
+      RUNNER_WORKER_BASE_URL: http://runner-worker:3010
+      CONTROL_PLANE_INTERNAL_URL: http://control-plane:3001/v1
+    ports:
+      - "7071:7071"
+    depends_on:
+      - runner-worker
 
   runner-worker:
     image: node:22-bookworm
     working_dir: /workspace
     volumes:
       - ../../:/workspace
-      - /var/run/docker.sock:/var/run/docker.sock
     command: >
       bash -lc "corepack enable &&
       pnpm install &&
       pnpm --filter @flogo-agent/runner-worker dev"
     environment:
-      REDIS_URL: redis://redis:6379
-      RUNNER_WORKER_CONCURRENCY: 2
-      RUNNER_EXECUTION_MODE: local-docker
+      RUNNER_WORKER_PORT: 3010
+      RUNNER_EXECUTION_MODE: local-process
+    ports:
+      - "3010:3010"
     depends_on:
-      - redis
+      - azurite
 
   web-console:
     image: node:22-bookworm
@@ -77,4 +90,3 @@ services:
 
 volumes:
   postgres-data:
-

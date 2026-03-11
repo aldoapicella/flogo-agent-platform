@@ -6,6 +6,7 @@ import {
   type Diagnostic,
   type RunnerJobResult,
   type RunnerJobSpec,
+  RunnerJobSpecSchema,
   RunnerJobResultSchema
 } from "@flogo-agent/contracts";
 
@@ -43,9 +44,11 @@ function createCommand(spec: RunnerJobSpec): string[] {
 }
 
 export class RunnerExecutorService implements RunnerExecutor {
-  async execute(spec: RunnerJobSpec): Promise<RunnerJobResult> {
+  async execute(specInput: RunnerJobSpec): Promise<RunnerJobResult> {
+    const spec = RunnerJobSpecSchema.parse(specInput);
     const command = createCommand(spec);
     const [binary, ...args] = command;
+    const startedAt = new Date().toISOString();
 
     return new Promise((resolve) => {
       const child = spawn(binary, args, {
@@ -70,9 +73,14 @@ export class RunnerExecutorService implements RunnerExecutor {
         resolve(
           RunnerJobResultSchema.parse({
             jobId: `${spec.taskId}-${spec.stepType}`,
+            jobRunId: spec.jobRunId,
             ok: code === 0,
+            status: code === 0 ? "succeeded" : "failed",
             summary: code === 0 ? `Executed ${spec.stepType}` : `Execution failed for ${spec.stepType}`,
             exitCode: code ?? 1,
+            startedAt,
+            finishedAt: new Date().toISOString(),
+            jobTemplateName: spec.jobTemplateName,
             logArtifact,
             artifacts: [logArtifact],
             diagnostics: (stderr
@@ -92,9 +100,14 @@ export class RunnerExecutorService implements RunnerExecutor {
         resolve(
           RunnerJobResultSchema.parse({
             jobId: `${spec.taskId}-${spec.stepType}`,
+            jobRunId: spec.jobRunId,
             ok: false,
+            status: "failed",
             summary: `Failed to spawn command for ${spec.stepType}`,
             exitCode: 1,
+            startedAt,
+            finishedAt: new Date().toISOString(),
+            jobTemplateName: spec.jobTemplateName,
             logArtifact: createLogArtifact(spec.taskId, spec.stepType, error.message),
             artifacts: [createLogArtifact(spec.taskId, spec.stepType, error.message)],
             diagnostics: [
@@ -111,14 +124,20 @@ export class RunnerExecutorService implements RunnerExecutor {
   }
 }
 
-export class AksJobRunnerExecutor implements RunnerExecutor {
-  async execute(spec: RunnerJobSpec): Promise<RunnerJobResult> {
-    const artifact = createLogArtifact(spec.taskId, spec.stepType, "AKS execution placeholder");
+export class ContainerAppsJobRunnerExecutor implements RunnerExecutor {
+  async execute(specInput: RunnerJobSpec): Promise<RunnerJobResult> {
+    const spec = RunnerJobSpecSchema.parse(specInput);
+    const artifact = createLogArtifact(spec.taskId, spec.stepType, "Container Apps Job execution placeholder");
     return RunnerJobResultSchema.parse({
       jobId: `${spec.taskId}-${spec.stepType}`,
+      jobRunId: spec.jobRunId,
       ok: true,
-      summary: "Prepared AKS job payload",
+      status: "succeeded",
+      summary: "Prepared Container Apps Job payload",
       exitCode: 0,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      jobTemplateName: spec.jobTemplateName,
       logArtifact: artifact,
       artifacts: [artifact],
       diagnostics: []
@@ -127,7 +146,7 @@ export class AksJobRunnerExecutor implements RunnerExecutor {
 }
 
 export function createRunnerExecutor(): RunnerExecutor {
-  return process.env.RUNNER_EXECUTION_MODE === "aks-job"
-    ? new AksJobRunnerExecutor()
+  return process.env.RUNNER_EXECUTION_MODE === "container-apps-job"
+    ? new ContainerAppsJobRunnerExecutor()
     : new RunnerExecutorService();
 }

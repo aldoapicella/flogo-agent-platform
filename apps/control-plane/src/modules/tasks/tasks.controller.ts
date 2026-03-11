@@ -16,8 +16,8 @@ export class TasksController {
   }
 
   @Get(":taskId")
-  getTask(@Param("taskId") taskId: string) {
-    const task = this.orchestrationService.getTask(taskId);
+  async getTask(@Param("taskId") taskId: string) {
+    const task = (await this.orchestrationService.refreshStatus(taskId)) ?? this.orchestrationService.getTask(taskId);
     if (!task) {
       throw new NotFoundException(`Unknown task ${taskId}`);
     }
@@ -32,5 +32,9 @@ export class TasksController {
       }))
     );
   }
-}
 
+  @Sse(":taskId/events")
+  streamTaskEvents(@Param("taskId") taskId: string): Observable<MessageEvent> {
+    return this.streamTask(taskId);
+  }
+}

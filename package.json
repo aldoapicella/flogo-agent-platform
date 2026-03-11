@@ -14,9 +14,10 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "dev:control-plane": "pnpm --filter @flogo-agent/control-plane dev",
+    "dev:orchestrator": "pnpm --filter @flogo-agent/orchestrator dev",
     "dev:runner-worker": "pnpm --filter @flogo-agent/runner-worker dev",
     "dev:web": "pnpm --filter @flogo-agent/web-console dev",
-    "dev": "concurrently -n control-plane,runner-worker,web -c blue,green,magenta \"pnpm dev:control-plane\" \"pnpm dev:runner-worker\" \"pnpm dev:web\"",
+    "dev": "concurrently -n control-plane,orchestrator,runner-worker,web -c blue,cyan,green,magenta \"pnpm dev:control-plane\" \"pnpm dev:orchestrator\" \"pnpm dev:runner-worker\" \"pnpm dev:web\"",
     "compose:up": "docker compose -f infra/local/docker-compose.yml up --build",
     "compose:down": "docker compose -f infra/local/docker-compose.yml down --remove-orphans"
   },

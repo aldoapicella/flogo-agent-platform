@@ -14,8 +14,20 @@
     "postgresAdminPassword": {
       "value": "replace-me"
     },
-    "aksNodeCount": {
-      "value": 2
+    "controlPlaneImage": {
+      "value": "myregistry.azurecr.io/flogo-agent/control-plane:latest"
+    },
+    "orchestratorImage": {
+      "value": "myregistry.azurecr.io/flogo-agent/orchestrator:latest"
+    },
+    "runnerWorkerImage": {
+      "value": "myregistry.azurecr.io/flogo-agent/runner-worker:latest"
+    },
+    "webConsoleImage": {
+      "value": "myregistry.azurecr.io/flogo-agent/web-console:latest"
+    },
+    "runnerJobImage": {
+      "value": "myregistry.azurecr.io/flogo-agent/flogo-runner:latest"
     }
   }
 }

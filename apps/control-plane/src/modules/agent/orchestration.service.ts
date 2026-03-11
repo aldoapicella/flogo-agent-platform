@@ -3,19 +3,24 @@ import { randomUUID } from "node:crypto";
 
 import { OrchestratorAgent, StaticModelClient } from "@flogo-agent/agent";
 import {
+  type ActiveJobRun,
+  type ApprovalDecision,
   type ApprovalType,
   type ArtifactRef,
-  type RunnerJobSpec,
+  type OrchestratorStatus,
+  TaskEventPublishSchema,
   TaskRequestSchema,
   TaskResultSchema,
+  TaskStateSyncSchema,
+  type TaskStep,
   type TaskRequest,
   type TaskResult,
   type TaskStatus
 } from "@flogo-agent/contracts";
 
 import { TaskEventsService } from "../events/task-events.service.js";
-import { RunnerQueueService } from "../queue/runner-queue.service.js";
 import { ToolsetService } from "../tools/toolset.service.js";
+import { OrchestratorClientService } from "./orchestrator-client.service.js";
 
 export interface StoredTask {
   id: string;
@@ -32,7 +37,7 @@ export class OrchestrationService {
 
   constructor(
     private readonly toolsetService: ToolsetService,
-    private readonly queueService: RunnerQueueService,
+    private readonly orchestratorClient: OrchestratorClientService,
     private readonly eventsService: TaskEventsService
   ) {
     this.orchestrator = new OrchestratorAgent({
@@ -45,11 +50,19 @@ export class OrchestrationService {
     const request = TaskRequestSchema.parse(value);
     const plan = await this.orchestrator.planTask(request);
     const id = request.taskId ?? randomUUID();
+    const steps: TaskStep[] = plan.steps.map((step, index) => ({
+      id: `${id}-${step.id}`,
+      order: index,
+      type: index === 0 ? "plan" : index === plan.steps.length - 1 ? "test" : "patch",
+      status: "planning",
+      summary: step.label
+    }));
     const result = TaskResultSchema.parse({
       taskId: id,
       type: request.type,
-      status: plan.requiredApprovals.length > 0 ? "awaiting_approval" : "running",
-      summary: `Task queued: ${request.summary}`,
+      status: plan.requiredApprovals.length > 0 ? "awaiting_approval" : "planning",
+      summary: plan.requiredApprovals.length > 0 ? "Task submitted and waiting for approval" : "Task submitted to orchestrator",
+      approvalStatus: plan.requiredApprovals.length > 0 ? "pending" : undefined,
       artifacts: [],
       requiredApprovals: plan.requiredApprovals,
       nextActions: plan.steps.map((step) => step.label)
@@ -69,10 +82,25 @@ export class OrchestrationService {
     this.tasks.set(id, storedTask);
     this.eventsService.publish(id, "status", `Task created: ${request.summary}`, { status: result.status });
     this.eventsService.publish(id, "tool", "Execution plan prepared", { steps: plan.steps });
+    const orchestration = await this.orchestratorClient.startWorkflow({
+      taskId: id,
+      request: storedTask.request,
+      requiredApprovals: plan.requiredApprovals,
+      planSummary: plan.summary,
+      steps
+    });
 
-    if (plan.requiredApprovals.length === 0) {
-      await this.enqueueDefaultRunnerJob(storedTask);
-    }
+    storedTask.result = {
+      ...storedTask.result,
+      orchestrationId: orchestration.orchestrationId,
+      status: plan.requiredApprovals.length > 0 ? "awaiting_approval" : "running",
+      summary: orchestration.summary,
+      activeJobRuns: orchestration.activeJobRuns
+    };
+    this.eventsService.publish(id, "status", orchestration.summary, {
+      orchestrationId: orchestration.orchestrationId,
+      status: storedTask.result.status
+    });
 
     return storedTask;
   }
@@ -85,21 +113,29 @@ export class OrchestrationService {
     return this.eventsService.stream(taskId);
   }
 
-  async approveTask(taskId: string, rationale?: string): Promise<StoredTask | undefined> {
+  async approveTask(taskId: string, decision: ApprovalDecision): Promise<StoredTask | undefined> {
     const task = this.tasks.get(taskId);
     if (!task) {
       return undefined;
     }
 
+    const orchestrationId = task.result.orchestrationId;
+    if (!orchestrationId) {
+      return task;
+    }
+
+    const status = await this.orchestratorClient.signalApproval(orchestrationId, decision);
+
     task.result = {
       ...task.result,
-      status: "running",
-      summary: "Approval recorded; task resumed",
+      status: decision.status === "approved" ? "running" : "failed",
+      summary: status?.summary ?? (decision.status === "approved" ? "Approval recorded; task resumed" : "Approval rejected"),
+      approvalStatus: decision.status,
+      activeJobRuns: status?.activeJobRuns ?? task.result.activeJobRuns,
       requiredApprovals: []
     };
     task.approvals = [];
-    this.eventsService.publish(taskId, "approval", "Approval recorded", { rationale });
-    await this.enqueueDefaultRunnerJob(task);
+    this.eventsService.publish(taskId, "approval", task.result.summary, { rationale: decision.rationale, status: decision.status });
     return task;
   }
 
@@ -140,20 +176,97 @@ export class OrchestrationService {
     this.eventsService.publish(taskId, "artifact", `Artifact published: ${artifact.name}`, { artifact });
   }
 
-  private async enqueueDefaultRunnerJob(task: StoredTask): Promise<void> {
-    const spec: RunnerJobSpec = {
-      taskId: task.id,
-      stepType: "build",
-      snapshotUri: `workspace://${task.request.projectId}/${task.id}`,
-      appPath: task.request.appPath ?? "flogo.json",
-      env: {},
-      timeoutSeconds: 900,
-      artifactOutputUri: `artifact://${task.id}`,
-      command: ["echo", `build ${task.request.appPath ?? "flogo.json"}`]
+  publishExternalEvent(taskId: string, payload: unknown): StoredTask | undefined {
+    const task = this.tasks.get(taskId);
+    if (!task) {
+      return undefined;
+    }
+
+    const event = TaskEventPublishSchema.parse(payload);
+    this.eventsService.publish(taskId, event.type, event.message, event.payload);
+    return task;
+  }
+
+  syncTaskState(taskId: string, payload: unknown): StoredTask | undefined {
+    const task = this.tasks.get(taskId);
+    if (!task) {
+      return undefined;
+    }
+
+    const sync = TaskStateSyncSchema.parse(payload);
+    task.result = {
+      ...task.result,
+      orchestrationId: sync.orchestrationId ?? task.result.orchestrationId,
+      status: sync.status ?? task.result.status,
+      summary: sync.summary ?? task.result.summary,
+      approvalStatus: sync.approvalStatus ?? task.result.approvalStatus,
+      activeJobRuns: sync.activeJobRuns ?? task.result.activeJobRuns,
+      validationReport: sync.validationReport ?? task.result.validationReport,
+      requiredApprovals: sync.requiredApprovals ?? task.result.requiredApprovals,
+      nextActions: sync.nextActions ?? task.result.nextActions
     };
 
-    const queued = await this.queueService.enqueue(spec);
-    this.eventsService.publish(task.id, "log", `Runner job queued in ${queued.mode} mode`, { spec: queued.spec });
+    if (sync.artifact) {
+      this.attachArtifact(taskId, sync.artifact);
+    }
+    if (sync.summary || sync.status || sync.approvalStatus || sync.activeJobRuns) {
+      this.eventsService.publish(taskId, "status", task.result.summary, {
+        status: task.result.status,
+        approvalStatus: task.result.approvalStatus,
+        activeJobRuns: task.result.activeJobRuns
+      });
+    }
+
+    return task;
+  }
+
+  async refreshStatus(taskId: string): Promise<StoredTask | undefined> {
+    const task = this.tasks.get(taskId);
+    if (!task?.result.orchestrationId) {
+      return task;
+    }
+
+    const status = await this.orchestratorClient.getStatus(task.result.orchestrationId);
+    if (!status) {
+      return task;
+    }
+
+    return this.applyOrchestratorStatus(task.id, status);
+  }
+
+  private applyOrchestratorStatus(taskId: string, status: OrchestratorStatus): StoredTask | undefined {
+    const task = this.tasks.get(taskId);
+    if (!task) {
+      return undefined;
+    }
+
+    task.result = {
+      ...task.result,
+      orchestrationId: status.orchestrationId,
+      status: this.mapRuntimeStatus(status.runtimeStatus, status.approvalStatus),
+      summary: status.summary,
+      approvalStatus: status.approvalStatus,
+      activeJobRuns: status.activeJobRuns
+    };
+
+    return task;
+  }
+
+  private mapRuntimeStatus(runtimeStatus: OrchestratorStatus["runtimeStatus"], approvalStatus?: OrchestratorStatus["approvalStatus"]): TaskStatus {
+    if (approvalStatus === "pending") {
+      return "awaiting_approval";
+    }
+
+    switch (runtimeStatus) {
+      case "completed":
+        return "completed";
+      case "failed":
+      case "terminated":
+        return "failed";
+      case "running":
+        return "running";
+      default:
+        return "planning";
+    }
   }
 }
-
