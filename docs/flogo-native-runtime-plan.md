@@ -176,6 +176,7 @@ Current status:
 Implemented in repo:
 
 - contribution inventory contracts, graph logic, public endpoint, runner step, and Blob/Azurite-backed persisted artifact,
+- module-aware package discovery for contribution inventory using `go.mod` workspaces, vendored package trees, descriptor search roots, and package-source fallback,
 - contribution catalog generation in `packages/flogo-graph`,
 - descriptor introspection contracts,
 - public descriptor inspection endpoint,
@@ -197,7 +198,7 @@ Implemented in repo:
 Still missing in Phase 1:
 
 - real `project-flogo/core` package introspection instead of the current normalized helper registry/fallback approach,
-- deeper descriptor/package evidence beyond contribution inventory, workspace/package descriptor discovery, and registry fallback,
+- deeper descriptor/package evidence beyond the current module-aware workspace/package discovery and registry fallback,
 - fuller programmatic app composition beyond the current comparison probe,
 - deeper alias/orphan/version governance tied to real package metadata.
 

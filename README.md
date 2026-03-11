@@ -178,7 +178,7 @@ The repo is beyond a pure scaffold, but it is not yet the full Flogo-native runt
 Current notable gaps:
 
 - Catalog, descriptor, governance, composition-compare, and mapping-preview app-analysis artifacts are Blob/Azurite-backed; broader runtime artifacts still have mixed local or logical URI behavior.
-- Contribution inventory now exists as the evidence layer for catalog/governance/composition analysis, but it still relies on descriptor/workspace discovery plus registry and inferred fallback rather than full `project-flogo/core` package introspection.
+- Contribution inventory now exists as the evidence layer for catalog/governance/composition analysis and includes module-aware workspace/package discovery, but it still stops short of full `project-flogo/core` package introspection.
 - Go helper behavior is real for inventory/catalog/descriptor/governance/composition comparison/mapping preview, but not yet for flow contracts, replay, or contribution scaffolding.
 - Flow-aware, runtime-aware, and extension-aware capabilities are still planned phases.
 - `next build` and Vitest can hit environment-specific `spawn EPERM` failures in restricted shells even when workspace typecheck is clean.

@@ -131,6 +131,8 @@ Copy `.env.example` to `.env`.
 
 Use this when local descriptor metadata lives outside the app directory or repository root. Multiple paths can be provided using the platform path delimiter.
 
+The inventory/catalog path now also searches for nearest `go.mod` roots and vendored package trees so contribution refs can resolve to local package roots before falling back to registry or inferred metadata.
+
 #### Model integration
 
 - `MODEL_PROVIDER`

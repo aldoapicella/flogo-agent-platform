@@ -209,6 +209,7 @@ Key fields:
 Current implementation notes:
 
 - inventory entries expose source evidence such as `app_descriptor`, `workspace_descriptor`, `package_descriptor`, `package_source`, `registry`, `inferred`, and `flow_resource`,
+- when an app lives under a `go.mod` workspace or vendored package tree, inventory resolution prefers module-aware package roots before falling back to registry or inferred metadata,
 - the response artifact is backed by Blob/Azurite JSON storage and Prisma metadata,
 - the inventory is the evidence layer used by catalog, governance, and composition-comparison analysis.
 

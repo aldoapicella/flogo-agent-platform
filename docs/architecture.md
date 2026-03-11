@@ -363,7 +363,7 @@ Persisted through Prisma today:
 
 - `flogo.json` is still the canonical artifact even as the Go helper path grows.
 - The Go helper is intentionally a finite execution binary, not a new always-on service.
-- The current helper uses contribution inventory plus normalized Flogo metadata and known-registry inference for part of the analysis path; it is not yet a full Core/Flow-native runtime.
+- The current helper uses contribution inventory plus module-aware package discovery, normalized Flogo metadata, and known-registry inference for the Phase 1 analysis path; it is not yet a full Core/Flow-native runtime.
 - Flow-aware, runtime-aware, and extension-aware capabilities are still roadmap items.
 - In restricted shells on Windows, `next build` and Vitest can fail with `spawn EPERM` even when typecheck is clean.
 

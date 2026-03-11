@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -76,6 +76,22 @@ type ResolvedDescriptor = {
 type ResolvedInventoryEntry = {
   entry: ContributionInventoryEntry;
   diagnostics: Diagnostic[];
+};
+
+type DescriptorCandidate = {
+  descriptorPath: string;
+  packageRoot?: string;
+  source: "app_descriptor" | "workspace_descriptor" | "package_descriptor";
+};
+
+type PackageCandidate = {
+  packageRoot: string;
+  source: "package_source";
+};
+
+type GoModuleInfo = {
+  root: string;
+  modulePath: string;
 };
 
 const knownDescriptorRegistry = new Map<string, Omit<ContribDescriptor, "ref" | "alias" | "evidence">>([
@@ -1189,7 +1205,7 @@ function resolveDescriptor(
   const normalizedAlias = alias ?? inferAliasFromRef(ref) ?? inferAliasFromRef(resolvedRef);
   const descriptorLocation = findDescriptorLocation(resolvedRef, options);
 
-  if (descriptorLocation?.descriptorPath) {
+  if (descriptorLocation && "descriptorPath" in descriptorLocation) {
     return {
       descriptor: parseDescriptorFile(
         descriptorLocation.descriptorPath,
@@ -1380,43 +1396,20 @@ function resolveImportRef(app: FlogoApp, ref: string, alias?: string) {
 }
 
 function findDescriptorFile(ref: string, options?: ContribLookupOptions) {
-  return findDescriptorLocation(ref, options)?.descriptorPath;
+  const location = findDescriptorLocation(ref, options);
+  return location && "descriptorPath" in location ? location.descriptorPath : undefined;
 }
 
-function findDescriptorLocation(ref: string, options?: ContribLookupOptions) {
-  const normalizedRef = ref.replace(/^#/, "").replace(/\\/g, "/");
-  const searchRoots = buildSearchRoots(options);
-  const refBasename = normalizedRef.split("/").filter(Boolean).at(-1);
-
-  for (const root of searchRoots) {
-    const candidates = [
-      path.join(root, normalizedRef, "descriptor.json"),
-      path.join(root, "vendor", normalizedRef, "descriptor.json"),
-      path.join(root, ".flogo", "descriptors", normalizedRef, "descriptor.json"),
-      path.join(root, "descriptors", normalizedRef, "descriptor.json"),
-      refBasename ? path.join(root, refBasename, "descriptor.json") : undefined,
-      refBasename ? path.join(root, "descriptors", refBasename, "descriptor.json") : undefined
-    ].filter((candidate): candidate is string => Boolean(candidate));
-
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) {
-        const packageRoot = path.dirname(candidate);
-        return {
-          descriptorPath: candidate,
-          packageRoot,
-          source: inferDescriptorSourceFromPath(candidate, normalizedRef, options),
-          root
-        };
-      }
+function findDescriptorLocation(ref: string, options?: ContribLookupOptions): DescriptorCandidate | PackageCandidate | undefined {
+  for (const candidate of buildDescriptorCandidates(ref, options)) {
+    if (existsSync(candidate.descriptorPath)) {
+      return candidate;
     }
   }
 
-  const packageRoot = findPackageRoot(ref, options);
-  if (packageRoot) {
-    return {
-      packageRoot,
-      source: "package_source" as const
-    };
+  const packageCandidate = findPackageRoot(ref, options);
+  if (packageCandidate) {
+    return packageCandidate;
   }
 
   return undefined;
@@ -1450,20 +1443,37 @@ function buildSearchRoots(options?: ContribLookupOptions) {
 function findPackageRoot(ref: string, options?: ContribLookupOptions) {
   const normalizedRef = ref.replace(/^#/, "").replace(/\\/g, "/");
   const refBasename = normalizedRef.split("/").filter(Boolean).at(-1);
-  for (const root of buildSearchRoots(options)) {
-    const candidates = [
-      path.join(root, normalizedRef),
-      path.join(root, "vendor", normalizedRef),
-      path.join(root, ".flogo", "descriptors", normalizedRef),
-      refBasename ? path.join(root, refBasename) : undefined
-    ].filter((candidate): candidate is string => Boolean(candidate));
+  const seen = new Set<string>();
+  const candidates: string[] = [];
 
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) {
-        return candidate;
-      }
+  for (const moduleInfo of collectGoModules(options)) {
+    const relativePath = resolveModuleRelativePath(moduleInfo, normalizedRef);
+    if (relativePath) {
+      candidates.push(path.join(moduleInfo.root, relativePath));
     }
   }
+
+  for (const root of buildSearchRoots(options)) {
+    candidates.push(path.join(root, "vendor", normalizedRef));
+    candidates.push(path.join(root, normalizedRef));
+    if (refBasename) {
+      candidates.push(path.join(root, refBasename));
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+    if (directoryLooksLikePackageRoot(candidate)) {
+      return {
+        packageRoot: candidate,
+        source: "package_source" as const
+      };
+    }
+  }
+
   return undefined;
 }
 
@@ -1548,31 +1558,159 @@ function createDescriptorEvidence(
   });
 }
 
-function inferDescriptorSourceFromPath(
-  descriptorPath: string,
-  ref: string,
-  options?: ContribLookupOptions
-): "app_descriptor" | "workspace_descriptor" | "package_descriptor" | "descriptor" {
-  const normalizedPath = descriptorPath.replace(/\\/g, "/");
+function buildDescriptorCandidates(ref: string, options?: ContribLookupOptions): DescriptorCandidate[] {
   const normalizedRef = ref.replace(/^#/, "").replace(/\\/g, "/");
-  const appDir = options?.appPath ? path.dirname(path.resolve(options.appPath)).replace(/\\/g, "/") : undefined;
-  if (
-    normalizedPath.includes(`/vendor/${normalizedRef}/descriptor.json`) ||
-    normalizedPath.includes(`/${normalizedRef}/descriptor.json`)
-  ) {
-    if (appDir && normalizedPath.startsWith(`${appDir}/`)) {
-      return "app_descriptor";
+  const refBasename = normalizedRef.split("/").filter(Boolean).at(-1);
+  const candidates: DescriptorCandidate[] = [];
+  const seen = new Set<string>();
+  const appDir = options?.appPath ? path.dirname(path.resolve(options.appPath)) : undefined;
+
+  const pushCandidate = (candidate: DescriptorCandidate | undefined) => {
+    if (!candidate || seen.has(candidate.descriptorPath)) {
+      return;
     }
-    if (normalizedPath.includes("/vendor/")) {
-      return "package_descriptor";
+    seen.add(candidate.descriptorPath);
+    candidates.push(candidate);
+  };
+
+  if (appDir) {
+    pushCandidate({
+      descriptorPath: path.join(appDir, normalizedRef, "descriptor.json"),
+      packageRoot: path.join(appDir, normalizedRef),
+      source: "app_descriptor"
+    });
+    pushCandidate({
+      descriptorPath: path.join(appDir, "descriptors", normalizedRef, "descriptor.json"),
+      packageRoot: path.join(appDir, "descriptors", normalizedRef),
+      source: "app_descriptor"
+    });
+    if (refBasename) {
+      pushCandidate({
+        descriptorPath: path.join(appDir, refBasename, "descriptor.json"),
+        packageRoot: path.join(appDir, refBasename),
+        source: "app_descriptor"
+      });
+      pushCandidate({
+        descriptorPath: path.join(appDir, "descriptors", refBasename, "descriptor.json"),
+        packageRoot: path.join(appDir, "descriptors", refBasename),
+        source: "app_descriptor"
+      });
     }
   }
 
-  if (normalizedPath.includes(`/.flogo/descriptors/${normalizedRef}/descriptor.json`) || normalizedPath.includes(`/descriptors/${normalizedRef}/descriptor.json`)) {
-    return "workspace_descriptor";
+  for (const moduleInfo of collectGoModules(options)) {
+    const relativePath = resolveModuleRelativePath(moduleInfo, normalizedRef);
+    if (!relativePath) {
+      continue;
+    }
+    pushCandidate({
+      descriptorPath: path.join(moduleInfo.root, relativePath, "descriptor.json"),
+      packageRoot: path.join(moduleInfo.root, relativePath),
+      source: "package_descriptor"
+    });
   }
 
-  return "workspace_descriptor";
+  for (const root of buildSearchRoots(options)) {
+    pushCandidate({
+      descriptorPath: path.join(root, "vendor", normalizedRef, "descriptor.json"),
+      packageRoot: path.join(root, "vendor", normalizedRef),
+      source: "package_descriptor"
+    });
+    pushCandidate({
+      descriptorPath: path.join(root, ".flogo", "descriptors", normalizedRef, "descriptor.json"),
+      packageRoot: path.join(root, ".flogo", "descriptors", normalizedRef),
+      source: "workspace_descriptor"
+    });
+    pushCandidate({
+      descriptorPath: path.join(root, "descriptors", normalizedRef, "descriptor.json"),
+      packageRoot: path.join(root, "descriptors", normalizedRef),
+      source: "workspace_descriptor"
+    });
+    pushCandidate({
+      descriptorPath: path.join(root, normalizedRef, "descriptor.json"),
+      packageRoot: path.join(root, normalizedRef),
+      source: "workspace_descriptor"
+    });
+    if (refBasename) {
+      pushCandidate({
+        descriptorPath: path.join(root, refBasename, "descriptor.json"),
+        packageRoot: path.join(root, refBasename),
+        source: "workspace_descriptor"
+      });
+      pushCandidate({
+        descriptorPath: path.join(root, "descriptors", refBasename, "descriptor.json"),
+        packageRoot: path.join(root, "descriptors", refBasename),
+        source: "workspace_descriptor"
+      });
+    }
+  }
+
+  return candidates;
+}
+
+function collectGoModules(options?: ContribLookupOptions): GoModuleInfo[] {
+  const modules = new Map<string, GoModuleInfo>();
+  for (const root of buildSearchRoots(options)) {
+    const moduleInfo = findNearestGoModule(root);
+    if (moduleInfo) {
+      modules.set(moduleInfo.root, moduleInfo);
+    }
+  }
+  return Array.from(modules.values());
+}
+
+function findNearestGoModule(startDir: string): GoModuleInfo | undefined {
+  let current = path.resolve(startDir);
+  while (true) {
+    const goModPath = path.join(current, "go.mod");
+    if (existsSync(goModPath)) {
+      const modulePath = parseGoModuleModulePath(goModPath);
+      if (modulePath) {
+        return {
+          root: current,
+          modulePath
+        };
+      }
+      return undefined;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return undefined;
+    }
+    current = parent;
+  }
+}
+
+function parseGoModuleModulePath(goModPath: string) {
+  const contents = readFileSync(goModPath, "utf8");
+  const match = contents.match(/^\s*module\s+([^\s]+)\s*$/m);
+  return match?.[1];
+}
+
+function resolveModuleRelativePath(moduleInfo: GoModuleInfo, normalizedRef: string) {
+  if (!normalizedRef.startsWith(moduleInfo.modulePath)) {
+    return undefined;
+  }
+  const relativePath = normalizedRef.slice(moduleInfo.modulePath.length).replace(/^\/+/, "");
+  return relativePath.length > 0 ? relativePath : undefined;
+}
+
+function directoryLooksLikePackageRoot(candidate: string) {
+  if (!existsSync(candidate)) {
+    return false;
+  }
+
+  try {
+    const entries = readdirSync(candidate, { withFileTypes: true });
+    return entries.some(
+      (entry) =>
+        entry.isFile() &&
+        (entry.name === "descriptor.json" || entry.name === "go.mod" || entry.name.endsWith(".go"))
+    );
+  } catch {
+    return false;
+  }
 }
 
 function withCatalogRef(descriptor: ContribDescriptor, ref: string): ContribDescriptor {

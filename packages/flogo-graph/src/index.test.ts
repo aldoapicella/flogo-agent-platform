@@ -322,6 +322,57 @@ describe("flogo graph", () => {
     expect(descriptor?.diagnostics).toEqual([]);
   });
 
+  it("resolves package-backed contribution inventory from a go.mod workspace", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "flogo-package-inventory-"));
+    tempPaths.push(tempDir);
+    const appDir = path.join(tempDir, "apps", "demo");
+    const appPath = path.join(appDir, "flogo.json");
+    await fs.mkdir(appDir, { recursive: true });
+    await fs.writeFile(path.join(tempDir, "go.mod"), "module github.com/project-flogo/contrib\n\ngo 1.22.0\n", "utf8");
+    await fs.mkdir(path.join(tempDir, "activity", "customlog"), { recursive: true });
+    await fs.writeFile(path.join(tempDir, "activity", "customlog", "activity.go"), "package customlog\n", "utf8");
+    await fs.mkdir(path.join(tempDir, "trigger", "customtimer"), { recursive: true });
+    await fs.writeFile(
+      path.join(tempDir, "trigger", "customtimer", "descriptor.json"),
+      JSON.stringify(
+        {
+          name: "customtimer",
+          type: "trigger",
+          title: "Custom Timer",
+          version: "0.1.0",
+          settings: [{ name: "interval", type: "string", required: true }]
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    await fs.writeFile(appPath, JSON.stringify(validApp, null, 2), "utf8");
+
+    const workspaceApp = {
+      ...structuredClone(validApp),
+      imports: [
+        {
+          alias: "customlog",
+          ref: "github.com/project-flogo/contrib/activity/customlog"
+        },
+        {
+          alias: "customtimer",
+          ref: "github.com/project-flogo/contrib/trigger/customtimer"
+        }
+      ]
+    };
+
+    const inventory = buildContributionInventory(workspaceApp, { appPath });
+    const customLog = inventory.entries.find((entry) => entry.alias === "customlog");
+    const customTimer = inventory.entries.find((entry) => entry.alias === "customtimer");
+
+    expect(customLog?.source).toBe("package_source");
+    expect(customLog?.packageRoot).toContain(path.join("activity", "customlog"));
+    expect(customTimer?.source).toBe("package_descriptor");
+    expect(customTimer?.descriptor?.version).toBe("0.1.0");
+  });
+
   it("reports governance findings for duplicate aliases and missing refs", () => {
     const app = structuredClone(validApp);
     app.imports.push({

@@ -218,6 +218,17 @@ type flogoApp struct {
 	Resources  []flogoFlow
 }
 
+type descriptorCandidate struct {
+	DescriptorPath string
+	PackageRoot    string
+	Source         string
+}
+
+type goModuleInfo struct {
+	Root       string
+	ModulePath string
+}
+
 var resolverPattern = regexp.MustCompile(`\$(activity\[[^\]]+\](?:\.[A-Za-z0-9_.-]+)?|flow(?:\.[A-Za-z0-9_.-]+)?|env(?:\.[A-Za-z0-9_.-]+)?|property(?:\.[A-Za-z0-9_.-]+)?|trigger(?:\.[A-Za-z0-9_.-]+)?)`)
 
 var knownRegistry = map[string]contribDescriptor{
@@ -1569,14 +1580,13 @@ func buildDescriptorForApp(
 		normalizedAlias = inferAlias(resolvedRef)
 	}
 
-	descriptorPath := findDescriptorFile(appPath, resolvedRef)
-	if descriptorPath != "" {
-		source := inferDescriptorSource(appPath, descriptorPath, resolvedRef)
-		return parseDescriptorFile(descriptorPath, resolvedRef, normalizedAlias, version, forcedType, source), []diagnostic{}
+	for _, candidate := range buildDescriptorCandidates(appPath, resolvedRef) {
+		if _, err := os.Stat(candidate.DescriptorPath); err == nil {
+			return parseDescriptorFile(candidate.DescriptorPath, resolvedRef, normalizedAlias, version, forcedType, candidate.Source), []diagnostic{}
+		}
 	}
 
-	packageRoot := findPackageRoot(appPath, resolvedRef)
-	if packageRoot != "" {
+	if packageRoot := findPackageRoot(appPath, resolvedRef); packageRoot != "" {
 		descriptor := buildDescriptor(resolvedRef, normalizedAlias, version, forcedType)
 		descriptor.Source = "package_source"
 		descriptor.Evidence = createEvidence(descriptor.Source, resolvedRef, normalizedAlias, version, "", packageRoot, nil)
@@ -1668,29 +1678,9 @@ func resolveImportRef(app flogoApp, ref string, alias string) string {
 }
 
 func findDescriptorFile(appPath string, ref string) string {
-	normalizedRef := strings.TrimPrefix(ref, "#")
-	normalizedRef = strings.ReplaceAll(normalizedRef, "\\", "/")
-	roots := buildSearchRoots(appPath)
-	refBase := filepath.Base(normalizedRef)
-
-	for _, root := range roots {
-		candidates := []string{
-			filepath.Join(root, filepath.FromSlash(normalizedRef), "descriptor.json"),
-			filepath.Join(root, "vendor", filepath.FromSlash(normalizedRef), "descriptor.json"),
-			filepath.Join(root, ".flogo", "descriptors", filepath.FromSlash(normalizedRef), "descriptor.json"),
-			filepath.Join(root, "descriptors", filepath.FromSlash(normalizedRef), "descriptor.json"),
-		}
-		if refBase != "" {
-			candidates = append(candidates,
-				filepath.Join(root, refBase, "descriptor.json"),
-				filepath.Join(root, "descriptors", refBase, "descriptor.json"),
-			)
-		}
-
-		for _, candidate := range candidates {
-			if _, err := os.Stat(candidate); err == nil {
-				return candidate
-			}
+	for _, candidate := range buildDescriptorCandidates(appPath, ref) {
+		if _, err := os.Stat(candidate.DescriptorPath); err == nil {
+			return candidate.DescriptorPath
 		}
 	}
 
@@ -1700,17 +1690,24 @@ func findDescriptorFile(appPath string, ref string) string {
 func findPackageRoot(appPath string, ref string) string {
 	normalizedRef := strings.TrimPrefix(strings.ReplaceAll(ref, "\\", "/"), "#")
 	refBase := filepath.Base(normalizedRef)
+	for _, moduleInfo := range collectGoModules(appPath) {
+		if relativePath := resolveModuleRelativePath(moduleInfo, normalizedRef); relativePath != "" {
+			candidate := filepath.Join(moduleInfo.Root, filepath.FromSlash(relativePath))
+			if directoryLooksLikePackageRoot(candidate) {
+				return candidate
+			}
+		}
+	}
 	for _, root := range buildSearchRoots(appPath) {
 		candidates := []string{
 			filepath.Join(root, filepath.FromSlash(normalizedRef)),
 			filepath.Join(root, "vendor", filepath.FromSlash(normalizedRef)),
-			filepath.Join(root, ".flogo", "descriptors", filepath.FromSlash(normalizedRef)),
 		}
 		if refBase != "" {
 			candidates = append(candidates, filepath.Join(root, refBase))
 		}
 		for _, candidate := range candidates {
-			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			if directoryLooksLikePackageRoot(candidate) {
 				return candidate
 			}
 		}
@@ -1744,6 +1741,170 @@ func buildSearchRoots(appPath string) []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+func buildDescriptorCandidates(appPath string, ref string) []descriptorCandidate {
+	normalizedRef := strings.TrimPrefix(strings.ReplaceAll(ref, "\\", "/"), "#")
+	refBase := filepath.Base(normalizedRef)
+	seen := map[string]bool{}
+	candidates := []descriptorCandidate{}
+	appDir := ""
+	if appPath != "" {
+		appDir = filepath.Dir(appPath)
+	}
+
+	pushCandidate := func(candidate descriptorCandidate) {
+		if seen[candidate.DescriptorPath] {
+			return
+		}
+		seen[candidate.DescriptorPath] = true
+		candidates = append(candidates, candidate)
+	}
+
+	if appDir != "" {
+		pushCandidate(descriptorCandidate{
+			DescriptorPath: filepath.Join(appDir, filepath.FromSlash(normalizedRef), "descriptor.json"),
+			PackageRoot:    filepath.Join(appDir, filepath.FromSlash(normalizedRef)),
+			Source:         "app_descriptor",
+		})
+		pushCandidate(descriptorCandidate{
+			DescriptorPath: filepath.Join(appDir, "descriptors", filepath.FromSlash(normalizedRef), "descriptor.json"),
+			PackageRoot:    filepath.Join(appDir, "descriptors", filepath.FromSlash(normalizedRef)),
+			Source:         "app_descriptor",
+		})
+		if refBase != "" {
+			pushCandidate(descriptorCandidate{
+				DescriptorPath: filepath.Join(appDir, refBase, "descriptor.json"),
+				PackageRoot:    filepath.Join(appDir, refBase),
+				Source:         "app_descriptor",
+			})
+			pushCandidate(descriptorCandidate{
+				DescriptorPath: filepath.Join(appDir, "descriptors", refBase, "descriptor.json"),
+				PackageRoot:    filepath.Join(appDir, "descriptors", refBase),
+				Source:         "app_descriptor",
+			})
+		}
+	}
+
+	for _, moduleInfo := range collectGoModules(appPath) {
+		if relativePath := resolveModuleRelativePath(moduleInfo, normalizedRef); relativePath != "" {
+			pushCandidate(descriptorCandidate{
+				DescriptorPath: filepath.Join(moduleInfo.Root, filepath.FromSlash(relativePath), "descriptor.json"),
+				PackageRoot:    filepath.Join(moduleInfo.Root, filepath.FromSlash(relativePath)),
+				Source:         "package_descriptor",
+			})
+		}
+	}
+
+	for _, root := range buildSearchRoots(appPath) {
+		pushCandidate(descriptorCandidate{
+			DescriptorPath: filepath.Join(root, "vendor", filepath.FromSlash(normalizedRef), "descriptor.json"),
+			PackageRoot:    filepath.Join(root, "vendor", filepath.FromSlash(normalizedRef)),
+			Source:         "package_descriptor",
+		})
+		pushCandidate(descriptorCandidate{
+			DescriptorPath: filepath.Join(root, ".flogo", "descriptors", filepath.FromSlash(normalizedRef), "descriptor.json"),
+			PackageRoot:    filepath.Join(root, ".flogo", "descriptors", filepath.FromSlash(normalizedRef)),
+			Source:         "workspace_descriptor",
+		})
+		pushCandidate(descriptorCandidate{
+			DescriptorPath: filepath.Join(root, "descriptors", filepath.FromSlash(normalizedRef), "descriptor.json"),
+			PackageRoot:    filepath.Join(root, "descriptors", filepath.FromSlash(normalizedRef)),
+			Source:         "workspace_descriptor",
+		})
+		pushCandidate(descriptorCandidate{
+			DescriptorPath: filepath.Join(root, filepath.FromSlash(normalizedRef), "descriptor.json"),
+			PackageRoot:    filepath.Join(root, filepath.FromSlash(normalizedRef)),
+			Source:         "workspace_descriptor",
+		})
+		if refBase != "" {
+			pushCandidate(descriptorCandidate{
+				DescriptorPath: filepath.Join(root, refBase, "descriptor.json"),
+				PackageRoot:    filepath.Join(root, refBase),
+				Source:         "workspace_descriptor",
+			})
+			pushCandidate(descriptorCandidate{
+				DescriptorPath: filepath.Join(root, "descriptors", refBase, "descriptor.json"),
+				PackageRoot:    filepath.Join(root, "descriptors", refBase),
+				Source:         "workspace_descriptor",
+			})
+		}
+	}
+
+	return candidates
+}
+
+func collectGoModules(appPath string) []goModuleInfo {
+	modules := map[string]goModuleInfo{}
+	for _, root := range buildSearchRoots(appPath) {
+		if moduleInfo, ok := findNearestGoModule(root); ok {
+			modules[moduleInfo.Root] = moduleInfo
+		}
+	}
+	result := make([]goModuleInfo, 0, len(modules))
+	for _, moduleInfo := range modules {
+		result = append(result, moduleInfo)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Root < result[j].Root
+	})
+	return result
+}
+
+func findNearestGoModule(startDir string) (goModuleInfo, bool) {
+	current := filepath.Clean(startDir)
+	for {
+		goModPath := filepath.Join(current, "go.mod")
+		if _, err := os.Stat(goModPath); err == nil {
+			modulePath := parseGoModuleModulePath(goModPath)
+			if modulePath != "" {
+				return goModuleInfo{Root: current, ModulePath: modulePath}, true
+			}
+			return goModuleInfo{}, false
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return goModuleInfo{}, false
+		}
+		current = parent
+	}
+}
+
+func parseGoModuleModulePath(goModPath string) string {
+	contents, err := os.ReadFile(goModPath)
+	if err != nil {
+		return ""
+	}
+	re := regexp.MustCompile(`(?m)^\s*module\s+([^\s]+)\s*$`)
+	match := re.FindStringSubmatch(string(contents))
+	if len(match) > 1 {
+		return match[1]
+	}
+	return ""
+}
+
+func resolveModuleRelativePath(moduleInfo goModuleInfo, normalizedRef string) string {
+	if !strings.HasPrefix(normalizedRef, moduleInfo.ModulePath) {
+		return ""
+	}
+	relativePath := strings.TrimPrefix(normalizedRef[len(moduleInfo.ModulePath):], "/")
+	if relativePath == "" {
+		return ""
+	}
+	return relativePath
+}
+
+func directoryLooksLikePackageRoot(candidate string) bool {
+	entries, err := os.ReadDir(candidate)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.Type().IsRegular() && (entry.Name() == "descriptor.json" || entry.Name() == "go.mod" || strings.HasSuffix(entry.Name(), ".go")) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseDescriptorFile(descriptorPath string, ref string, alias string, version string, forcedType string, source string) contribDescriptor {
