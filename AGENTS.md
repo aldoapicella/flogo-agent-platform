@@ -1,0 +1,246 @@
+# AGENTS.md
+
+## Purpose
+
+This repository is building a Flogo-native engineering platform, not just a `flogo.json` editor.
+
+Future agents working here should preserve that direction and use this file as a repo-specific operating guide.
+
+## Core Rules
+
+### 1. Treat `flogo.json` as canonical
+
+Always treat `flogo.json` as the canonical stored artifact for:
+
+- repository diffs
+- user review
+- task outputs
+- policy review
+- change summaries
+
+Go/Core-based composition, introspection, and runtime logic are additive execution and validation paths. They do not replace `flogo.json` as the primary source of truth.
+
+### 2. Use official Flogo references when needed
+
+For any work involving TIBCO Flogo, always refer to the official Flogo documentation and source references when needed, especially for:
+
+- app structure and `flogo.json`
+- triggers, handlers, actions, and activities
+- mappings, resolvers, and coercion behavior
+- flow input/output contracts
+- iterators, subflows, and control-flow patterns
+- app properties and environment configuration
+- Flogo Core and Flow package behavior
+
+Preferred references:
+
+- [Project Flogo introduction](https://tibcosoftware.github.io/flogo/introduction/)
+- [Flogo Core package](https://pkg.go.dev/github.com/project-flogo/core)
+- [Flogo Core data packages](https://github.com/project-flogo/core/tree/master/data)
+- [Flow input/output parameters](https://tibcosoftware.github.io/flogo/development/flows/io-parameters/)
+- [Project Flogo Flow repository](https://github.com/project-flogo/flow)
+- [Iterator docs](https://tibcosoftware.github.io/flogo/development/flows/iterators/)
+- [Mapping docs](https://tibcosoftware.github.io/flogo/development/flows/mapping/)
+- [Property bag docs](https://tibcosoftware.github.io/flogo/development/flows/property-bag/)
+
+When a Flogo behavior is ambiguous, prefer the official docs and source repos over assumptions.
+
+### 3. Stay aligned with the Flogo-native roadmap
+
+Before implementing new Flogo-native capabilities, read:
+
+1. `docs/flogo-native-runtime-plan.md`
+2. `docs/capability-matrix.md`
+3. `docs/architecture.md`
+4. `docs/api-reference.md`
+5. `docs/data-model.md`
+
+If your change affects the Flogo-native roadmap, update:
+
+1. `docs/flogo-native-runtime-plan.md`
+2. `docs/capability-matrix.md`
+3. the affected operational docs
+4. then the code
+
+Do not let roadmap docs drift behind implementation.
+
+## Repository-Specific Guidance
+
+### Platform shape
+
+The primary deployables are:
+
+- `apps/control-plane`
+- `apps/orchestrator`
+- `apps/runner-worker`
+- `apps/web-console`
+
+The Flogo-native helper path lives in:
+
+- `go-runtime/flogo-helper`
+
+Important shared packages:
+
+- `packages/contracts`
+- `packages/flogo-graph`
+- `packages/tools`
+- `packages/agent`
+
+### Ownership boundaries
+
+Keep the split consistent:
+
+- TypeScript owns the control plane, orchestration, contracts, planner logic, persistence, and public APIs.
+- Go owns Flogo-native helper execution inside finite runner paths.
+
+Do not introduce a new always-on Go service unless there is a strong architectural reason and the roadmap/docs are updated accordingly.
+
+### Current Flogo-native baseline
+
+The repo already supports a Phase 1 slice. Before adding new capability, understand what exists:
+
+- contribution cataloging
+- descriptor inspection
+- governance validation
+- composition comparison
+- mapping preview
+- coercion suggestions
+- property/environment planning
+- Blob/Azurite-backed app-analysis artifacts
+- analysis-only orchestration modes
+
+Do not accidentally regress these while implementing later phases.
+
+## Implementation Rules
+
+### Prefer Flogo-native capability layers
+
+When possible, implement features through:
+
+- `packages/flogo-graph` for Flogo domain normalization and analysis
+- `packages/tools` for capability-oriented tool wrappers
+- `go-runtime/flogo-helper` for finite Flogo-native execution
+
+Do not solve Flogo features purely with generic string manipulation if the platform already has a graph/tool/helper layer for that concern.
+
+### Extend capabilities by phase
+
+The intended progression is:
+
+- Phase 1: Core-aware foundation
+- Phase 2: Flow-aware design
+- Phase 3: Runtime-aware debugging
+- Phase 4: Extension-aware contribution authoring
+
+Do not start a later-phase feature casually if the current work should still be finishing an earlier phase.
+
+### Keep public APIs additive
+
+Prefer:
+
+- new additive endpoints
+- richer `inputs.mode` values
+- extended shared contracts
+
+Avoid breaking existing task routes or replacing top-level task types unless absolutely necessary.
+
+### Preserve analysis-only task behavior
+
+Analysis-only modes should stop after analysis artifact publication. They should not schedule patch/build/smoke work unless the task is actually mutating behavior.
+
+## Validation and Testing
+
+### Verification order
+
+Preferred verification flow:
+
+1. `pnpm typecheck`
+2. targeted Vitest for changed packages/apps
+3. `go build .` from `go-runtime/flogo-helper` if helper code changed
+
+### Important workspace caveat
+
+Shared packages are consumed through built `dist` exports.
+
+That means:
+
+- `pnpm typecheck` rebuilds shared packages first
+- app-level tests may load those built outputs
+
+Do not run `pnpm typecheck` and Vitest in parallel when validating app packages that import shared workspace packages through `dist` exports. Run them sequentially.
+
+### Windows shell caveat
+
+In restricted Windows shells, `next build` or Vitest can fail with `spawn EPERM` because `esbuild.exe` is blocked at process spawn time. Do not assume repo breakage until that environment issue is ruled out.
+
+## Flogo-Specific Design Guidance
+
+### Mappings are a first-class concern
+
+Be especially careful with:
+
+- `$flow`
+- `$activity[...]`
+- `$env`
+- `$property`
+- `$trigger`
+
+Mapping/type/scope behavior is one of the highest-value areas in this repo. When adding Flogo-native logic, prefer deterministic mapping analysis over vague heuristics whenever possible.
+
+### Flows are reusable units
+
+Treat flows like reusable callable units with explicit input/output contracts, not just inline trigger bodies.
+
+### Triggers are adapters
+
+When reasoning about architecture or future features, prefer the model:
+
+- trigger -> maps into flow
+- flow -> does reusable work
+- trigger reply/output -> maps from flow
+
+### Contribution metadata should be evidence-backed
+
+If contribution metadata comes from:
+
+- descriptor files
+- workspace descriptor overrides
+- registry fallback
+- inferred fallback
+
+make that explicit in output, diagnostics, or evidence fields. Do not hide the difference between authoritative metadata and fallback metadata.
+
+## Persistence and Artifact Rules
+
+App-analysis outputs should remain durable. When extending app-analysis capabilities, prefer:
+
+- Prisma metadata records
+- Blob/Azurite-backed JSON payload storage
+
+Do not silently fall back to ephemeral-only analysis results unless that behavior is explicitly intended and documented.
+
+## Useful Local References
+
+Important files to consult before extending the platform:
+
+- `README.md`
+- `docs/flogo-native-runtime-plan.md`
+- `docs/capability-matrix.md`
+- `docs/architecture.md`
+- `docs/api-reference.md`
+- `docs/data-model.md`
+- `docs/development.md`
+- `examples/hello-rest/flogo.json`
+- `examples/broken-mappings/flogo.json`
+
+## Practical Default Behavior For Agents
+
+When making changes in this repo:
+
+1. identify which capability domain the work belongs to
+2. confirm the current phase in `docs/flogo-native-runtime-plan.md`
+3. check whether the capability already exists in `docs/capability-matrix.md`
+4. update docs first if the roadmap or interface meaning changes
+5. implement in the appropriate layer
+6. run sequential verification
+7. report both what landed and what remains out of scope
