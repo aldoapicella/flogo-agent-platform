@@ -1,9 +1,20 @@
 import {
+  ContribCatalogSchema,
+  type ContribCatalog,
+  ContribDescriptorSchema,
+  type ContribDescriptor,
+  type Diagnostic,
   FlogoAppGraphSchema,
   FlogoAppSchema,
-  type Diagnostic,
   type FlogoApp,
   type FlogoAppGraph,
+  type FlogoFlow,
+  MappingKindSchema,
+  MappingPreviewResultSchema,
+  type MappingPreviewContext,
+  type MappingPreviewField,
+  PropertyPlanSchema,
+  type PropertyPlan,
   type ValidationReport,
   ValidationReportSchema,
   type ValidationStage,
@@ -28,9 +39,111 @@ function stageResult(stage: ValidationStage, diagnostics: Diagnostic[]): Validat
   };
 }
 
+type LocatedTask = {
+  flowId: string;
+  flow: FlogoFlow;
+  task: FlogoFlow["data"]["tasks"][number];
+};
+
+const knownDescriptorRegistry = new Map<string, Omit<ContribDescriptor, "ref" | "alias">>([
+  [
+    "rest",
+    {
+      type: "trigger",
+      name: "rest",
+      title: "REST Trigger",
+      settings: [{ name: "port", type: "integer", required: true }],
+      inputs: [
+        { name: "pathParams", type: "object", required: false },
+        { name: "queryParams", type: "object", required: false },
+        { name: "headers", type: "object", required: false },
+        { name: "content", type: "object", required: false }
+      ],
+      outputs: [
+        { name: "code", type: "integer", required: false },
+        { name: "data", type: "object", required: false },
+        { name: "headers", type: "object", required: false },
+        { name: "cookies", type: "object", required: false }
+      ],
+      examples: ["Bind a reusable flow to GET /resource/{id}"],
+      compatibilityNotes: ["Works as a trigger adapter for HTTP-facing flows"],
+      source: "registry"
+    }
+  ],
+  [
+    "log",
+    {
+      type: "activity",
+      name: "log",
+      title: "Log Activity",
+      settings: [],
+      inputs: [{ name: "message", type: "string", required: true }],
+      outputs: [],
+      examples: ["Log trigger input before calling downstream activity"],
+      compatibilityNotes: ["Useful for trace and debugging instrumentation"],
+      source: "registry"
+    }
+  ],
+  [
+    "timer",
+    {
+      type: "trigger",
+      name: "timer",
+      title: "Timer Trigger",
+      settings: [{ name: "interval", type: "string", required: true }],
+      inputs: [],
+      outputs: [{ name: "tick", type: "string", required: false }],
+      examples: ["Run a flow on a fixed interval"],
+      compatibilityNotes: ["Use for batch and scheduled flows"],
+      source: "registry"
+    }
+  ],
+  [
+    "cli",
+    {
+      type: "trigger",
+      name: "cli",
+      title: "CLI Trigger",
+      settings: [],
+      inputs: [{ name: "args", type: "array", required: false }],
+      outputs: [{ name: "stdout", type: "string", required: false }],
+      examples: ["Run a flow as a one-shot CLI command"],
+      compatibilityNotes: ["Useful for command and batch profiles"],
+      source: "registry"
+    }
+  ],
+  [
+    "channel",
+    {
+      type: "trigger",
+      name: "channel",
+      title: "Channel Trigger",
+      settings: [{ name: "name", type: "string", required: true }],
+      inputs: [{ name: "message", type: "object", required: false }],
+      outputs: [{ name: "reply", type: "object", required: false }],
+      examples: ["Run a flow from an internal engine channel"],
+      compatibilityNotes: ["Useful for internal worker topologies"],
+      source: "registry"
+    }
+  ]
+]);
+
+const resolverPattern = /\$(activity\[([^\]]+)\]|flow(?:\.([A-Za-z0-9_.-]+))?|env(?:\.([A-Za-z0-9_.-]+))?|property(?:\.([A-Za-z0-9_.-]+))?|trigger(?:\.([A-Za-z0-9_.-]+))?)/g;
+
+function createEmptyMappingContext(): MappingPreviewContext {
+  return {
+    flow: {},
+    activity: {},
+    env: {},
+    property: {},
+    trigger: {}
+  };
+}
+
 export function parseFlogoAppDocument(document: string | FlogoApp | unknown): FlogoApp {
   const parsed = typeof document === "string" ? JSON.parse(document) : document;
-  return FlogoAppSchema.parse(parsed);
+  const normalized = normalizeAppShape(parsed);
+  return FlogoAppSchema.parse(normalized);
 }
 
 export function buildAppGraph(document: string | FlogoApp | unknown): FlogoAppGraph {
@@ -62,13 +175,51 @@ export function validateStructural(document: string | FlogoApp | unknown): Valid
   return stageResult("structural", diagnostics);
 }
 
+export function validateAliases(document: string | FlogoApp | unknown): Diagnostic[] {
+  const app = parseFlogoAppDocument(document);
+  const diagnostics: Diagnostic[] = [];
+  const seenAliases = new Set<string>();
+
+  for (const entry of app.imports) {
+    if (seenAliases.has(entry.alias)) {
+      diagnostics.push(
+        createDiagnostic(
+          "flogo.alias.duplicate",
+          `Import alias "${entry.alias}" is defined more than once`,
+          "error",
+          `imports.${entry.alias}`
+        )
+      );
+    }
+    seenAliases.add(entry.alias);
+
+    if (entry.alias.trim().length === 0) {
+      diagnostics.push(createDiagnostic("flogo.alias.blank", "Import alias cannot be blank", "error", "imports"));
+    }
+  }
+
+  return diagnostics;
+}
+
 export function validateSemantic(document: string | FlogoApp | unknown): ValidationStageResult {
   const graph = buildAppGraph(document);
-  const diagnostics: Diagnostic[] = [];
+  const diagnostics: Diagnostic[] = [...validateAliases(document)];
   const resourceIds = new Set(graph.resourceIds);
   const importAliases = new Set(Object.keys(graph.importsByAlias));
 
   for (const trigger of graph.app.triggers) {
+    const inferredAlias = inferAliasFromRef(trigger.ref);
+    if (trigger.ref.startsWith("#") && inferredAlias && !importAliases.has(inferredAlias) && inferredAlias !== "flow") {
+      diagnostics.push(
+        createDiagnostic(
+          "flogo.semantic.inferred_trigger_alias",
+          `Trigger "${trigger.id}" uses alias "${inferredAlias}" without an explicit import`,
+          "warning",
+          `triggers.${trigger.id}.ref`
+        )
+      );
+    }
+
     for (const handler of trigger.handlers) {
       const ref = handler.action.ref;
       if (ref.startsWith("#flow:")) {
@@ -102,8 +253,8 @@ export function validateSemantic(document: string | FlogoApp | unknown): Validat
       }
 
       if (task.activityRef.startsWith("#")) {
-        const alias = task.activityRef.slice(1).split(".")[0];
-        if (!importAliases.has(alias) && alias !== "flow" && alias !== "rest") {
+        const alias = inferAliasFromRef(task.activityRef);
+        if (alias && !importAliases.has(alias) && alias !== "flow" && alias !== "rest") {
           diagnostics.push(
             createDiagnostic(
               "flogo.semantic.missing_import",
@@ -183,7 +334,7 @@ export function validateDependencies(document: string | FlogoApp | unknown): Val
   const diagnostics: Diagnostic[] = [];
 
   for (const entry of app.imports) {
-    if (!entry.ref.includes("/")) {
+    if (!entry.ref.includes("/") && !entry.ref.startsWith("#")) {
       diagnostics.push(
         createDiagnostic(
           "flogo.dependency.invalid_ref",
@@ -219,17 +370,661 @@ export function validateFlogoApp(document: string | FlogoApp | unknown): Validat
   });
 }
 
+export function buildContribCatalog(document: string | FlogoApp | unknown): ContribCatalog {
+  const app = parseFlogoAppDocument(document);
+  const entries = new Map<string, ContribDescriptor>();
+
+  const upsert = (entry: ContribDescriptor) => {
+    const key = `${entry.type}:${entry.alias ?? entry.ref}`;
+    entries.set(key, ContribDescriptorSchema.parse(entry));
+  };
+
+  for (const entry of app.imports) {
+    upsert(buildDescriptorFromRef(entry.ref, entry.alias, entry.version));
+  }
+
+  for (const trigger of app.triggers) {
+    upsert(buildDescriptorFromRef(trigger.ref, inferAliasFromRef(trigger.ref), undefined, "trigger"));
+  }
+
+  for (const resource of app.resources) {
+    upsert(
+      ContribDescriptorSchema.parse({
+        ref: `#flow:${resource.id}`,
+        alias: "flow",
+        type: "action",
+        name: resource.data.name ?? resource.id,
+        title: resource.data.name ?? resource.id,
+        settings: [],
+        inputs: (resource.data.metadata?.input ?? []).map((item, index) => ({
+          name: typeof item.name === "string" ? item.name : `input_${index}`,
+          type: typeof item.type === "string" ? item.type : undefined,
+          required: Boolean(item.required)
+        })),
+        outputs: (resource.data.metadata?.output ?? []).map((item, index) => ({
+          name: typeof item.name === "string" ? item.name : `output_${index}`,
+          type: typeof item.type === "string" ? item.type : undefined,
+          required: Boolean(item.required)
+        })),
+        examples: [`Invoke reusable flow ${resource.id}`],
+        compatibilityNotes: ["Flow resources behave like reusable actions"],
+        source: "flow-resource"
+      })
+    );
+
+    for (const task of resource.data.tasks) {
+      if (!task.activityRef) {
+        continue;
+      }
+      upsert(buildDescriptorFromRef(task.activityRef, inferAliasFromRef(task.activityRef)));
+    }
+  }
+
+  return ContribCatalogSchema.parse({
+    appName: app.name,
+    entries: Array.from(entries.values()).sort((left, right) => left.name.localeCompare(right.name)),
+    diagnostics: []
+  });
+}
+
+export function introspectContrib(document: string | FlogoApp | unknown, refOrAlias: string): ContribDescriptor | undefined {
+  const catalog = buildContribCatalog(document);
+  return catalog.entries.find((entry) => entry.ref === refOrAlias || entry.alias === normalizeAlias(refOrAlias));
+}
+
+export function classifyMappingValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return MappingKindSchema.parse("array");
+  }
+  if (value !== null && typeof value === "object") {
+    return MappingKindSchema.parse("object");
+  }
+  if (typeof value === "string" && value.includes("$")) {
+    return MappingKindSchema.parse("expression");
+  }
+  return MappingKindSchema.parse("literal");
+}
+
+export function previewMapping(
+  document: string | FlogoApp | unknown,
+  nodeId: string,
+  sampleInput: MappingPreviewContext = createEmptyMappingContext()
+): ReturnType<typeof MappingPreviewResultSchema.parse> {
+  const app = parseFlogoAppDocument(document);
+  const located = locateTask(app, nodeId);
+  if (!located) {
+    return MappingPreviewResultSchema.parse({
+      nodeId,
+      fields: [],
+      suggestedCoercions: [],
+      diagnostics: [createDiagnostic("flogo.mapping.node_not_found", `Unable to locate node "${nodeId}"`, "error", nodeId)]
+    });
+  }
+
+  const fieldEntries: MappingPreviewField[] = [
+    ...collectMappingFields("input", located.task.input, sampleInput),
+    ...collectMappingFields("settings", located.task.settings, sampleInput),
+    ...collectMappingFields("output", located.task.output, sampleInput)
+  ];
+  const suggestedCoercions = suggestCoercions(app, sampleInput).filter((diagnostic) => diagnostic.path?.startsWith(nodeId));
+
+  return MappingPreviewResultSchema.parse({
+    nodeId,
+    flowId: located.flowId,
+    fields: fieldEntries,
+    suggestedCoercions,
+    diagnostics: fieldEntries.flatMap((field) => field.diagnostics)
+  });
+}
+
+export function suggestCoercions(
+  document: string | FlogoApp | unknown,
+  sampleInput: MappingPreviewContext = createEmptyMappingContext()
+): Diagnostic[] {
+  const app = parseFlogoAppDocument(document);
+  const diagnostics: Diagnostic[] = [];
+
+  for (const resource of app.resources) {
+    for (const task of resource.data.tasks) {
+      const sections = [
+        ["input", task.input] as const,
+        ["settings", task.settings] as const,
+        ["output", task.output] as const
+      ];
+
+      for (const [section, value] of sections) {
+        collectCoercionDiagnostics(value, `${task.id}.${section}`, diagnostics, sampleInput);
+      }
+    }
+  }
+
+  return diagnostics;
+}
+
+export function analyzePropertyUsage(document: string | FlogoApp | unknown): PropertyPlan {
+  const app = parseFlogoAppDocument(document);
+  const propertyRefs = new Set<string>();
+  const envRefs = new Set<string>();
+  const diagnostics: Diagnostic[] = [];
+
+  for (const resource of app.resources) {
+    for (const task of resource.data.tasks) {
+      const sections = [task.input, task.settings, task.output];
+      for (const section of sections) {
+        collectResolverKinds(section, propertyRefs, envRefs);
+      }
+    }
+  }
+
+  const declaredProperties = new Set(app.properties.map((property) => property.name));
+  for (const propertyRef of propertyRefs) {
+    if (!declaredProperties.has(propertyRef)) {
+      diagnostics.push(
+        createDiagnostic(
+          "flogo.property.undefined",
+          `Property "${propertyRef}" is referenced but not declared on the app`,
+          "warning",
+          `properties.${propertyRef}`
+        )
+      );
+    }
+  }
+
+  for (const property of app.properties) {
+    if (!propertyRefs.has(property.name)) {
+      diagnostics.push(
+        createDiagnostic(
+          "flogo.property.unused",
+          `Property "${property.name}" is declared but not referenced`,
+          "info",
+          `properties.${property.name}`
+        )
+      );
+    }
+  }
+
+  return PropertyPlanSchema.parse({
+    propertyRefs: Array.from(propertyRefs).sort(),
+    envRefs: Array.from(envRefs).sort(),
+    recommendations: [
+      ...Array.from(propertyRefs)
+        .sort()
+        .map((name) => ({
+          source: "property",
+          name,
+          rationale: "Referenced through $property and suitable for reusable app-level configuration"
+        })),
+      ...Array.from(envRefs)
+        .sort()
+        .map((name) => ({
+          source: "env",
+          name,
+          rationale: "Referenced through $env and suitable for deployment-specific configuration"
+        }))
+    ],
+    diagnostics
+  });
+}
+
+export function defineProperties(
+  document: string | FlogoApp | unknown,
+  properties: FlogoApp["properties"]
+): FlogoApp {
+  const app = parseFlogoAppDocument(document);
+  const merged = new Map(app.properties.map((property) => [property.name, property]));
+  for (const property of properties) {
+    merged.set(property.name, property);
+  }
+
+  return FlogoAppSchema.parse({
+    ...app,
+    properties: Array.from(merged.values())
+  });
+}
+
 export function summarizeAppDiff(beforeDocument: string | FlogoApp | unknown, afterDocument: string | FlogoApp | unknown): string {
   const beforeGraph = buildAppGraph(beforeDocument);
   const afterGraph = buildAppGraph(afterDocument);
   const importDelta = afterGraph.app.imports.length - beforeGraph.app.imports.length;
   const triggerDelta = afterGraph.app.triggers.length - beforeGraph.app.triggers.length;
   const resourceDelta = afterGraph.app.resources.length - beforeGraph.app.resources.length;
+  const propertyDelta = afterGraph.app.properties.length - beforeGraph.app.properties.length;
 
   return [
     `imports ${importDelta >= 0 ? "+" : ""}${importDelta}`,
     `triggers ${triggerDelta >= 0 ? "+" : ""}${triggerDelta}`,
-    `resources ${resourceDelta >= 0 ? "+" : ""}${resourceDelta}`
+    `resources ${resourceDelta >= 0 ? "+" : ""}${resourceDelta}`,
+    `properties ${propertyDelta >= 0 ? "+" : ""}${propertyDelta}`
   ].join(", ");
 }
 
+function buildDescriptorFromRef(ref: string, alias?: string, version?: string, forcedType?: ContribDescriptor["type"]): ContribDescriptor {
+  const normalizedAlias = alias ?? inferAliasFromRef(ref);
+  const registryKey = normalizedAlias ? normalizeAlias(normalizedAlias) : undefined;
+  const registryMatch = registryKey ? knownDescriptorRegistry.get(registryKey) : undefined;
+  const inferredType = forcedType ?? inferContribType(ref);
+  const name = normalizedAlias ?? inferNameFromRef(ref);
+
+  return ContribDescriptorSchema.parse({
+    ref,
+    alias: normalizedAlias,
+    type: registryMatch?.type ?? inferredType,
+    name,
+    version,
+    title: registryMatch?.title ?? name,
+    settings: registryMatch?.settings ?? [],
+    inputs: registryMatch?.inputs ?? [],
+    outputs: registryMatch?.outputs ?? [],
+    examples: registryMatch?.examples ?? [],
+    compatibilityNotes: registryMatch?.compatibilityNotes ?? [],
+    source: registryMatch?.source ?? "inferred"
+  });
+}
+
+function inferContribType(ref: string): ContribDescriptor["type"] {
+  if (ref.includes("/trigger/") || ref.startsWith("#rest") || ref.startsWith("#timer") || ref.startsWith("#cli") || ref.startsWith("#channel")) {
+    return "trigger";
+  }
+  if (ref.includes("/activity/") || ref.startsWith("#log")) {
+    return "activity";
+  }
+  return "action";
+}
+
+function inferAliasFromRef(ref: string): string | undefined {
+  if (ref.startsWith("#flow:")) {
+    return "flow";
+  }
+  if (ref.startsWith("#")) {
+    return normalizeAlias(ref.slice(1).split(".")[0]);
+  }
+
+  const segments = ref.split("/").filter(Boolean);
+  const last = segments.at(-1);
+  return last ? normalizeAlias(last) : undefined;
+}
+
+function normalizeAppShape(parsed: unknown): unknown {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return parsed;
+  }
+
+  const appRecord = { ...(parsed as Record<string, unknown>) };
+  appRecord.triggers = normalizeTriggers(appRecord.triggers);
+  appRecord.resources = normalizeResources(appRecord.resources);
+  appRecord.properties = normalizeProperties(appRecord.properties);
+  return appRecord;
+}
+
+function normalizeTriggers(value: unknown): unknown[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((trigger) => {
+    if (!trigger || typeof trigger !== "object" || Array.isArray(trigger)) {
+      return trigger;
+    }
+
+    const triggerRecord = { ...(trigger as Record<string, unknown>) };
+    if (Array.isArray(triggerRecord.handlers)) {
+      triggerRecord.handlers = triggerRecord.handlers.map((handler) => normalizeHandler(handler));
+    }
+
+    return triggerRecord;
+  });
+}
+
+function normalizeHandler(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const handlerRecord = { ...(value as Record<string, unknown>) };
+  const action = handlerRecord.action;
+  if (action && typeof action === "object" && !Array.isArray(action)) {
+    const actionRecord = { ...(action as Record<string, unknown>) };
+    if (typeof actionRecord.ref === "string" && actionRecord.ref.startsWith("flow:")) {
+      actionRecord.ref = `#${actionRecord.ref}`;
+    }
+    handlerRecord.action = actionRecord;
+  }
+
+  return handlerRecord;
+}
+
+function normalizeResources(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value.map((resource, index) => normalizeResource(resource, `resource_${index}`));
+  }
+
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  return Object.entries(value as Record<string, unknown>).map(([id, resource]) => normalizeResource(resource, id));
+}
+
+function normalizeResource(value: unknown, fallbackId: string): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const resourceRecord = { ...(value as Record<string, unknown>) };
+  const normalizedData = normalizeResourceData(resourceRecord.data);
+
+  return {
+    ...resourceRecord,
+    id: typeof resourceRecord.id === "string" ? resourceRecord.id : fallbackId,
+    data: normalizedData
+  };
+}
+
+function normalizeResourceData(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      metadata: {
+        input: [],
+        output: []
+      },
+      tasks: [],
+      links: []
+    };
+  }
+
+  const dataRecord = { ...(value as Record<string, unknown>) };
+  const metadata = dataRecord.metadata && typeof dataRecord.metadata === "object" && !Array.isArray(dataRecord.metadata)
+    ? { ...(dataRecord.metadata as Record<string, unknown>) }
+    : {};
+
+  metadata.input = normalizeMetadataFields(metadata.input);
+  metadata.output = normalizeMetadataFields(metadata.output);
+  dataRecord.metadata = metadata;
+  dataRecord.tasks = Array.isArray(dataRecord.tasks) ? dataRecord.tasks.map((task) => normalizeTask(task)) : [];
+  dataRecord.links = Array.isArray(dataRecord.links) ? dataRecord.links : [];
+
+  return dataRecord;
+}
+
+function normalizeMetadataFields(value: unknown): unknown[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((field) => {
+    if (typeof field === "string") {
+      return { name: field };
+    }
+    return field;
+  });
+}
+
+function normalizeTask(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const taskRecord = { ...(value as Record<string, unknown>) };
+  const activity = taskRecord.activity;
+
+  if (typeof taskRecord.activityRef !== "string" && activity && typeof activity === "object" && !Array.isArray(activity)) {
+    const activityRef = (activity as Record<string, unknown>).ref;
+    if (typeof activityRef === "string") {
+      taskRecord.activityRef = activityRef;
+    }
+  }
+
+  delete taskRecord.activity;
+  return taskRecord;
+}
+
+function normalizeProperties(value: unknown): unknown[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value;
+}
+
+function inferNameFromRef(ref: string): string {
+  return inferAliasFromRef(ref) ?? ref;
+}
+
+function normalizeAlias(alias: string): string {
+  return alias.replace(/^#/, "").trim();
+}
+
+function locateTask(app: FlogoApp, nodeId: string): LocatedTask | undefined {
+  for (const flow of app.resources) {
+    const task = flow.data.tasks.find((candidate) => candidate.id === nodeId);
+    if (task) {
+      return {
+        flowId: flow.id,
+        flow,
+        task
+      };
+    }
+  }
+
+  return undefined;
+}
+
+function collectMappingFields(prefix: string, value: unknown, sampleInput: MappingPreviewContext): MappingPreviewField[] {
+  if (value === null || value === undefined) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return [
+      {
+        path: prefix,
+        kind: "array",
+        references: collectResolverReferences(JSON.stringify(value)),
+        resolved: resolveMappingValue(value, sampleInput),
+        diagnostics: []
+      },
+      ...value.flatMap((entry, index) => collectMappingFields(`${prefix}[${index}]`, entry, sampleInput))
+    ];
+  }
+
+  if (typeof value === "object") {
+    const objectEntries = Object.entries(value as Record<string, unknown>);
+    const result: MappingPreviewField[] = [
+      {
+        path: prefix,
+        kind: "object",
+        references: collectResolverReferences(JSON.stringify(value)),
+        resolved: resolveMappingValue(value, sampleInput),
+        diagnostics: []
+      }
+    ];
+
+    for (const [key, nestedValue] of objectEntries) {
+      result.push(...collectMappingFields(`${prefix}.${key}`, nestedValue, sampleInput));
+    }
+
+    return result;
+  }
+
+  const kind = classifyMappingValue(value);
+  const expression = typeof value === "string" ? value : undefined;
+  const references = typeof value === "string" ? collectResolverReferences(value) : [];
+
+  return [
+    {
+      path: prefix,
+      kind,
+      expression,
+      references,
+      resolved: resolveMappingValue(value, sampleInput),
+      diagnostics: []
+    }
+  ];
+}
+
+function collectResolverReferences(value: string): string[] {
+  const references = new Set<string>();
+  let match: RegExpExecArray | null = resolverPattern.exec(value);
+  while (match) {
+    references.add(`$${match[1]}`);
+    match = resolverPattern.exec(value);
+  }
+  resolverPattern.lastIndex = 0;
+  return Array.from(references);
+}
+
+function resolveMappingValue(value: unknown, sampleInput: MappingPreviewContext): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => resolveMappingValue(entry, sampleInput));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [key, resolveMappingValue(nestedValue, sampleInput)])
+    );
+  }
+
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const references = collectResolverReferences(value);
+  if (references.length === 0) {
+    return value;
+  }
+
+  if (references.length === 1 && references[0] === value) {
+    return resolveReference(references[0], sampleInput);
+  }
+
+  let resolved = value;
+  for (const reference of references) {
+    const replacement = resolveReference(reference, sampleInput);
+    resolved = resolved.replace(reference, replacement === undefined ? "" : String(replacement));
+  }
+  return resolved;
+}
+
+function resolveReference(reference: string, sampleInput: MappingPreviewContext): unknown {
+  if (reference.startsWith("$activity[")) {
+    const activityMatch = /^\$activity\[([^\]]+)\](?:\.(.+))?$/.exec(reference);
+    if (!activityMatch) {
+      return undefined;
+    }
+    const [, activityId, propertyPath] = activityMatch;
+    return resolveByPath(sampleInput.activity?.[activityId], propertyPath);
+  }
+
+  if (reference.startsWith("$flow")) {
+    return resolveByPath(sampleInput.flow, reference.replace(/^\$flow\.?/, ""));
+  }
+  if (reference.startsWith("$env")) {
+    return resolveByPath(sampleInput.env, reference.replace(/^\$env\.?/, ""));
+  }
+  if (reference.startsWith("$property")) {
+    return resolveByPath(sampleInput.property, reference.replace(/^\$property\.?/, ""));
+  }
+  if (reference.startsWith("$trigger")) {
+    return resolveByPath(sampleInput.trigger, reference.replace(/^\$trigger\.?/, ""));
+  }
+
+  return undefined;
+}
+
+function resolveByPath(value: unknown, pathExpression?: string): unknown {
+  if (!pathExpression || pathExpression.length === 0) {
+    return value;
+  }
+  const segments = pathExpression.split(".").filter(Boolean);
+  let current = value;
+  for (const segment of segments) {
+    if (!current || typeof current !== "object") {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+function collectResolverKinds(value: unknown, propertyRefs: Set<string>, envRefs: Set<string>): void {
+  if (typeof value === "string") {
+    for (const reference of collectResolverReferences(value)) {
+      if (reference.startsWith("$property.")) {
+        propertyRefs.add(reference.replace("$property.", ""));
+      }
+      if (reference.startsWith("$env.")) {
+        envRefs.add(reference.replace("$env.", ""));
+      }
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      collectResolverKinds(entry, propertyRefs, envRefs);
+    }
+    return;
+  }
+
+  if (value && typeof value === "object") {
+    for (const nestedValue of Object.values(value)) {
+      collectResolverKinds(nestedValue, propertyRefs, envRefs);
+    }
+  }
+}
+
+function collectCoercionDiagnostics(
+  value: unknown,
+  path: string,
+  diagnostics: Diagnostic[],
+  sampleInput: MappingPreviewContext
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => collectCoercionDiagnostics(entry, `${path}[${index}]`, diagnostics, sampleInput));
+    return;
+  }
+
+  if (value && typeof value === "object") {
+    for (const [key, nestedValue] of Object.entries(value)) {
+      collectCoercionDiagnostics(nestedValue, `${path}.${key}`, diagnostics, sampleInput);
+    }
+    return;
+  }
+
+  if (typeof value !== "string" || !value.includes("$")) {
+    return;
+  }
+  if (value.includes("toType(") || value.includes("toString(")) {
+    return;
+  }
+
+  const fieldName = path.split(".").at(-1)?.toLowerCase() ?? path.toLowerCase();
+  const resolved = resolveMappingValue(value, sampleInput);
+  const numericLike = /(count|size|length|timeout|interval|port|code|status|limit)/i.test(fieldName);
+  const booleanLike = /(enabled|disabled|success|retry|dryrun|debug|active)/i.test(fieldName);
+
+  if (numericLike) {
+    diagnostics.push(
+      createDiagnostic(
+        "flogo.mapping.coercion.numeric",
+        `Field "${path}" looks numeric; consider wrapping ${value} with toType(..., integer)`,
+        "warning",
+        path,
+        { resolved }
+      )
+    );
+    return;
+  }
+
+  if (booleanLike) {
+    diagnostics.push(
+      createDiagnostic(
+        "flogo.mapping.coercion.boolean",
+        `Field "${path}" looks boolean; consider wrapping ${value} with toType(..., boolean)`,
+        "warning",
+        path,
+        { resolved }
+      )
+    );
+  }
+}

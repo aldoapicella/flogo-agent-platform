@@ -238,6 +238,14 @@ resource runnerWorkerApp 'Microsoft.App/containerApps@2024-03-01' = {
               value: '${namePrefix}-flogo-eval-job'
             }
             {
+              name: 'RUNNER_CATALOG_JOB_TEMPLATE_NAME'
+              value: '${namePrefix}-flogo-build-job'
+            }
+            {
+              name: 'RUNNER_MAPPING_PREVIEW_JOB_TEMPLATE_NAME'
+              value: '${namePrefix}-flogo-build-job'
+            }
+            {
               name: 'RUNNER_JOB_TEMPLATE_NAME'
               value: '${namePrefix}-flogo-build-job'
             }

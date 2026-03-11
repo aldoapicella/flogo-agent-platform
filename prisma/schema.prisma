@@ -56,6 +56,12 @@ enum ArtifactKind {
   patch_bundle
   review_report
   workspace_snapshot
+  contrib_catalog
+  mapping_preview
+  flow_contract
+  run_trace
+  replay_report
+  contrib_bundle
 }
 
 model Organization {

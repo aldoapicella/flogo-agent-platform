@@ -43,6 +43,12 @@ function createCommand(spec: RunnerJobSpec): string[] {
       return ["echo", `logs:${spec.taskId}`];
     case "run_smoke":
       return ["echo", `smoke:${spec.appPath}`];
+    case "catalog_contribs":
+      return ["echo", `catalog:${spec.appPath}`];
+    case "inspect_descriptor":
+      return ["echo", `descriptor:${spec.appPath}`];
+    case "preview_mapping":
+      return ["echo", `mapping-preview:${spec.appPath}`];
     default:
       return ["echo", `runner:${spec.stepType}`];
   }

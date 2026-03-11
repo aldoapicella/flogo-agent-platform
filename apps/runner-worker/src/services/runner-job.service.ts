@@ -132,6 +132,10 @@ export class RunnerJobService {
         );
       case "eval":
         return process.env.RUNNER_EVAL_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-eval-job";
+      case "catalog":
+        return process.env.RUNNER_CATALOG_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
+      case "mapping_preview":
+        return process.env.RUNNER_MAPPING_PREVIEW_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
       default:
         return process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-runner";
     }

@@ -36,7 +36,13 @@ export const ArtifactTypeSchema = z.enum([
   "test_report",
   "patch_bundle",
   "review_report",
-  "workspace_snapshot"
+  "workspace_snapshot",
+  "contrib_catalog",
+  "mapping_preview",
+  "flow_contract",
+  "run_trace",
+  "replay_report",
+  "contrib_bundle"
 ]);
 export type ArtifactType = z.infer<typeof ArtifactTypeSchema>;
 
@@ -215,6 +221,14 @@ export const FlogoImportSchema = z.object({
 });
 export type FlogoImport = z.infer<typeof FlogoImportSchema>;
 
+export const FlogoPropertySchema = z.object({
+  name: z.string(),
+  type: z.string().optional(),
+  value: z.unknown().optional(),
+  required: z.boolean().optional()
+});
+export type FlogoProperty = z.infer<typeof FlogoPropertySchema>;
+
 export const FlogoTaskSchema = z.object({
   id: z.string(),
   name: z.string().optional(),
@@ -266,6 +280,7 @@ export const FlogoAppSchema = z.object({
   version: z.string().optional(),
   description: z.string().optional(),
   imports: z.array(FlogoImportSchema).default([]),
+  properties: z.array(FlogoPropertySchema).default([]),
   triggers: z.array(FlogoTriggerSchema).default([]),
   resources: z.array(FlogoFlowSchema).default([])
 }).passthrough();
@@ -280,16 +295,112 @@ export const FlogoAppGraphSchema = z.object({
 });
 export type FlogoAppGraph = z.infer<typeof FlogoAppGraphSchema>;
 
+export const ContribTypeSchema = z.enum(["trigger", "activity", "action"]);
+export type ContribType = z.infer<typeof ContribTypeSchema>;
+
+export const ContribFieldSchema = z.object({
+  name: z.string(),
+  type: z.string().optional(),
+  required: z.boolean().default(false),
+  description: z.string().optional()
+});
+export type ContribField = z.infer<typeof ContribFieldSchema>;
+
+export const ContribDescriptorSchema = z.object({
+  ref: z.string(),
+  alias: z.string().optional(),
+  type: ContribTypeSchema,
+  name: z.string(),
+  version: z.string().optional(),
+  title: z.string().optional(),
+  settings: z.array(ContribFieldSchema).default([]),
+  inputs: z.array(ContribFieldSchema).default([]),
+  outputs: z.array(ContribFieldSchema).default([]),
+  examples: z.array(z.string()).default([]),
+  compatibilityNotes: z.array(z.string()).default([]),
+  source: z.string().optional()
+});
+export type ContribDescriptor = z.infer<typeof ContribDescriptorSchema>;
+
+export const ContribCatalogSchema = z.object({
+  appName: z.string().optional(),
+  entries: z.array(ContribDescriptorSchema).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([])
+});
+export type ContribCatalog = z.infer<typeof ContribCatalogSchema>;
+
+export const MappingKindSchema = z.enum(["literal", "expression", "object", "array"]);
+export type MappingKind = z.infer<typeof MappingKindSchema>;
+
+export const MappingPreviewContextSchema = z.object({
+  flow: z.record(z.string(), z.unknown()).default({}),
+  activity: z.record(z.string(), z.record(z.string(), z.unknown())).default({}),
+  env: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).default({}),
+  property: z.record(z.string(), z.unknown()).default({}),
+  trigger: z.record(z.string(), z.unknown()).default({})
+});
+export type MappingPreviewContext = z.infer<typeof MappingPreviewContextSchema>;
+
+export const MappingPreviewFieldSchema = z.object({
+  path: z.string(),
+  kind: MappingKindSchema,
+  expression: z.string().optional(),
+  references: z.array(z.string()).default([]),
+  resolved: z.unknown().optional(),
+  diagnostics: z.array(DiagnosticSchema).default([])
+});
+export type MappingPreviewField = z.infer<typeof MappingPreviewFieldSchema>;
+
+export const MappingPreviewRequestSchema = z.object({
+  nodeId: z.string(),
+  sampleInput: MappingPreviewContextSchema.default({})
+});
+export type MappingPreviewRequest = z.infer<typeof MappingPreviewRequestSchema>;
+
+export const MappingPreviewResultSchema = z.object({
+  nodeId: z.string(),
+  flowId: z.string().optional(),
+  fields: z.array(MappingPreviewFieldSchema).default([]),
+  suggestedCoercions: z.array(DiagnosticSchema).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([])
+});
+export type MappingPreviewResult = z.infer<typeof MappingPreviewResultSchema>;
+
+export const PropertyPlanRecommendationSchema = z.object({
+  source: z.enum(["property", "env"]),
+  name: z.string(),
+  rationale: z.string()
+});
+export type PropertyPlanRecommendation = z.infer<typeof PropertyPlanRecommendationSchema>;
+
+export const PropertyPlanSchema = z.object({
+  propertyRefs: z.array(z.string()).default([]),
+  envRefs: z.array(z.string()).default([]),
+  recommendations: z.array(PropertyPlanRecommendationSchema).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([])
+});
+export type PropertyPlan = z.infer<typeof PropertyPlanSchema>;
+
+export const MappingPreviewResponseSchema = z.object({
+  preview: MappingPreviewResultSchema,
+  propertyPlan: PropertyPlanSchema.optional(),
+  artifact: ArtifactRefSchema.optional()
+});
+export type MappingPreviewResponse = z.infer<typeof MappingPreviewResponseSchema>;
+
 export const RunnerStepTypeSchema = z.enum([
   "build",
   "run",
   "collect_logs",
   "generate_smoke",
-  "run_smoke"
+  "run_smoke",
+  "catalog_contribs",
+  "inspect_descriptor",
+  "preview_mapping"
 ]);
 export type RunnerStepType = z.infer<typeof RunnerStepTypeSchema>;
 
-export const RunnerJobKindSchema = z.enum(["build", "smoke_test", "custom_contrib", "eval"]);
+export const RunnerJobKindSchema = z.enum(["build", "smoke_test", "custom_contrib", "eval", "catalog", "mapping_preview"]);
 export type RunnerJobKind = z.infer<typeof RunnerJobKindSchema>;
 
 export const RunnerJobStateSchema = z.enum(["pending", "running", "succeeded", "failed", "cancelled"]);

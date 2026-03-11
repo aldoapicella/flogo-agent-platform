@@ -9,7 +9,9 @@ WORKDIR /workspace
 # Install the Flogo CLI into the runner image.
 RUN go install github.com/project-flogo/cli/...@latest
 
+COPY go-runtime/flogo-helper /tmp/flogo-helper
+RUN cd /tmp/flogo-helper && go build -o /usr/local/bin/flogo-helper .
+
 ENV PATH="/root/go/bin:${PATH}"
 
 CMD ["bash"]
-

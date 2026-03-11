@@ -73,18 +73,36 @@ export class TaskPlanner {
 
   plan(task: TaskRequest): ExecutionPlan {
     const validation = task.type === "create" ? undefined : this.validateDraft(task);
+    const summary = task.summary.toLowerCase();
+    const steps: ExecutionPlanStep[] = [
+      { id: "graph", label: "Parse current Flogo graph", tool: "flogo.parseApp" },
+      { id: "validate", label: "Validate structure and mappings", tool: "flogo.validateApp" }
+    ];
+
+    if (/(trigger|activity|action|contrib|descriptor|catalog)/i.test(summary)) {
+      steps.push({ id: "catalog", label: "Catalog Flogo contributions and descriptors", tool: "flogo.catalogContribs" });
+    }
+
+    if (/(mapping|coercion|resolver|property|env)/i.test(summary)) {
+      steps.push({ id: "mapping", label: "Preview mappings and suggest coercions", tool: "flogo.previewMapping" });
+    }
+
+    if (/(property|env|config)/i.test(summary)) {
+      steps.push({ id: "properties", label: "Plan app properties and environment usage", tool: "flogo.planProperties" });
+    }
+
+    steps.push(
+      { id: "patch", label: "Generate or patch flogo.json", tool: task.type === "create" ? "flogo.generateApp" : "flogo.patchApp" },
+      { id: "build", label: "Queue build step", tool: "runner.buildApp" },
+      { id: "smoke", label: "Queue smoke validation", tool: "test.runSmoke" }
+    );
+
     return {
       taskType: task.type,
       requiredApprovals: this.policy.evaluate(task),
       validation,
       summary: `Prepared ${task.type} workflow for ${task.summary}.`,
-      steps: [
-        { id: "graph", label: "Parse current Flogo graph", tool: "flogo.parseApp" },
-        { id: "validate", label: "Validate structure and mappings", tool: "flogo.validateApp" },
-        { id: "patch", label: "Generate or patch flogo.json", tool: task.type === "create" ? "flogo.generateApp" : "flogo.patchApp" },
-        { id: "build", label: "Queue build step", tool: "runner.buildApp" },
-        { id: "smoke", label: "Queue smoke validation", tool: "test.runSmoke" }
-      ]
+      steps
     };
   }
 
