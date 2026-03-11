@@ -60,6 +60,8 @@ It currently supports:
 
 - contribution catalog generation,
 - descriptor inspection,
+- governance validation,
+- composition comparison,
 - mapping preview.
 
 It is expected to grow into:
@@ -102,7 +104,7 @@ Responsibilities:
 - start orchestrations,
 - store tasks, events, approvals, artifacts, build runs, and test runs through Prisma,
 - expose task history and run summaries,
-- expose direct app-analysis endpoints for graph, catalog, descriptor inspection, artifact listing, and mapping preview,
+- expose direct app-analysis endpoints for graph, catalog, descriptor inspection, governance reporting, composition comparison, artifact listing, and mapping preview,
 - persist app-analysis payload JSON to Blob/Azurite-backed storage,
 - accept internal sync callbacks from the orchestrator and runner paths.
 
@@ -137,6 +139,8 @@ Current workflow modes:
   - `run_smoke`
 - analysis-only workflow modes:
   - `catalog_contribs`
+  - `validate_governance`
+  - `compare_composition`
   - `preview_mapping`
 
 ## Runner-worker
@@ -160,6 +164,8 @@ Current notable behavior:
 - local mode executes real helper commands for:
   - `catalog_contribs`
   - `inspect_descriptor`
+  - `validate_governance`
+  - `compare_composition`
   - `preview_mapping`
 - Container Apps Job mode includes ARM start/poll logic and job-template routing,
 - build/smoke steps are still less Flogo-native than the catalog/preview slice and remain an ongoing implementation area.
@@ -206,6 +212,8 @@ Implements the TypeScript-side Flogo domain model, including:
 - structural, semantic, mapping, and dependency validation,
 - contribution catalog generation,
 - alias validation,
+- governance validation,
+- composition comparison,
 - mapping classification and preview,
 - coercion suggestions,
 - property analysis,
@@ -246,6 +254,8 @@ Implements the current Go-side Flogo-native command surface:
 
 - `catalog contribs`
 - `inspect descriptor`
+- `governance validate`
+- `compose compare`
 - `preview mapping`
 
 ## End-to-end runtime flows
@@ -277,8 +287,8 @@ sequenceDiagram
   participant FG as Flogo Graph
   participant DB as PostgreSQL
 
-  Client->>CP: GET /catalog or POST /mappings/preview
-  CP->>FG: Build catalog / preview result
+  Client->>CP: GET /catalog, GET /governance, POST /composition/compare, or POST /mappings/preview
+  CP->>FG: Build analysis result
   CP->>DB: Persist hidden app-analysis task + artifact
   CP-->>Client: Analysis payload + ArtifactRef
 ```
@@ -295,7 +305,7 @@ sequenceDiagram
 
   Client->>CP: POST /v1/tasks with inputs.mode
   CP->>O: Start analysis-only orchestration
-  O->>RW: Start catalog or preview job
+  O->>RW: Start analysis job
   RW->>H: Execute helper command
   H-->>RW: JSON result
   RW-->>O: Structured job result
@@ -309,6 +319,8 @@ The platform is currently strongest in the Phase 1 capability area:
 
 - contribution cataloging,
 - descriptor inspection,
+- governance validation,
+- composition comparison,
 - mapping preview,
 - coercion suggestions,
 - richer property/environment planning,
@@ -331,7 +343,7 @@ Persisted through Prisma today:
 
 ### Current partial persistence
 
-- app-scoped catalog, descriptor, and mapping-preview artifacts are persisted through hidden synthetic analysis tasks,
+- app-scoped catalog, descriptor, governance, composition-compare, and mapping-preview artifacts are persisted through hidden synthetic analysis tasks,
 - those app-analysis payloads are stored in Blob/Azurite-backed JSON objects,
 - broader task artifacts outside the app-analysis slice still include logical/local URIs.
 

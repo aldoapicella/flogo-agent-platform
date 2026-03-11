@@ -51,6 +51,8 @@ Important current `inputs` conventions:
 
 - `mode = "catalog"` for analysis-only contribution catalog work
 - `mode = "mapping_preview"` for analysis-only mapping preview work
+- `mode = "governance"` for analysis-only alias/orphan/version validation
+- `mode = "composition_compare"` for analysis-only JSON vs programmatic comparison
 
 ### `TaskResult`
 
@@ -136,6 +138,8 @@ Current artifact kinds:
 - `review_report`
 - `workspace_snapshot`
 - `contrib_catalog`
+- `governance_report`
+- `composition_compare`
 - `mapping_preview`
 - `flow_contract`
 - `run_trace`
@@ -156,6 +160,7 @@ Important schemas:
 These describe:
 
 - ref and alias,
+- evidence source and resolved-ref metadata,
 - contrib type,
 - descriptor source and diagnostics,
 - settings,
@@ -182,6 +187,41 @@ These describe:
 - diagnostics,
 - coercion suggestions,
 - richer property/environment planning output,
+- response artifact references.
+
+### Governance contracts
+
+Important schemas:
+
+- `GovernanceReport`
+- `GovernanceResponse`
+- `AliasIssue`
+- `OrphanedRef`
+- `VersionFinding`
+
+These describe:
+
+- alias and import issues,
+- orphaned trigger/activity/action/flow refs,
+- version findings,
+- normalized diagnostics,
+- response artifact references.
+
+### Composition comparison contracts
+
+Important schemas:
+
+- `CompositionCompareRequest`
+- `CompositionCompareResult`
+- `CompositionCompareResponse`
+- `CompositionDifference`
+
+These describe:
+
+- comparison target and mode,
+- canonical and programmatic hashes,
+- machine-readable differences,
+- diagnostics,
 - response artifact references.
 
 ### Property planning contracts
@@ -248,6 +288,7 @@ Important fields:
 - `correlationId?`
 - `command`
 - `containerArgs`
+- `analysisKind?`
 - `analysisPayload?`
 - `targetNodeId?`
 - `targetRef?`
@@ -335,6 +376,8 @@ Current graph-level logic includes:
 - activity-ref presence validation,
 - mapping-order validation for `$activity[...]`,
 - contribution catalog generation,
+- governance validation for aliases, orphaned refs, and version drift,
+- programmatic-composition comparison probes,
 - typed mapping preview classification,
 - unresolved-reference diagnostics,
 - coercion suggestion heuristics,
@@ -400,6 +443,8 @@ This allows:
 
 - app-level catalog artifact history,
 - app-level descriptor artifact history,
+- app-level governance artifact history,
+- app-level composition-comparison artifact history,
 - app-level mapping preview artifact history,
 - artifact lookup by resolved `FlogoApp`,
 

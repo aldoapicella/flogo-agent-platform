@@ -39,6 +39,8 @@ export const ArtifactTypeSchema = z.enum([
   "workspace_snapshot",
   "contrib_catalog",
   "mapping_preview",
+  "governance_report",
+  "composition_compare",
   "flow_contract",
   "run_trace",
   "replay_report",
@@ -298,6 +300,15 @@ export type FlogoAppGraph = z.infer<typeof FlogoAppGraphSchema>;
 export const ContribTypeSchema = z.enum(["trigger", "activity", "action"]);
 export type ContribType = z.infer<typeof ContribTypeSchema>;
 
+export const ContribEvidenceSourceSchema = z.enum([
+  "descriptor",
+  "workspace_descriptor",
+  "registry",
+  "inferred",
+  "flow_resource"
+]);
+export type ContribEvidenceSource = z.infer<typeof ContribEvidenceSourceSchema>;
+
 export const ContribFieldSchema = z.object({
   name: z.string(),
   type: z.string().optional(),
@@ -305,6 +316,16 @@ export const ContribFieldSchema = z.object({
   description: z.string().optional()
 });
 export type ContribField = z.infer<typeof ContribFieldSchema>;
+
+export const ContribResolutionEvidenceSchema = z.object({
+  source: ContribEvidenceSourceSchema,
+  resolvedRef: z.string(),
+  descriptorPath: z.string().optional(),
+  importAlias: z.string().optional(),
+  version: z.string().optional(),
+  diagnostics: z.array(DiagnosticSchema).default([])
+});
+export type ContribResolutionEvidence = z.infer<typeof ContribResolutionEvidenceSchema>;
 
 export const ContribDescriptorSchema = z.object({
   ref: z.string(),
@@ -318,7 +339,8 @@ export const ContribDescriptorSchema = z.object({
   outputs: z.array(ContribFieldSchema).default([]),
   examples: z.array(z.string()).default([]),
   compatibilityNotes: z.array(z.string()).default([]),
-  source: z.string().optional()
+  source: z.string().optional(),
+  evidence: ContribResolutionEvidenceSchema.optional()
 });
 export type ContribDescriptor = z.infer<typeof ContribDescriptorSchema>;
 
@@ -420,6 +442,97 @@ export const MappingPreviewResponseSchema = z.object({
 });
 export type MappingPreviewResponse = z.infer<typeof MappingPreviewResponseSchema>;
 
+export const AliasIssueKindSchema = z.enum([
+  "duplicate_alias",
+  "missing_import",
+  "implicit_alias_use",
+  "alias_ref_mismatch"
+]);
+export type AliasIssueKind = z.infer<typeof AliasIssueKindSchema>;
+
+export const AliasIssueSchema = z.object({
+  kind: AliasIssueKindSchema,
+  alias: z.string(),
+  ref: z.string().optional(),
+  path: z.string(),
+  message: z.string(),
+  severity: DiagnosticSeveritySchema.default("warning")
+});
+export type AliasIssue = z.infer<typeof AliasIssueSchema>;
+
+export const OrphanedRefKindSchema = z.enum(["trigger", "activity", "action", "flow"]);
+export type OrphanedRefKind = z.infer<typeof OrphanedRefKindSchema>;
+
+export const OrphanedRefSchema = z.object({
+  ref: z.string(),
+  kind: OrphanedRefKindSchema,
+  path: z.string(),
+  reason: z.string(),
+  severity: DiagnosticSeveritySchema.default("error")
+});
+export type OrphanedRef = z.infer<typeof OrphanedRefSchema>;
+
+export const VersionFindingStatusSchema = z.enum(["missing", "conflict", "duplicate_alias", "ok"]);
+export type VersionFindingStatus = z.infer<typeof VersionFindingStatusSchema>;
+
+export const VersionFindingSchema = z.object({
+  alias: z.string(),
+  ref: z.string(),
+  declaredVersion: z.string().optional(),
+  status: VersionFindingStatusSchema,
+  message: z.string(),
+  severity: DiagnosticSeveritySchema.default("info")
+});
+export type VersionFinding = z.infer<typeof VersionFindingSchema>;
+
+export const GovernanceReportSchema = z.object({
+  appName: z.string(),
+  ok: z.boolean(),
+  aliasIssues: z.array(AliasIssueSchema).default([]),
+  orphanedRefs: z.array(OrphanedRefSchema).default([]),
+  versionFindings: z.array(VersionFindingSchema).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([])
+});
+export type GovernanceReport = z.infer<typeof GovernanceReportSchema>;
+
+export const GovernanceResponseSchema = z.object({
+  report: GovernanceReportSchema,
+  artifact: ArtifactRefSchema.optional()
+});
+export type GovernanceResponse = z.infer<typeof GovernanceResponseSchema>;
+
+export const CompositionCompareRequestSchema = z.object({
+  mode: z.enum(["analyze"]).default("analyze"),
+  target: z.enum(["app", "resource"]).default("app"),
+  resourceId: z.string().optional()
+});
+export type CompositionCompareRequest = z.infer<typeof CompositionCompareRequestSchema>;
+
+export const CompositionDifferenceSchema = z.object({
+  path: z.string(),
+  kind: z.string(),
+  expected: z.unknown().optional(),
+  actual: z.unknown().optional(),
+  severity: DiagnosticSeveritySchema.default("warning")
+});
+export type CompositionDifference = z.infer<typeof CompositionDifferenceSchema>;
+
+export const CompositionCompareResultSchema = z.object({
+  appName: z.string(),
+  ok: z.boolean(),
+  canonicalHash: z.string(),
+  programmaticHash: z.string(),
+  differences: z.array(CompositionDifferenceSchema).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([]),
+  artifact: ArtifactRefSchema.optional()
+});
+export type CompositionCompareResult = z.infer<typeof CompositionCompareResultSchema>;
+
+export const CompositionCompareResponseSchema = z.object({
+  comparison: CompositionCompareResultSchema
+});
+export type CompositionCompareResponse = z.infer<typeof CompositionCompareResponseSchema>;
+
 export const RunnerStepTypeSchema = z.enum([
   "build",
   "run",
@@ -428,12 +541,32 @@ export const RunnerStepTypeSchema = z.enum([
   "run_smoke",
   "catalog_contribs",
   "inspect_descriptor",
-  "preview_mapping"
+  "preview_mapping",
+  "validate_governance",
+  "compare_composition"
 ]);
 export type RunnerStepType = z.infer<typeof RunnerStepTypeSchema>;
 
-export const RunnerJobKindSchema = z.enum(["build", "smoke_test", "custom_contrib", "eval", "catalog", "mapping_preview"]);
+export const RunnerJobKindSchema = z.enum([
+  "build",
+  "smoke_test",
+  "custom_contrib",
+  "eval",
+  "catalog",
+  "mapping_preview",
+  "governance",
+  "composition_compare"
+]);
 export type RunnerJobKind = z.infer<typeof RunnerJobKindSchema>;
+
+export const AnalysisKindSchema = z.enum([
+  "catalog",
+  "descriptor",
+  "mapping_preview",
+  "governance",
+  "composition_compare"
+]);
+export type AnalysisKind = z.infer<typeof AnalysisKindSchema>;
 
 export const RunnerJobStateSchema = z.enum(["pending", "running", "succeeded", "failed", "cancelled"]);
 export type RunnerJobState = z.infer<typeof RunnerJobStateSchema>;
@@ -453,6 +586,7 @@ export const RunnerJobSpecSchema = z.object({
   taskId: z.string(),
   jobKind: RunnerJobKindSchema.default("build"),
   stepType: RunnerStepTypeSchema,
+  analysisKind: AnalysisKindSchema.optional(),
   snapshotUri: z.string(),
   workspaceBlobPrefix: z.string().optional(),
   appPath: z.string(),

@@ -144,6 +144,73 @@ describe("RunnerExecutorService", () => {
     expect(result.ok).toBe(true);
     expect(result.artifacts.some((artifact) => artifact.name.includes("descriptor"))).toBe(true);
   });
+
+  it("executes helper-backed governance validation and publishes a governance artifact", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        appName: "demo",
+        ok: true,
+        aliasIssues: [],
+        orphanedRefs: [],
+        versionFindings: [],
+        diagnostics: []
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-5",
+      jobKind: "governance",
+      stepType: "validate_governance",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://governance",
+      jobTemplateName: "flogo-runner",
+      command: [],
+      containerArgs: []
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.artifacts.some((artifact) => artifact.type === "governance_report")).toBe(true);
+  });
+
+  it("executes helper-backed composition comparison and publishes a composition artifact", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        appName: "demo",
+        ok: true,
+        canonicalHash: "abc",
+        programmaticHash: "abc",
+        differences: [],
+        diagnostics: []
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-6",
+      jobKind: "composition_compare",
+      stepType: "compare_composition",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://compare",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        target: "app"
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.artifacts.some((artifact) => artifact.type === "composition_compare")).toBe(true);
+  });
 });
 
 async function createHelperScript(stdout: string) {

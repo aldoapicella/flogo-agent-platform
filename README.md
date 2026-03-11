@@ -37,9 +37,9 @@ The current repo supports:
 - Prisma-backed task, event, approval, build-run, test-run, and artifact persistence,
 - orchestration through a dedicated orchestrator app with Durable Functions definitions and a local development host,
 - runner-worker support for local process execution and Container Apps Job metadata/start-poll adapters,
-- Flogo graph parsing, structural/semantic/mapping validation, contribution cataloging, mapping preview, coercion suggestions, and property analysis,
-- direct app-analysis APIs for graph, catalog, descriptor inspection, mapping preview, and app-scoped analysis artifacts,
-- a Go helper binary for contribution catalog, descriptor inspection, and mapping preview commands.
+- Flogo graph parsing, structural/semantic/mapping validation, contribution cataloging, governance validation, composition comparison, mapping preview, coercion suggestions, and property analysis,
+- direct app-analysis APIs for graph, catalog, descriptor inspection, governance reporting, composition comparison, mapping preview, and app-scoped analysis artifacts,
+- a Go helper binary for contribution catalog, descriptor inspection, governance validation, composition comparison, and mapping preview commands.
 
 ## Flogo-native roadmap
 
@@ -138,7 +138,9 @@ The control-plane exposes `/v1` routes, including:
 - `GET /v1/projects/:projectId/apps/:appId/catalog`
 - `GET /v1/projects/:projectId/apps/:appId/descriptors?ref=...`
 - `GET /v1/projects/:projectId/apps/:appId/artifacts`
+- `GET /v1/projects/:projectId/apps/:appId/governance`
 - `POST /v1/projects/:projectId/apps/:appId/mappings/preview`
+- `POST /v1/projects/:projectId/apps/:appId/composition/compare`
 - `GET /v1/health`
 
 Swagger is available locally at `http://localhost:3001/docs`.
@@ -174,7 +176,7 @@ The repo is beyond a pure scaffold, but it is not yet the full Flogo-native runt
 
 Current notable gaps:
 
-- Catalog, descriptor, and mapping-preview app-analysis artifacts are Blob/Azurite-backed; broader runtime artifacts still have mixed local or logical URI behavior.
-- Go helper behavior is real for catalog/descriptor/mapping preview, but not yet for flow contracts, replay, or contribution scaffolding.
+- Catalog, descriptor, governance, composition-compare, and mapping-preview app-analysis artifacts are Blob/Azurite-backed; broader runtime artifacts still have mixed local or logical URI behavior.
+- Go helper behavior is real for catalog/descriptor/governance/composition comparison/mapping preview, but not yet for flow contracts, replay, or contribution scaffolding.
 - Flow-aware, runtime-aware, and extension-aware capabilities are still planned phases.
 - `next build` and Vitest can hit environment-specific `spawn EPERM` failures in restricted shells even when workspace typecheck is clean.

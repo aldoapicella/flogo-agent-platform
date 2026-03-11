@@ -97,6 +97,8 @@ Copy `.env.example` to `.env`.
 - `RUNNER_EVAL_JOB_TEMPLATE_NAME`
 - `RUNNER_CATALOG_JOB_TEMPLATE_NAME`
 - `RUNNER_MAPPING_PREVIEW_JOB_TEMPLATE_NAME`
+- `RUNNER_GOVERNANCE_JOB_TEMPLATE_NAME`
+- `RUNNER_COMPOSITION_COMPARE_JOB_TEMPLATE_NAME`
 - `FLOGO_HELPER_BIN` if you want to point runner-worker at a prebuilt helper
 
 #### Durable orchestration backend
@@ -169,6 +171,8 @@ Important:
 ```bash
 pnpm test
 ```
+
+When you are validating app packages that import shared workspace packages through `dist` exports, do not run `pnpm typecheck` and Vitest in parallel. `pnpm typecheck` rebuilds the shared package outputs first, and that can race with Vitest module loading.
 
 ### Build everything
 
@@ -252,6 +256,14 @@ Current contract:
 - logs/errors to stderr,
 - normalized exit code behavior for runner-worker consumption.
 
+Current helper commands:
+
+- `catalog contribs`
+- `inspect descriptor`
+- `governance validate`
+- `compose compare`
+- `preview mapping`
+
 When adding a helper command:
 
 1. define or reuse shared contracts first,
@@ -311,5 +323,6 @@ Current important test areas:
 - Some artifact URIs are still logical/local rather than Blob-backed.
 - App-analysis catalog, descriptor, and mapping-preview artifacts are Blob/Azurite-backed, but broader runtime artifacts are not yet.
 - The Go helper currently covers only the Phase 1 catalog/descriptor/mapping-preview slice.
+- The Go helper currently covers the Phase 1 catalog/descriptor/governance/composition-compare/mapping-preview slice.
 
 If the environment blocks build/test execution, validate the same commands again in CI or an unrestricted local shell before assuming the code is broken.

@@ -1,4 +1,4 @@
-import type { FlogoApp, MappingPreviewContext, TaskRequest, ToolResponse } from "@flogo-agent/contracts";
+import type { CompositionCompareRequest, FlogoApp, MappingPreviewContext, TaskRequest, ToolResponse } from "@flogo-agent/contracts";
 
 import { ArtifactTools } from "./artifact-tools.js";
 import { FlogoCoreTools } from "./flogo-core-tools.js";
@@ -51,6 +51,17 @@ export class FlogoTools {
 
   introspectDescriptor(raw: string | FlogoApp | unknown, refOrAlias: string): ToolResponse {
     return this.core.introspectDescriptor(raw, refOrAlias);
+  }
+
+  validateGovernance(raw: string | FlogoApp | unknown): ToolResponse {
+    return this.core.validateGovernance(raw);
+  }
+
+  compareJsonVsProgrammatic(
+    raw: string | FlogoApp | unknown,
+    request: CompositionCompareRequest = { mode: "analyze", target: "app" }
+  ): ToolResponse {
+    return this.core.compareJsonVsProgrammatic(raw, request);
   }
 
   generateApp(task: TaskRequest): ToolResponse {

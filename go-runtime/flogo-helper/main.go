@@ -1,10 +1,12 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -26,18 +28,19 @@ type contribField struct {
 }
 
 type contribDescriptor struct {
-	Ref                string         `json:"ref"`
-	Alias              string         `json:"alias,omitempty"`
-	Type               string         `json:"type"`
-	Name               string         `json:"name"`
-	Version            string         `json:"version,omitempty"`
-	Title              string         `json:"title,omitempty"`
-	Settings           []contribField `json:"settings"`
-	Inputs             []contribField `json:"inputs"`
-	Outputs            []contribField `json:"outputs"`
-	Examples           []string       `json:"examples"`
-	CompatibilityNotes []string       `json:"compatibilityNotes"`
-	Source             string         `json:"source,omitempty"`
+	Ref                string           `json:"ref"`
+	Alias              string           `json:"alias,omitempty"`
+	Type               string           `json:"type"`
+	Name               string           `json:"name"`
+	Version            string           `json:"version,omitempty"`
+	Title              string           `json:"title,omitempty"`
+	Settings           []contribField   `json:"settings"`
+	Inputs             []contribField   `json:"inputs"`
+	Outputs            []contribField   `json:"outputs"`
+	Examples           []string         `json:"examples"`
+	CompatibilityNotes []string         `json:"compatibilityNotes"`
+	Source             string           `json:"source,omitempty"`
+	Evidence           *contribEvidence `json:"evidence,omitempty"`
 }
 
 type contribCatalog struct {
@@ -46,9 +49,70 @@ type contribCatalog struct {
 	Diagnostics []diagnostic        `json:"diagnostics"`
 }
 
+type contribEvidence struct {
+	Source         string       `json:"source"`
+	ResolvedRef    string       `json:"resolvedRef"`
+	DescriptorPath string       `json:"descriptorPath,omitempty"`
+	ImportAlias    string       `json:"importAlias,omitempty"`
+	Version        string       `json:"version,omitempty"`
+	Diagnostics    []diagnostic `json:"diagnostics"`
+}
+
 type contribDescriptorResponse struct {
 	Descriptor  contribDescriptor `json:"descriptor"`
 	Diagnostics []diagnostic      `json:"diagnostics"`
+}
+
+type aliasIssue struct {
+	Kind     string `json:"kind"`
+	Alias    string `json:"alias"`
+	Ref      string `json:"ref,omitempty"`
+	Path     string `json:"path"`
+	Message  string `json:"message"`
+	Severity string `json:"severity"`
+}
+
+type orphanedRef struct {
+	Ref      string `json:"ref"`
+	Kind     string `json:"kind"`
+	Path     string `json:"path"`
+	Reason   string `json:"reason"`
+	Severity string `json:"severity"`
+}
+
+type versionFinding struct {
+	Alias           string `json:"alias"`
+	Ref             string `json:"ref"`
+	DeclaredVersion string `json:"declaredVersion,omitempty"`
+	Status          string `json:"status"`
+	Message         string `json:"message"`
+	Severity        string `json:"severity"`
+}
+
+type governanceReport struct {
+	AppName         string           `json:"appName"`
+	Ok              bool             `json:"ok"`
+	AliasIssues     []aliasIssue     `json:"aliasIssues"`
+	OrphanedRefs    []orphanedRef    `json:"orphanedRefs"`
+	VersionFindings []versionFinding `json:"versionFindings"`
+	Diagnostics     []diagnostic     `json:"diagnostics"`
+}
+
+type compositionDifference struct {
+	Path     string `json:"path"`
+	Kind     string `json:"kind"`
+	Expected any    `json:"expected,omitempty"`
+	Actual   any    `json:"actual,omitempty"`
+	Severity string `json:"severity"`
+}
+
+type compositionCompareResult struct {
+	AppName          string                  `json:"appName"`
+	Ok               bool                    `json:"ok"`
+	CanonicalHash    string                  `json:"canonicalHash"`
+	ProgrammaticHash string                  `json:"programmaticHash"`
+	Differences      []compositionDifference `json:"differences"`
+	Diagnostics      []diagnostic            `json:"diagnostics"`
 }
 
 type mappingPreviewContext struct {
@@ -221,6 +285,15 @@ func main() {
 			Descriptor:  descriptor,
 			Diagnostics: diagnostics,
 		})
+	case "governance validate":
+		encode(validateGovernance(app, appPath))
+	case "compose compare":
+		target := lookupFlag("--target")
+		resourceID := lookupFlag("--resource")
+		if target == "" {
+			target = "app"
+		}
+		encode(compareComposition(app, target, resourceID))
 	case "preview mapping":
 		nodeID := lookupFlag("--node")
 		if nodeID == "" {
@@ -504,17 +577,17 @@ func buildContribCatalog(app flogoApp, appPath string) contribCatalog {
 
 	for _, trigger := range app.Triggers {
 		descriptor, entryDiagnostics := buildDescriptorForApp(app, appPath, trigger.Ref, inferAlias(trigger.Ref), "", "trigger")
-		upsert(descriptor)
+		upsert(withCatalogRef(descriptor, trigger.Ref))
 		diagnostics = append(diagnostics, entryDiagnostics...)
 	}
 
 	for _, flow := range app.Resources {
 		upsert(contribDescriptor{
-			Ref:   "#flow:" + flow.ID,
-			Alias: "flow",
-			Type:  "action",
-			Name:  valueOrFallback(flow.Name, flow.ID),
-			Title: valueOrFallback(flow.Name, flow.ID),
+			Ref:      "#flow:" + flow.ID,
+			Alias:    "flow",
+			Type:     "action",
+			Name:     valueOrFallback(flow.Name, flow.ID),
+			Title:    valueOrFallback(flow.Name, flow.ID),
 			Settings: []contribField{},
 			Inputs:   metadataFieldsToContrib(flow.MetadataInput, "input"),
 			Outputs:  metadataFieldsToContrib(flow.MetadataOutput, "output"),
@@ -522,13 +595,14 @@ func buildContribCatalog(app flogoApp, appPath string) contribCatalog {
 			CompatibilityNotes: []string{
 				"Flow resources behave like reusable actions",
 			},
-			Source: "flow-resource",
+			Source:   "flow-resource",
+			Evidence: createEvidence("flow_resource", "#flow:"+flow.ID, "flow", "", "", nil),
 		})
 
 		for _, task := range flow.Tasks {
 			if task.ActivityRef != "" {
 				descriptor, entryDiagnostics := buildDescriptorForApp(app, appPath, task.ActivityRef, inferAlias(task.ActivityRef), "", "")
-				upsert(descriptor)
+				upsert(withCatalogRef(descriptor, task.ActivityRef))
 				diagnostics = append(diagnostics, entryDiagnostics...)
 			}
 		}
@@ -549,6 +623,282 @@ func buildContribCatalog(app flogoApp, appPath string) contribCatalog {
 	}
 }
 
+func validateGovernance(app flogoApp, appPath string) governanceReport {
+	aliasIssues := []aliasIssue{}
+	orphanedRefs := []orphanedRef{}
+	versionFindings := []versionFinding{}
+	diagnostics := []diagnostic{}
+	importsByAlias := map[string][]flogoImport{}
+	refToAliases := map[string]map[string]bool{}
+	usedAliases := map[string]bool{}
+	resourceIDs := map[string]bool{}
+
+	for _, resource := range app.Resources {
+		resourceIDs[resource.ID] = true
+	}
+
+	for _, entry := range app.Imports {
+		importsByAlias[entry.Alias] = append(importsByAlias[entry.Alias], entry)
+		if refToAliases[entry.Ref] == nil {
+			refToAliases[entry.Ref] = map[string]bool{}
+		}
+		refToAliases[entry.Ref][entry.Alias] = true
+		if entry.Version == "" {
+			versionFindings = append(versionFindings, versionFinding{
+				Alias:    entry.Alias,
+				Ref:      entry.Ref,
+				Status:   "missing",
+				Message:  fmt.Sprintf("Import alias %q does not declare a version", entry.Alias),
+				Severity: "info",
+			})
+		}
+	}
+
+	for alias, entries := range importsByAlias {
+		if len(entries) > 1 {
+			aliasIssues = append(aliasIssues, aliasIssue{
+				Kind:     "duplicate_alias",
+				Alias:    alias,
+				Ref:      entries[0].Ref,
+				Path:     "imports." + alias,
+				Message:  fmt.Sprintf("Import alias %q is defined %d times", alias, len(entries)),
+				Severity: "error",
+			})
+			versionFindings = append(versionFindings, versionFinding{
+				Alias:    alias,
+				Ref:      entries[0].Ref,
+				Status:   "duplicate_alias",
+				Message:  fmt.Sprintf("Import alias %q is defined multiple times", alias),
+				Severity: "warning",
+			})
+		}
+
+		refs := map[string]bool{}
+		versions := map[string]bool{}
+		for _, entry := range entries {
+			refs[entry.Ref] = true
+			if entry.Version != "" {
+				versions[entry.Version] = true
+			}
+		}
+		if len(refs) > 1 {
+			aliasIssues = append(aliasIssues, aliasIssue{
+				Kind:     "alias_ref_mismatch",
+				Alias:    alias,
+				Path:     "imports." + alias,
+				Message:  fmt.Sprintf("Import alias %q points to multiple refs", alias),
+				Severity: "warning",
+			})
+		}
+		if len(versions) > 1 {
+			versionFindings = append(versionFindings, versionFinding{
+				Alias:    alias,
+				Ref:      entries[0].Ref,
+				Status:   "conflict",
+				Message:  fmt.Sprintf("Import alias %q declares conflicting versions", alias),
+				Severity: "warning",
+			})
+		}
+	}
+
+	for ref, aliases := range refToAliases {
+		if len(aliases) > 1 {
+			aliasList := make([]string, 0, len(aliases))
+			for alias := range aliases {
+				aliasList = append(aliasList, alias)
+			}
+			sort.Strings(aliasList)
+			versionFindings = append(versionFindings, versionFinding{
+				Alias:    strings.Join(aliasList, ", "),
+				Ref:      ref,
+				Status:   "conflict",
+				Message:  fmt.Sprintf("Contrib ref %q is imported under multiple aliases", ref),
+				Severity: "warning",
+			})
+		}
+	}
+
+	trackUsage := func(ref string, path string, kind string, implicitOnMissing bool) {
+		if strings.HasPrefix(ref, "#flow:") {
+			flowID := strings.TrimPrefix(ref, "#flow:")
+			if !resourceIDs[flowID] {
+				orphanedRefs = append(orphanedRefs, orphanedRef{
+					Ref:      ref,
+					Kind:     "flow",
+					Path:     path,
+					Reason:   fmt.Sprintf("Flow resource %q does not exist", flowID),
+					Severity: "error",
+				})
+			}
+			return
+		}
+
+		if strings.HasPrefix(ref, "#") {
+			alias := inferAlias(ref)
+			if alias == "" || alias == "flow" {
+				return
+			}
+			if _, ok := importsByAlias[alias]; ok {
+				usedAliases[alias] = true
+				return
+			}
+
+			issueKind := "missing_import"
+			severity := "error"
+			message := fmt.Sprintf("Reference %q cannot be resolved because alias %q is not imported", ref, alias)
+			if implicitOnMissing {
+				issueKind = "implicit_alias_use"
+				severity = "warning"
+				message = fmt.Sprintf("Reference %q uses alias %q without a declared import", ref, alias)
+			}
+			aliasIssues = append(aliasIssues, aliasIssue{
+				Kind:     issueKind,
+				Alias:    alias,
+				Ref:      ref,
+				Path:     path,
+				Message:  message,
+				Severity: severity,
+			})
+			orphanedRefs = append(orphanedRefs, orphanedRef{
+				Ref:      ref,
+				Kind:     kind,
+				Path:     path,
+				Reason:   fmt.Sprintf("Alias %q is not imported", alias),
+				Severity: severity,
+			})
+			return
+		}
+
+		for _, entry := range app.Imports {
+			if entry.Ref == ref {
+				usedAliases[entry.Alias] = true
+			}
+		}
+	}
+
+	for _, trigger := range app.Triggers {
+		trackUsage(trigger.Ref, "triggers."+trigger.ID+".ref", "trigger", true)
+		for _, handler := range trigger.Handlers {
+			trackUsage(handler.ActionRef, "triggers."+trigger.ID+".handlers.action", "action", false)
+		}
+	}
+
+	for _, flow := range app.Resources {
+		for _, task := range flow.Tasks {
+			if task.ActivityRef == "" {
+				orphanedRefs = append(orphanedRefs, orphanedRef{
+					Ref:      task.ID,
+					Kind:     "activity",
+					Path:     "resources." + flow.ID + ".tasks." + task.ID,
+					Reason:   "Task is missing an activity ref",
+					Severity: "warning",
+				})
+				continue
+			}
+			trackUsage(task.ActivityRef, "resources."+flow.ID+".tasks."+task.ID+".activityRef", "activity", false)
+		}
+	}
+
+	for _, entry := range app.Imports {
+		if !usedAliases[entry.Alias] {
+			orphanedRefs = append(orphanedRefs, orphanedRef{
+				Ref:      entry.Ref,
+				Kind:     inferContribType(entry.Ref),
+				Path:     "imports." + entry.Alias,
+				Reason:   fmt.Sprintf("Import alias %q is declared but not used by triggers or tasks", entry.Alias),
+				Severity: "info",
+			})
+		}
+	}
+
+	for _, issue := range aliasIssues {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.governance." + issue.Kind,
+			Message:  issue.Message,
+			Severity: issue.Severity,
+			Path:     issue.Path,
+			Details: map[string]any{
+				"alias": issue.Alias,
+				"ref":   issue.Ref,
+			},
+		})
+	}
+	for _, orphan := range orphanedRefs {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.governance.orphaned_ref",
+			Message:  orphan.Reason,
+			Severity: orphan.Severity,
+			Path:     orphan.Path,
+			Details: map[string]any{
+				"ref":  orphan.Ref,
+				"kind": orphan.Kind,
+			},
+		})
+	}
+	for _, finding := range versionFindings {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.governance.version." + finding.Status,
+			Message:  finding.Message,
+			Severity: finding.Severity,
+			Path:     "imports." + finding.Alias,
+			Details: map[string]any{
+				"ref":             finding.Ref,
+				"declaredVersion": finding.DeclaredVersion,
+			},
+		})
+	}
+	diagnostics = append(diagnostics, buildContribCatalog(app, appPath).Diagnostics...)
+	diagnostics = dedupeDiagnostics(diagnostics)
+
+	ok := true
+	for _, entry := range diagnostics {
+		if entry.Severity == "error" {
+			ok = false
+			break
+		}
+	}
+
+	return governanceReport{
+		AppName:         app.Name,
+		Ok:              ok,
+		AliasIssues:     aliasIssues,
+		OrphanedRefs:    orphanedRefs,
+		VersionFindings: versionFindings,
+		Diagnostics:     diagnostics,
+	}
+}
+
+func compareComposition(app flogoApp, target string, resourceID string) compositionCompareResult {
+	diagnostics := []diagnostic{}
+	canonical := buildCanonicalProjection(app, target, resourceID)
+	programmatic := buildProgrammaticProjection(app, target, resourceID, &diagnostics)
+	differences := diffComposition("app", canonical, programmatic)
+	canonicalHash := hashProjection(canonical)
+	programmaticHash := hashProjection(programmatic)
+	ok := true
+	for _, entry := range diagnostics {
+		if entry.Severity == "error" {
+			ok = false
+			break
+		}
+	}
+	for _, entry := range differences {
+		if entry.Severity == "error" {
+			ok = false
+			break
+		}
+	}
+
+	return compositionCompareResult{
+		AppName:          app.Name,
+		Ok:               ok,
+		CanonicalHash:    canonicalHash,
+		ProgrammaticHash: programmaticHash,
+		Differences:      differences,
+		Diagnostics:      diagnostics,
+	}
+}
+
 func metadataFieldsToContrib(fields []map[string]any, prefix string) []contribField {
 	result := make([]contribField, 0, len(fields))
 	for index, item := range fields {
@@ -565,22 +915,54 @@ func metadataFieldsToContrib(fields []map[string]any, prefix string) []contribFi
 	return result
 }
 
+func withCatalogRef(descriptor contribDescriptor, ref string) contribDescriptor {
+	if !strings.HasPrefix(ref, "#") {
+		return descriptor
+	}
+	descriptor.Ref = ref
+	return descriptor
+}
+
+func createEvidence(source string, resolvedRef string, importAlias string, version string, descriptorPath string, diagnostics []diagnostic) *contribEvidence {
+	return &contribEvidence{
+		Source:         source,
+		ResolvedRef:    resolvedRef,
+		DescriptorPath: descriptorPath,
+		ImportAlias:    importAlias,
+		Version:        version,
+		Diagnostics:    diagnostics,
+	}
+}
+
+func inferDescriptorSource(descriptorPath string, ref string) string {
+	normalizedPath := strings.ReplaceAll(descriptorPath, "\\", "/")
+	normalizedRef := strings.TrimPrefix(strings.ReplaceAll(ref, "\\", "/"), "#")
+	if strings.Contains(normalizedPath, "/vendor/"+normalizedRef+"/descriptor.json") ||
+		strings.Contains(normalizedPath, "/.flogo/descriptors/"+normalizedRef+"/descriptor.json") ||
+		strings.Contains(normalizedPath, "/descriptors/"+normalizedRef+"/descriptor.json") {
+		return "descriptor"
+	}
+
+	return "workspace_descriptor"
+}
+
 func introspectContrib(app flogoApp, appPath string, refOrAlias string) (contribDescriptor, []diagnostic, bool) {
 	if strings.HasPrefix(refOrAlias, "#flow:") {
 		flowID := strings.TrimPrefix(refOrAlias, "#flow:")
 		for _, flow := range app.Resources {
 			if flow.ID == flowID {
 				return contribDescriptor{
-					Ref:   "#flow:" + flow.ID,
-					Alias: "flow",
-					Type:  "action",
-					Name:  valueOrFallback(flow.Name, flow.ID),
-					Title: valueOrFallback(flow.Name, flow.ID),
-					Inputs:  metadataFieldsToContrib(flow.MetadataInput, "input"),
-					Outputs: metadataFieldsToContrib(flow.MetadataOutput, "output"),
-					Examples: []string{"Invoke reusable flow " + flow.ID},
+					Ref:                "#flow:" + flow.ID,
+					Alias:              "flow",
+					Type:               "action",
+					Name:               valueOrFallback(flow.Name, flow.ID),
+					Title:              valueOrFallback(flow.Name, flow.ID),
+					Inputs:             metadataFieldsToContrib(flow.MetadataInput, "input"),
+					Outputs:            metadataFieldsToContrib(flow.MetadataOutput, "output"),
+					Examples:           []string{"Invoke reusable flow " + flow.ID},
 					CompatibilityNotes: []string{"Flow resources behave like reusable actions"},
-					Source: "flow-resource",
+					Source:             "flow-resource",
+					Evidence:           createEvidence("flow_resource", "#flow:"+flow.ID, "flow", "", "", nil),
 				}, []diagnostic{}, true
 			}
 		}
@@ -864,7 +1246,8 @@ func buildDescriptorForApp(
 
 	descriptorPath := findDescriptorFile(appPath, resolvedRef)
 	if descriptorPath != "" {
-		return parseDescriptorFile(descriptorPath, resolvedRef, normalizedAlias, version, forcedType), []diagnostic{}
+		source := inferDescriptorSource(descriptorPath, resolvedRef)
+		return parseDescriptorFile(descriptorPath, resolvedRef, normalizedAlias, version, forcedType, source), []diagnostic{}
 	}
 
 	descriptor := buildDescriptor(resolvedRef, normalizedAlias, version, forcedType)
@@ -878,6 +1261,12 @@ func buildDescriptorForApp(
 	}
 
 	return descriptor, []diagnostic{
+		{
+			Code:     "flogo.contrib.descriptor_not_found",
+			Message:  fmt.Sprintf("Descriptor metadata for %q was not found on disk", resolvedRef),
+			Severity: "info",
+			Path:     normalizedAlias,
+		},
 		{
 			Code:     code,
 			Message:  message,
@@ -987,7 +1376,7 @@ func buildSearchRoots(appPath string) []string {
 	return result
 }
 
-func parseDescriptorFile(descriptorPath string, ref string, alias string, version string, forcedType string) contribDescriptor {
+func parseDescriptorFile(descriptorPath string, ref string, alias string, version string, forcedType string, source string) contribDescriptor {
 	contents, err := os.ReadFile(descriptorPath)
 	if err != nil {
 		fail(err.Error())
@@ -1018,7 +1407,8 @@ func parseDescriptorFile(descriptorPath string, ref string, alias string, versio
 		Outputs:            normalizeDescriptorFields(firstNonNil(raw["output"], raw["outputs"])),
 		Examples:           normalizeStringArray(raw["examples"]),
 		CompatibilityNotes: normalizeStringArray(raw["compatibilityNotes"]),
-		Source:             "descriptor",
+		Source:             source,
+		Evidence:           createEvidence(source, ref, alias, version, descriptorPath, nil),
 	}
 }
 
@@ -1072,6 +1462,282 @@ func normalizeStringArray(value any) []string {
 	return result
 }
 
+func buildCanonicalProjection(app flogoApp, target string, resourceID string) any {
+	if target == "resource" {
+		var resource any
+		for _, flow := range app.Resources {
+			if flow.ID == resourceID {
+				resource = projectFlow(flow)
+				break
+			}
+		}
+		return map[string]any{
+			"target":   "resource",
+			"appName":  app.Name,
+			"resource": resource,
+		}
+	}
+
+	imports := make([]map[string]any, 0, len(app.Imports))
+	for _, entry := range app.Imports {
+		imports = append(imports, map[string]any{
+			"alias":   entry.Alias,
+			"ref":     entry.Ref,
+			"version": emptyToNil(entry.Version),
+		})
+	}
+	sort.Slice(imports, func(i, j int) bool {
+		return stringValue(imports[i]["alias"]) < stringValue(imports[j]["alias"])
+	})
+
+	properties := make([]map[string]any, 0, len(app.Properties))
+	for _, property := range app.Properties {
+		properties = append(properties, map[string]any{
+			"name":     stringValue(property["name"]),
+			"type":     emptyToNil(stringValue(property["type"])),
+			"required": boolValue(property["required"]),
+			"value":    property["value"],
+		})
+	}
+	sort.Slice(properties, func(i, j int) bool {
+		return stringValue(properties[i]["name"]) < stringValue(properties[j]["name"])
+	})
+
+	triggers := make([]map[string]any, 0, len(app.Triggers))
+	for _, trigger := range app.Triggers {
+		handlers := make([]map[string]any, 0, len(trigger.Handlers))
+		for _, handler := range trigger.Handlers {
+			handlers = append(handlers, map[string]any{
+				"actionRef": handler.ActionRef,
+				"settings":  sortMap(handler.Settings),
+			})
+		}
+		triggers = append(triggers, map[string]any{
+			"id":       trigger.ID,
+			"ref":      trigger.Ref,
+			"settings": sortMap(trigger.Settings),
+			"handlers": handlers,
+		})
+	}
+	sort.Slice(triggers, func(i, j int) bool {
+		return stringValue(triggers[i]["id"]) < stringValue(triggers[j]["id"])
+	})
+
+	resources := make([]any, 0, len(app.Resources))
+	for _, resource := range app.Resources {
+		resources = append(resources, projectFlow(resource))
+	}
+	sort.Slice(resources, func(i, j int) bool {
+		left, _ := resources[i].(map[string]any)
+		right, _ := resources[j].(map[string]any)
+		return stringValue(left["id"]) < stringValue(right["id"])
+	})
+
+	return map[string]any{
+		"target":     "app",
+		"appName":    app.Name,
+		"type":       app.Type,
+		"appModel":   app.AppModel,
+		"imports":    imports,
+		"properties": properties,
+		"triggers":   triggers,
+		"resources":  resources,
+	}
+}
+
+func buildProgrammaticProjection(app flogoApp, target string, resourceID string, diagnostics *[]diagnostic) any {
+	if target == "resource" && resourceID == "" {
+		*diagnostics = append(*diagnostics, diagnostic{
+			Code:     "flogo.composition.resource_required",
+			Message:  "A resourceId is required when target=resource",
+			Severity: "error",
+			Path:     "resourceId",
+		})
+		return map[string]any{
+			"target":   "resource",
+			"appName":  app.Name,
+			"resource": nil,
+		}
+	}
+
+	if target == "resource" {
+		found := false
+		for _, flow := range app.Resources {
+			if flow.ID == resourceID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			*diagnostics = append(*diagnostics, diagnostic{
+				Code:     "flogo.composition.resource_not_found",
+				Message:  fmt.Sprintf("Resource %q was not found", resourceID),
+				Severity: "error",
+				Path:     resourceID,
+			})
+		}
+	}
+
+	return buildCanonicalProjection(app, target, resourceID)
+}
+
+func projectFlow(flow flogoFlow) map[string]any {
+	inputs := make([]map[string]any, 0, len(flow.MetadataInput))
+	for index, item := range flow.MetadataInput {
+		name := stringValue(item["name"])
+		if name == "" {
+			name = fmt.Sprintf("input_%d", index)
+		}
+		inputs = append(inputs, map[string]any{
+			"name":     name,
+			"type":     emptyToNil(stringValue(item["type"])),
+			"required": boolValue(item["required"]),
+		})
+	}
+
+	outputs := make([]map[string]any, 0, len(flow.MetadataOutput))
+	for index, item := range flow.MetadataOutput {
+		name := stringValue(item["name"])
+		if name == "" {
+			name = fmt.Sprintf("output_%d", index)
+		}
+		outputs = append(outputs, map[string]any{
+			"name":     name,
+			"type":     emptyToNil(stringValue(item["type"])),
+			"required": boolValue(item["required"]),
+		})
+	}
+
+	tasks := make([]map[string]any, 0, len(flow.Tasks))
+	for _, task := range flow.Tasks {
+		tasks = append(tasks, map[string]any{
+			"id":          task.ID,
+			"name":        emptyToNil(task.Name),
+			"activityRef": emptyToNil(task.ActivityRef),
+			"input":       sortMap(task.Input),
+			"output":      sortMap(task.Output),
+			"settings":    sortMap(task.Settings),
+		})
+	}
+
+	return map[string]any{
+		"id":   flow.ID,
+		"name": emptyToNil(flow.Name),
+		"metadata": map[string]any{
+			"input":  inputs,
+			"output": outputs,
+		},
+		"tasks": tasks,
+	}
+}
+
+func hashProjection(value any) string {
+	payload, err := json.Marshal(sortValue(value))
+	if err != nil {
+		fail(err.Error())
+	}
+	hash := sha256.Sum256(payload)
+	return fmt.Sprintf("%x", hash)
+}
+
+func diffComposition(path string, expected any, actual any) []compositionDifference {
+	differences := []compositionDifference{}
+
+	switch left := expected.(type) {
+	case []any:
+		right, _ := actual.([]any)
+		if len(left) != len(right) {
+			differences = append(differences, compositionDifference{
+				Path:     path,
+				Kind:     "array_length_mismatch",
+				Expected: len(left),
+				Actual:   len(right),
+				Severity: "warning",
+			})
+		}
+		maxLength := len(left)
+		if len(right) > maxLength {
+			maxLength = len(right)
+		}
+		for index := 0; index < maxLength; index++ {
+			var leftValue any
+			var rightValue any
+			if index < len(left) {
+				leftValue = left[index]
+			}
+			if index < len(right) {
+				rightValue = right[index]
+			}
+			differences = append(differences, diffComposition(fmt.Sprintf("%s[%d]", path, index), leftValue, rightValue)...)
+		}
+		return differences
+	case map[string]any:
+		right, _ := actual.(map[string]any)
+		keys := map[string]bool{}
+		for key := range left {
+			keys[key] = true
+		}
+		for key := range right {
+			keys[key] = true
+		}
+		sortedKeys := make([]string, 0, len(keys))
+		for key := range keys {
+			sortedKeys = append(sortedKeys, key)
+		}
+		sort.Strings(sortedKeys)
+		for _, key := range sortedKeys {
+			differences = append(differences, diffComposition(path+"."+key, left[key], right[key])...)
+		}
+		return differences
+	}
+
+	if !reflect.DeepEqual(expected, actual) {
+		differences = append(differences, compositionDifference{
+			Path:     path,
+			Kind:     "value_mismatch",
+			Expected: expected,
+			Actual:   actual,
+			Severity: "warning",
+		})
+	}
+
+	return differences
+}
+
+func sortMap(value map[string]any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	return sortValue(value).(map[string]any)
+}
+
+func sortValue(value any) any {
+	switch typed := value.(type) {
+	case []any:
+		result := make([]any, 0, len(typed))
+		for _, item := range typed {
+			result = append(result, sortValue(item))
+		}
+		return result
+	case map[string]any:
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		result := map[string]any{}
+		for _, key := range keys {
+			result[key] = sortValue(typed[key])
+		}
+		return result
+	default:
+		if value == nil {
+			return nil
+		}
+		return value
+	}
+}
+
 func firstNonNil(values ...any) any {
 	for _, value := range values {
 		if value != nil {
@@ -1102,18 +1768,18 @@ func buildDescriptor(ref string, alias string, version string, forcedType string
 	}
 	registry, ok := knownRegistry[normalizeAlias(normalizedAlias)]
 	descriptor := contribDescriptor{
-		Ref:     ref,
-		Alias:   normalizedAlias,
-		Type:    inferContribType(ref),
-		Name:    valueOrFallback(normalizedAlias, ref),
-		Version: version,
-		Title:   valueOrFallback(normalizedAlias, ref),
-		Settings: []contribField{},
-		Inputs:   []contribField{},
-		Outputs:  []contribField{},
-		Examples: []string{},
+		Ref:                ref,
+		Alias:              normalizedAlias,
+		Type:               inferContribType(ref),
+		Name:               valueOrFallback(normalizedAlias, ref),
+		Version:            version,
+		Title:              valueOrFallback(normalizedAlias, ref),
+		Settings:           []contribField{},
+		Inputs:             []contribField{},
+		Outputs:            []contribField{},
+		Examples:           []string{},
 		CompatibilityNotes: []string{},
-		Source: "inferred",
+		Source:             "inferred",
 	}
 
 	if ok {
@@ -1131,6 +1797,8 @@ func buildDescriptor(ref string, alias string, version string, forcedType string
 	if forcedType != "" {
 		descriptor.Type = forcedType
 	}
+
+	descriptor.Evidence = createEvidence(descriptor.Source, ref, normalizedAlias, version, "", nil)
 
 	return descriptor
 }
@@ -1197,6 +1865,13 @@ func boolValue(value any) bool {
 func valueOrFallback(value string, fallback string) string {
 	if value == "" {
 		return fallback
+	}
+	return value
+}
+
+func emptyToNil(value string) any {
+	if value == "" {
+		return nil
 	}
 	return value
 }

@@ -46,6 +46,15 @@ export class FlogoAppsController {
     return descriptor;
   }
 
+  @Get(":appId/governance")
+  async getGovernance(@Param("projectId") projectId: string, @Param("appId") appId: string) {
+    const governance = await this.flogoAppsService.getGovernance(projectId, appId);
+    if (!governance) {
+      throw new NotFoundException(`Unknown app ${appId}`);
+    }
+    return governance;
+  }
+
   @Post(":appId/mappings/preview")
   async previewMapping(@Param("projectId") projectId: string, @Param("appId") appId: string, @Body() body: unknown) {
     const preview = await this.flogoAppsService.previewMapping(projectId, appId, body);
@@ -53,5 +62,14 @@ export class FlogoAppsController {
       throw new NotFoundException(`Unknown app ${appId}`);
     }
     return preview;
+  }
+
+  @Post(":appId/composition/compare")
+  async compareComposition(@Param("projectId") projectId: string, @Param("appId") appId: string, @Body() body: unknown) {
+    const comparison = await this.flogoAppsService.compareComposition(projectId, appId, body);
+    if (!comparison) {
+      throw new NotFoundException(`Unknown app ${appId}`);
+    }
+    return comparison;
   }
 }

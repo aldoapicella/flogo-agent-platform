@@ -8,11 +8,13 @@ import {
   analyzePropertyUsage,
   buildAppGraph,
   buildContribCatalog,
+  compareJsonVsProgrammatic,
   inspectContribDescriptor,
   previewMapping,
   suggestCoercions,
   summarizeAppDiff,
-  validateFlogoApp
+  validateFlogoApp,
+  validateGovernance
 } from "./index.js";
 
 const validApp = {
@@ -302,7 +304,55 @@ describe("flogo graph", () => {
     const descriptor = inspectContribDescriptor(validApp, "#log", { searchRoots: [tempDir] });
 
     expect(catalog.entries.find((entry) => entry.alias === "log")?.name).toBe("workspace-log");
-    expect(descriptor?.descriptor.source).toBe("descriptor");
+    expect(descriptor?.descriptor.source).toBe("workspace_descriptor");
+    expect(descriptor?.descriptor.evidence?.source).toBe("workspace_descriptor");
     expect(descriptor?.diagnostics).toEqual([]);
+  });
+
+  it("reports governance findings for duplicate aliases and missing refs", () => {
+    const app = structuredClone(validApp);
+    app.imports.push({
+      alias: "log",
+      ref: "github.com/project-flogo/contrib/activity/log",
+      version: "1.0.0"
+    });
+    app.resources[0].data.tasks.push({
+      id: "missing_1",
+      activityRef: "#missing",
+      input: {}
+    });
+
+    const governance = validateGovernance(app);
+
+    expect(governance.ok).toBe(false);
+    expect(governance.aliasIssues.some((issue) => issue.kind === "duplicate_alias" && issue.alias === "log")).toBe(true);
+    expect(governance.orphanedRefs.some((entry) => entry.ref === "#missing" && entry.kind === "activity")).toBe(true);
+    expect(governance.versionFindings.some((finding) => finding.alias === "rest" && finding.status === "missing")).toBe(true);
+  });
+
+  it("compares canonical and programmatic composition for app and resource targets", () => {
+    const appComparison = compareJsonVsProgrammatic(validApp, {
+      mode: "analyze",
+      target: "app"
+    });
+    const resourceComparison = compareJsonVsProgrammatic(legacyShapeApp, {
+      mode: "analyze",
+      target: "resource",
+      resourceId: "hello"
+    });
+    const missingResource = compareJsonVsProgrammatic(validApp, {
+      mode: "analyze",
+      target: "resource",
+      resourceId: "missing"
+    });
+
+    expect(appComparison.ok).toBe(true);
+    expect(appComparison.differences).toEqual([]);
+    expect(resourceComparison.ok).toBe(true);
+    expect(resourceComparison.differences).toEqual([]);
+    expect(missingResource.ok).toBe(false);
+    expect(missingResource.diagnostics.some((diagnostic) => diagnostic.code === "flogo.composition.resource_not_found")).toBe(
+      true
+    );
   });
 });

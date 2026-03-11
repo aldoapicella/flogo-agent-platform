@@ -5,8 +5,11 @@ import path from "node:path";
 
 import {
   ArtifactRefSchema,
+  CompositionCompareRequestSchema,
+  CompositionCompareResponseSchema,
   ContribDescriptorResponseSchema,
   ContribCatalogResponseSchema,
+  GovernanceResponseSchema,
   MappingPreviewRequestSchema,
   MappingPreviewResponseSchema
 } from "@flogo-agent/contracts";
@@ -14,10 +17,12 @@ import {
   analyzePropertyUsage,
   buildAppGraph,
   buildContribCatalog,
+  compareJsonVsProgrammatic,
   inspectContribDescriptor,
   parseFlogoAppDocument,
   previewMapping,
-  suggestCoercions
+  suggestCoercions,
+  validateGovernance
 } from "@flogo-agent/flogo-graph";
 
 import { AppAnalysisStorageService } from "./app-analysis-storage.service.js";
@@ -154,6 +159,65 @@ export class FlogoAppsService {
     return ContribDescriptorResponseSchema.parse({
       ...descriptorResponse,
       artifact
+    });
+  }
+
+  async getGovernance(projectId: string, appId: string) {
+    const resolved = await this.resolveApp(projectId, appId);
+    if (!resolved) {
+      return undefined;
+    }
+
+    const report = validateGovernance(resolved.content, { appPath: resolved.appPath });
+    const artifact = await this.persistArtifact(
+      resolved,
+      "governance_report",
+      `${appId}-governance-report.json`,
+      {
+        analysisType: "governance",
+        appId,
+        sourceType: resolved.sourceType
+      },
+      {
+        report
+      }
+    );
+
+    return GovernanceResponseSchema.parse({
+      report,
+      artifact
+    });
+  }
+
+  async compareComposition(projectId: string, appId: string, payload: unknown) {
+    const resolved = await this.resolveApp(projectId, appId);
+    if (!resolved) {
+      return undefined;
+    }
+
+    const request = CompositionCompareRequestSchema.parse(payload ?? {});
+    const comparison = compareJsonVsProgrammatic(resolved.content, request);
+    const artifact = await this.persistArtifact(
+      resolved,
+      "composition_compare",
+      `${appId}-composition-compare.json`,
+      {
+        analysisType: "composition_compare",
+        appId,
+        sourceType: resolved.sourceType,
+        target: request.target,
+        resourceId: request.resourceId
+      },
+      {
+        comparison
+      }
+    );
+
+    return CompositionCompareResponseSchema.parse({
+      comparison: {
+        ...comparison,
+        artifact
+      }
     });
   }
 
@@ -307,7 +371,7 @@ export class FlogoAppsService {
 
   private async persistArtifact(
     resolved: ResolvedApp,
-    type: "contrib_catalog" | "mapping_preview" | "descriptor",
+    type: "contrib_catalog" | "mapping_preview" | "descriptor" | "governance_report" | "composition_compare",
     name: string,
     metadata: Record<string, unknown>,
     payload: Record<string, unknown>

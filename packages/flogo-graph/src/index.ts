@@ -1,19 +1,28 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
+  CompositionCompareRequestSchema,
+  type CompositionCompareRequest,
+  CompositionCompareResultSchema,
+  type CompositionCompareResult,
   ContribCatalogSchema,
   type ContribCatalog,
   ContribDescriptorSchema,
   type ContribDescriptor,
   ContribDescriptorResponseSchema,
   type ContribDescriptorResponse,
+  ContribResolutionEvidenceSchema,
+  type ContribResolutionEvidence,
   type Diagnostic,
   FlogoAppGraphSchema,
   FlogoAppSchema,
   type FlogoApp,
   type FlogoAppGraph,
   type FlogoFlow,
+  GovernanceReportSchema,
+  type GovernanceReport,
   MappingKindSchema,
   MappingPreviewResultSchema,
   type MappingPreviewContext,
@@ -60,7 +69,7 @@ type ResolvedDescriptor = {
   diagnostics: Diagnostic[];
 };
 
-const knownDescriptorRegistry = new Map<string, Omit<ContribDescriptor, "ref" | "alias">>([
+const knownDescriptorRegistry = new Map<string, Omit<ContribDescriptor, "ref" | "alias" | "evidence">>([
   [
     "rest",
     {
@@ -429,7 +438,8 @@ export function buildContribCatalog(document: string | FlogoApp | unknown, optio
         })),
         examples: [`Invoke reusable flow ${resource.id}`],
         compatibilityNotes: ["Flow resources behave like reusable actions"],
-        source: "flow-resource"
+        source: "flow-resource",
+        evidence: createDescriptorEvidence("flow_resource", `#flow:${resource.id}`, "flow")
       })
     );
 
@@ -672,6 +682,275 @@ export function summarizeAppDiff(beforeDocument: string | FlogoApp | unknown, af
   ].join(", ");
 }
 
+export function validateGovernance(document: string | FlogoApp | unknown, options?: ContribLookupOptions): GovernanceReport {
+  const app = parseFlogoAppDocument(document);
+  const aliasIssues: Array<{
+    kind: "duplicate_alias" | "missing_import" | "implicit_alias_use" | "alias_ref_mismatch";
+    alias: string;
+    ref?: string;
+    path: string;
+    message: string;
+    severity: Diagnostic["severity"];
+  }> = [];
+  const orphanedRefs: Array<{
+    ref: string;
+    kind: "trigger" | "activity" | "action" | "flow";
+    path: string;
+    reason: string;
+    severity: Diagnostic["severity"];
+  }> = [];
+  const versionFindings: Array<{
+    alias: string;
+    ref: string;
+    declaredVersion?: string;
+    status: "missing" | "conflict" | "duplicate_alias" | "ok";
+    message: string;
+    severity: Diagnostic["severity"];
+  }> = [];
+
+  const importsByAlias = new Map<string, FlogoApp["imports"]>();
+  const refToAliases = new Map<string, Set<string>>();
+  const usedImportAliases = new Set<string>();
+  const resourceIds = new Set(app.resources.map((resource) => resource.id));
+  const catalogDiagnostics = buildContribCatalog(app, options).diagnostics;
+
+  for (const entry of app.imports) {
+    const current = importsByAlias.get(entry.alias) ?? [];
+    current.push(entry);
+    importsByAlias.set(entry.alias, current);
+    const aliases = refToAliases.get(entry.ref) ?? new Set<string>();
+    aliases.add(entry.alias);
+    refToAliases.set(entry.ref, aliases);
+
+    if (!entry.version) {
+      versionFindings.push({
+        alias: entry.alias,
+        ref: entry.ref,
+        declaredVersion: entry.version,
+        status: "missing",
+        message: `Import alias "${entry.alias}" does not declare a version`,
+        severity: "info"
+      });
+    }
+  }
+
+  for (const [alias, entries] of importsByAlias) {
+    if (entries.length > 1) {
+      aliasIssues.push({
+        kind: "duplicate_alias",
+        alias,
+        ref: entries[0]?.ref,
+        path: `imports.${alias}`,
+        message: `Import alias "${alias}" is defined ${entries.length} times`,
+        severity: "error"
+      });
+      versionFindings.push({
+        alias,
+        ref: entries[0]?.ref ?? "",
+        declaredVersion: entries[0]?.version,
+        status: "duplicate_alias",
+        message: `Import alias "${alias}" is defined multiple times`,
+        severity: "warning"
+      });
+    }
+
+    const uniqueRefs = new Set(entries.map((entry) => entry.ref));
+    if (uniqueRefs.size > 1) {
+      aliasIssues.push({
+        kind: "alias_ref_mismatch",
+        alias,
+        ref: entries.map((entry) => entry.ref).join(", "),
+        path: `imports.${alias}`,
+        message: `Import alias "${alias}" points to multiple refs`,
+        severity: "warning"
+      });
+      versionFindings.push({
+        alias,
+        ref: entries[0]?.ref ?? "",
+        declaredVersion: entries[0]?.version,
+        status: "conflict",
+        message: `Import alias "${alias}" is associated with multiple refs`,
+        severity: "warning"
+      });
+    }
+
+    const uniqueVersions = new Set(entries.map((entry) => entry.version).filter((value): value is string => Boolean(value)));
+    if (uniqueVersions.size > 1) {
+      versionFindings.push({
+        alias,
+        ref: entries[0]?.ref ?? "",
+        declaredVersion: entries[0]?.version,
+        status: "conflict",
+        message: `Import alias "${alias}" declares conflicting versions`,
+        severity: "warning"
+      });
+    }
+  }
+
+  for (const [ref, aliases] of refToAliases) {
+    if (aliases.size > 1) {
+      versionFindings.push({
+        alias: Array.from(aliases).sort().join(", "),
+        ref,
+        status: "conflict",
+        message: `Contrib ref "${ref}" is imported under multiple aliases`,
+        severity: "warning"
+      });
+    }
+  }
+
+  const trackRefUsage = (
+    ref: string,
+    path: string,
+    kind: "trigger" | "activity" | "action" | "flow",
+    implicitOnMissing = false
+  ) => {
+    if (ref.startsWith("#flow:")) {
+      const flowId = ref.replace("#flow:", "");
+      if (!resourceIds.has(flowId)) {
+        orphanedRefs.push({
+          ref,
+          kind: "flow",
+          path,
+          reason: `Flow resource "${flowId}" does not exist`,
+          severity: "error"
+        });
+      }
+      return;
+    }
+
+    if (ref.startsWith("#")) {
+      const alias = inferAliasFromRef(ref);
+      if (!alias || alias === "flow") {
+        return;
+      }
+
+      if (importsByAlias.has(alias)) {
+        usedImportAliases.add(alias);
+        return;
+      }
+
+      aliasIssues.push({
+        kind: implicitOnMissing ? "implicit_alias_use" : "missing_import",
+        alias,
+        ref,
+        path,
+        message: implicitOnMissing
+          ? `Reference "${ref}" uses alias "${alias}" without a declared import`
+          : `Reference "${ref}" cannot be resolved because alias "${alias}" is not imported`,
+        severity: implicitOnMissing ? "warning" : "error"
+      });
+      orphanedRefs.push({
+        ref,
+        kind,
+        path,
+        reason: `Alias "${alias}" is not imported`,
+        severity: implicitOnMissing ? "warning" : "error"
+      });
+      return;
+    }
+
+    if (ref.includes("/")) {
+      const importMatch = app.imports.find((entry) => entry.ref === ref);
+      if (importMatch) {
+        usedImportAliases.add(importMatch.alias);
+      }
+    }
+  };
+
+  for (const trigger of app.triggers) {
+    trackRefUsage(trigger.ref, `triggers.${trigger.id}.ref`, "trigger", true);
+    for (const handler of trigger.handlers) {
+      trackRefUsage(handler.action.ref, `triggers.${trigger.id}.handlers.action`, "action");
+    }
+  }
+
+  for (const resource of app.resources) {
+    for (const task of resource.data.tasks) {
+      if (task.activityRef) {
+        trackRefUsage(task.activityRef, `resources.${resource.id}.tasks.${task.id}.activityRef`, "activity");
+      } else {
+        orphanedRefs.push({
+          ref: task.id,
+          kind: "activity",
+          path: `resources.${resource.id}.tasks.${task.id}`,
+          reason: "Task is missing an activity ref",
+          severity: "warning"
+        });
+      }
+    }
+  }
+
+  for (const entry of app.imports) {
+    if (!usedImportAliases.has(entry.alias)) {
+      orphanedRefs.push({
+        ref: entry.ref,
+        kind: inferContribType(entry.ref),
+        path: `imports.${entry.alias}`,
+        reason: `Import alias "${entry.alias}" is declared but not used by triggers or tasks`,
+        severity: "info"
+      });
+    }
+  }
+
+  const diagnostics = dedupeDiagnostics([
+    ...aliasIssues.map((issue) =>
+      createDiagnostic(`flogo.governance.${issue.kind}`, issue.message, issue.severity, issue.path, {
+        alias: issue.alias,
+        ref: issue.ref
+      })
+    ),
+    ...orphanedRefs.map((entry) =>
+      createDiagnostic("flogo.governance.orphaned_ref", entry.reason, entry.severity, entry.path, {
+        ref: entry.ref,
+        kind: entry.kind
+      })
+    ),
+    ...versionFindings.map((finding) =>
+      createDiagnostic(`flogo.governance.version.${finding.status}`, finding.message, finding.severity, `imports.${finding.alias}`, {
+        ref: finding.ref,
+        declaredVersion: finding.declaredVersion
+      })
+    ),
+    ...catalogDiagnostics
+  ]);
+
+  return GovernanceReportSchema.parse({
+    appName: app.name,
+    ok: diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    aliasIssues,
+    orphanedRefs,
+    versionFindings,
+    diagnostics
+  });
+}
+
+export function compareJsonVsProgrammatic(
+  document: string | FlogoApp | unknown,
+  requestInput?: CompositionCompareRequest | unknown
+): CompositionCompareResult {
+  const app = parseFlogoAppDocument(document);
+  const request = CompositionCompareRequestSchema.parse(requestInput ?? {});
+  const diagnostics: Diagnostic[] = [];
+
+  const canonicalProjection = buildCanonicalProjection(app, request);
+  const programmaticProjection = buildProgrammaticProjection(app, request, diagnostics);
+  const differences = diffComposition("app", canonicalProjection, programmaticProjection);
+  const canonicalHash = createHash("sha256").update(stableStringify(canonicalProjection)).digest("hex");
+  const programmaticHash = createHash("sha256").update(stableStringify(programmaticProjection)).digest("hex");
+
+  return CompositionCompareResultSchema.parse({
+    appName: app.name,
+    ok:
+      diagnostics.every((diagnostic) => diagnostic.severity !== "error") &&
+      differences.every((difference) => difference.severity !== "error"),
+    canonicalHash,
+    programmaticHash,
+    differences,
+    diagnostics
+  });
+}
+
 function buildDescriptorFromRef(ref: string, alias?: string, version?: string, forcedType?: ContribDescriptor["type"]): ContribDescriptor {
   const normalizedAlias = alias ?? inferAliasFromRef(ref);
   const registryKey = normalizedAlias ? normalizeAlias(normalizedAlias) : undefined;
@@ -691,7 +970,8 @@ function buildDescriptorFromRef(ref: string, alias?: string, version?: string, f
     outputs: registryMatch?.outputs ?? [],
     examples: registryMatch?.examples ?? [],
     compatibilityNotes: registryMatch?.compatibilityNotes ?? [],
-    source: registryMatch?.source ?? "inferred"
+    source: registryMatch?.source ?? "inferred",
+    evidence: createDescriptorEvidence(registryMatch ? "registry" : "inferred", ref, normalizedAlias, version)
   });
 }
 
@@ -708,8 +988,9 @@ function resolveDescriptor(
   const descriptorFile = findDescriptorFile(resolvedRef, options);
 
   if (descriptorFile) {
+    const source = inferDescriptorSourceFromPath(descriptorFile, resolvedRef);
     return {
-      descriptor: parseDescriptorFile(descriptorFile, resolvedRef, normalizedAlias, version, forcedType),
+      descriptor: parseDescriptorFile(descriptorFile, resolvedRef, normalizedAlias, version, forcedType, source),
       diagnostics: []
     };
   }
@@ -724,6 +1005,12 @@ function resolveDescriptor(
   return {
     descriptor: registryDescriptor,
     diagnostics: [
+      createDiagnostic(
+        "flogo.contrib.descriptor_not_found",
+        `Descriptor metadata for "${resolvedRef}" was not found on disk`,
+        "info",
+        normalizedAlias ? `imports.${normalizedAlias}` : resolvedRef
+      ),
       createDiagnostic(
         sourceCode,
         sourceMessage,
@@ -770,7 +1057,8 @@ function resolveFlowDescriptor(app: FlogoApp, refOrAlias: string): ContribDescri
     })),
     examples: [`Invoke reusable flow ${resource.id}`],
     compatibilityNotes: ["Flow resources behave like reusable actions"],
-    source: "flow-resource"
+    source: "flow-resource",
+    evidence: createDescriptorEvidence("flow_resource", `#flow:${resource.id}`, "flow")
   });
 }
 
@@ -902,7 +1190,8 @@ function parseDescriptorFile(
   ref: string,
   alias?: string,
   version?: string,
-  forcedType?: ContribDescriptor["type"]
+  forcedType?: ContribDescriptor["type"],
+  source: "descriptor" | "workspace_descriptor" = "descriptor"
 ): ContribDescriptor {
   const raw = JSON.parse(readFileSync(descriptorPath, "utf8")) as Record<string, unknown>;
   const fieldSet = (value: unknown) => normalizeDescriptorFields(value);
@@ -920,7 +1209,8 @@ function parseDescriptorFile(
     outputs: fieldSet(raw.output ?? raw.outputs),
     examples: normalizeStringArray(raw.examples),
     compatibilityNotes: normalizeStringArray(raw.compatibilityNotes),
-    source: "descriptor"
+    source,
+    evidence: createDescriptorEvidence(source, ref, alias, version, descriptorPath)
   });
 }
 
@@ -953,6 +1243,38 @@ function normalizeDescriptorFields(value: unknown) {
 
 function normalizeStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+function createDescriptorEvidence(
+  source: ContribResolutionEvidence["source"],
+  resolvedRef: string,
+  importAlias?: string,
+  version?: string,
+  descriptorPath?: string,
+  diagnostics: Diagnostic[] = []
+): ContribResolutionEvidence {
+  return ContribResolutionEvidenceSchema.parse({
+    source,
+    resolvedRef,
+    descriptorPath,
+    importAlias,
+    version,
+    diagnostics
+  });
+}
+
+function inferDescriptorSourceFromPath(descriptorPath: string, ref: string): "descriptor" | "workspace_descriptor" {
+  const normalizedPath = descriptorPath.replace(/\\/g, "/");
+  const normalizedRef = ref.replace(/^#/, "").replace(/\\/g, "/");
+  if (
+    normalizedPath.includes(`/vendor/${normalizedRef}/descriptor.json`) ||
+    normalizedPath.includes(`/.flogo/descriptors/${normalizedRef}/descriptor.json`) ||
+    normalizedPath.includes(`/descriptors/${normalizedRef}/descriptor.json`)
+  ) {
+    return "descriptor";
+  }
+
+  return "workspace_descriptor";
 }
 
 function withCatalogRef(descriptor: ContribDescriptor, ref: string): ContribDescriptor {
@@ -1025,6 +1347,205 @@ function buildDeploymentNotes(
     notes.push("Unused declared properties should be removed or wired into mappings to keep configuration intentional.");
   }
   return notes;
+}
+
+function buildCanonicalProjection(app: FlogoApp, request: CompositionCompareRequest) {
+  if (request.target === "resource") {
+    const resource = request.resourceId ? app.resources.find((entry) => entry.id === request.resourceId) : undefined;
+    return {
+      target: "resource",
+      appName: app.name,
+      resource: resource ? projectFlow(resource) : undefined
+    };
+  }
+
+  return {
+    target: "app",
+    appName: app.name,
+    type: app.type,
+    appModel: app.appModel,
+    imports: app.imports
+      .map((entry) => ({
+        alias: entry.alias,
+        ref: entry.ref,
+        version: entry.version ?? null
+      }))
+      .sort((left, right) => left.alias.localeCompare(right.alias)),
+    properties: app.properties
+      .map((property) => ({
+        name: property.name,
+        type: property.type ?? null,
+        required: Boolean(property.required),
+        value: property.value ?? null
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name)),
+    triggers: app.triggers
+      .map((trigger) => ({
+        id: trigger.id,
+        ref: trigger.ref,
+        settings: sortObject(trigger.settings),
+        handlers: trigger.handlers.map((handler) => ({
+          actionRef: handler.action.ref,
+          settings: sortObject(handler.settings),
+          input: sortObject(handler.input),
+          output: sortObject(handler.output)
+        }))
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+    resources: app.resources.map(projectFlow).sort((left, right) => left.id.localeCompare(right.id))
+  };
+}
+
+function buildProgrammaticProjection(
+  app: FlogoApp,
+  request: CompositionCompareRequest,
+  diagnostics: Diagnostic[]
+) {
+  if (request.target === "resource") {
+    if (!request.resourceId) {
+      diagnostics.push(
+        createDiagnostic(
+          "flogo.composition.resource_required",
+          "A resourceId is required when target=resource",
+          "error",
+          "resourceId"
+        )
+      );
+      return {
+        target: "resource",
+        appName: app.name,
+        resource: undefined
+      };
+    }
+
+    const resource = app.resources.find((entry) => entry.id === request.resourceId);
+    if (!resource) {
+      diagnostics.push(
+        createDiagnostic(
+          "flogo.composition.resource_not_found",
+          `Resource "${request.resourceId}" was not found`,
+          "error",
+          request.resourceId
+        )
+      );
+      return {
+        target: "resource",
+        appName: app.name,
+        resource: undefined
+      };
+    }
+
+    return {
+      target: "resource",
+      appName: app.name,
+      resource: projectFlow(resource)
+    };
+  }
+
+  return buildCanonicalProjection(app, request);
+}
+
+function projectFlow(resource: FlogoFlow) {
+  return {
+    id: resource.id,
+    name: resource.data.name ?? null,
+    metadata: {
+      input: (resource.data.metadata?.input ?? []).map((item, index) => ({
+        name: typeof item.name === "string" ? item.name : `input_${index}`,
+        type: typeof item.type === "string" ? item.type : null,
+        required: Boolean(item.required)
+      })),
+      output: (resource.data.metadata?.output ?? []).map((item, index) => ({
+        name: typeof item.name === "string" ? item.name : `output_${index}`,
+        type: typeof item.type === "string" ? item.type : null,
+        required: Boolean(item.required)
+      }))
+    },
+    tasks: resource.data.tasks.map((task) => ({
+      id: task.id,
+      name: task.name ?? null,
+      activityRef: task.activityRef ?? null,
+      input: sortObject(task.input),
+      output: sortObject(task.output),
+      settings: sortObject(task.settings)
+    }))
+  };
+}
+
+function sortObject(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => sortObject(entry));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, sortObject(nested)])
+    );
+  }
+  return value ?? null;
+}
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(sortObject(value));
+}
+
+function diffComposition(pathPrefix: string, expected: unknown, actual: unknown) {
+  const differences: Array<{
+    path: string;
+    kind: string;
+    expected?: unknown;
+    actual?: unknown;
+    severity: Diagnostic["severity"];
+  }> = [];
+
+  if (Array.isArray(expected) || Array.isArray(actual)) {
+    const left = Array.isArray(expected) ? expected : [];
+    const right = Array.isArray(actual) ? actual : [];
+    if (left.length !== right.length) {
+      differences.push({
+        path: pathPrefix,
+        kind: "array_length_mismatch",
+        expected: left.length,
+        actual: right.length,
+        severity: "warning"
+      });
+    }
+    const maxLength = Math.max(left.length, right.length);
+    for (let index = 0; index < maxLength; index += 1) {
+      differences.push(...diffComposition(`${pathPrefix}[${index}]`, left[index], right[index]));
+    }
+    return differences;
+  }
+
+  if (expected && typeof expected === "object" && actual && typeof actual === "object") {
+    const keys = new Set([
+      ...Object.keys(expected as Record<string, unknown>),
+      ...Object.keys(actual as Record<string, unknown>)
+    ]);
+    for (const key of Array.from(keys).sort()) {
+      differences.push(
+        ...diffComposition(
+          `${pathPrefix}.${key}`,
+          (expected as Record<string, unknown>)[key],
+          (actual as Record<string, unknown>)[key]
+        )
+      );
+    }
+    return differences;
+  }
+
+  if (expected !== actual) {
+    differences.push({
+      path: pathPrefix,
+      kind: "value_mismatch",
+      expected,
+      actual,
+      severity: "warning"
+    });
+  }
+
+  return differences;
 }
 
 function inferContribType(ref: string): ContribDescriptor["type"] {

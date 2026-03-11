@@ -47,6 +47,8 @@ Important analysis-only modes:
 
 - `inputs.mode = "catalog"`
 - `inputs.mode = "mapping_preview"`
+- `inputs.mode = "governance"`
+- `inputs.mode = "composition_compare"`
 
 When one of those modes is supplied, the planner avoids patch/build/smoke steps and routes the task through analysis-oriented runner steps.
 
@@ -250,6 +252,24 @@ Current implementation note:
 
 - app-scoped analysis artifacts are currently persisted through hidden synthetic review tasks plus Blob/Azurite-backed JSON payload storage.
 
+### `GET /v1/projects/:projectId/apps/:appId/governance`
+
+Returns alias, orphaned-ref, and version-governance analysis plus a persisted artifact reference.
+
+Response shape:
+
+- `GovernanceResponse`
+
+Key fields:
+
+- `report`
+- `artifact`
+
+Current implementation notes:
+
+- governance currently checks duplicate aliases, missing imports, implicit alias use, missing flow/action refs, unused imports, and version drift heuristics,
+- the report artifact is backed by Blob/Azurite JSON storage and Prisma metadata.
+
 ### `POST /v1/projects/:projectId/apps/:appId/mappings/preview`
 
 Runs typed mapping preview for a specific node and returns the result plus a persisted artifact reference.
@@ -277,6 +297,34 @@ Current implementation notes:
 
 - the preview artifact is backed by Blob/Azurite JSON storage and Prisma metadata,
 - `propertyPlan` now includes declared properties, undefined and unused refs, recommended properties, recommended environment variables, and deployment notes.
+
+### `POST /v1/projects/:projectId/apps/:appId/composition/compare`
+
+Compares canonical `flogo.json` structure with the current programmatic-composition probe and returns a persisted artifact reference.
+
+Request shape:
+
+- `CompositionCompareRequest`
+
+Important fields:
+
+- `mode`
+- `target`
+- `resourceId?`
+
+Response shape:
+
+- `CompositionCompareResponse`
+
+Key fields:
+
+- `comparison`
+- `comparison.artifact`
+
+Current implementation notes:
+
+- this is an analysis/probe path, not full programmatic generation,
+- the comparison artifact is backed by Blob/Azurite JSON storage and Prisma metadata.
 
 ### `GET /v1/health`
 
@@ -391,7 +439,7 @@ Request shape:
 Workflow behavior:
 
 - mutating workflows use build/run/smoke-oriented runner steps,
-- analysis-only workflows use `catalog_contribs` or `preview_mapping`.
+- analysis-only workflows use `catalog_contribs`, `validate_governance`, `compare_composition`, or `preview_mapping`.
 
 ## Runner-worker API
 
@@ -430,6 +478,7 @@ Important fields:
 - `command`
 - `containerArgs`
 - `analysisPayload?`
+- `analysisKind?`
 - `targetNodeId?`
 - `targetRef?`
 
@@ -474,6 +523,11 @@ The most important ones are:
 - `ContribDescriptorResponse`
 - `ContribCatalog`
 - `ContribCatalogResponse`
+- `GovernanceReport`
+- `GovernanceResponse`
+- `CompositionCompareRequest`
+- `CompositionCompareResult`
+- `CompositionCompareResponse`
 - `MappingPreviewRequest`
 - `MappingPreviewResult`
 - `MappingPreviewResponse`

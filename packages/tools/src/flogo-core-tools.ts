@@ -1,10 +1,20 @@
-import type { TaskRequest, ToolResponse, FlogoApp, ContribCatalog, ContribDescriptor } from "@flogo-agent/contracts";
+import type {
+  CompositionCompareRequest,
+  ContribCatalog,
+  ContribDescriptor,
+  FlogoApp,
+  GovernanceReport,
+  TaskRequest,
+  ToolResponse
+} from "@flogo-agent/contracts";
 import {
   buildContribCatalog,
+  compareJsonVsProgrammatic,
   defineProperties,
   inspectContribDescriptor,
   parseFlogoAppDocument,
   summarizeAppDiff,
+  validateGovernance,
   validateAliases,
   validateFlogoApp,
   validateMappings
@@ -90,6 +100,35 @@ export class FlogoCoreTools {
             }
           ],
       artifacts: [],
+      retryable: false
+    });
+  }
+
+  validateGovernance(raw: string | FlogoApp | unknown): ToolResponse {
+    const report: GovernanceReport = validateGovernance(raw);
+    return toolResponse({
+      ok: report.ok,
+      summary: report.ok ? "Governance validation passed." : "Governance validation found issues.",
+      data: { report },
+      diagnostics: report.diagnostics,
+      artifacts: [],
+      retryable: false
+    });
+  }
+
+  compareJsonVsProgrammatic(
+    raw: string | FlogoApp | unknown,
+    request: CompositionCompareRequest = { mode: "analyze", target: "app" }
+  ): ToolResponse {
+    const comparison = compareJsonVsProgrammatic(raw, request);
+    return toolResponse({
+      ok: comparison.ok,
+      summary: comparison.ok
+        ? "Canonical JSON and programmatic composition are aligned."
+        : "Canonical JSON and programmatic composition diverge.",
+      data: { comparison },
+      diagnostics: comparison.diagnostics,
+      artifacts: comparison.artifact ? [comparison.artifact] : [],
       retryable: false
     });
   }

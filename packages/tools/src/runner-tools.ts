@@ -101,4 +101,40 @@ export class RunnerTools {
       retryable: false
     });
   }
+
+  async validateGovernance(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "validate_governance",
+      jobKind: "governance",
+      analysisKind: "governance"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued governance validation job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
+  async compareComposition(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "compare_composition",
+      jobKind: "composition_compare",
+      analysisKind: "composition_compare"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued composition comparison job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
 }

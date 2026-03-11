@@ -253,4 +253,49 @@ describe("FlogoAppsService", () => {
     expect(descriptor?.artifact?.metadata?.analysisType).toBe("descriptor");
     expect(storedPayloads.some((entry) => entry.blobPath.includes("/descriptor/"))).toBe(true);
   });
+
+  it("returns a governance report and persists a governance artifact", async () => {
+    const { service, storedPayloads } = createService();
+
+    const governance = await service.getGovernance("demo", "hello-rest");
+
+    expect(governance).toBeDefined();
+    expect(governance?.report.ok).toBe(true);
+    expect(governance?.artifact?.type).toBe("governance_report");
+    expect(governance?.artifact?.metadata?.analysisType).toBe("governance");
+    expect(storedPayloads.some((entry) => entry.blobPath.includes("/governance_report/"))).toBe(true);
+  });
+
+  it("returns a composition comparison and persists a composition artifact", async () => {
+    const { service, storedPayloads } = createService();
+
+    const comparison = await service.compareComposition("demo", "hello-rest", {
+      mode: "analyze",
+      target: "app"
+    });
+
+    expect(comparison).toBeDefined();
+    expect(comparison?.comparison.ok).toBe(true);
+    expect(comparison?.comparison.artifact?.type).toBe("composition_compare");
+    expect(comparison?.comparison.artifact?.metadata?.analysisType).toBe("composition_compare");
+    expect(storedPayloads.some((entry) => entry.blobPath.includes("/composition_compare/"))).toBe(true);
+  });
+
+  it("lists governance and composition artifacts alongside other persisted app analysis artifacts", async () => {
+    const { service } = createService();
+
+    await service.getCatalog("demo", "hello-rest");
+    await service.getGovernance("demo", "hello-rest");
+    await service.compareComposition("demo", "hello-rest", {
+      mode: "analyze",
+      target: "app"
+    });
+
+    const artifacts = await service.listArtifacts("demo", "hello-rest");
+
+    expect(artifacts).toHaveLength(3);
+    expect(artifacts?.some((artifact) => artifact.type === "contrib_catalog")).toBe(true);
+    expect(artifacts?.some((artifact) => artifact.type === "governance_report")).toBe(true);
+    expect(artifacts?.some((artifact) => artifact.type === "composition_compare")).toBe(true);
+  });
 });

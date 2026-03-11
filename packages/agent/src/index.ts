@@ -43,9 +43,11 @@ const approvalMap: Record<TaskRequest["type"], ApprovalType[]> = {
   review: []
 };
 
-function getAnalysisMode(task: TaskRequest): "catalog" | "mapping_preview" | undefined {
+function getAnalysisMode(task: TaskRequest): "catalog" | "mapping_preview" | "governance" | "composition_compare" | undefined {
   const mode = task.inputs["mode"];
-  return mode === "catalog" || mode === "mapping_preview" ? mode : undefined;
+  return mode === "catalog" || mode === "mapping_preview" || mode === "governance" || mode === "composition_compare"
+    ? mode
+    : undefined;
 }
 
 export class PolicyEngine {
@@ -94,6 +96,10 @@ export class TaskPlanner {
     } else if (analysisMode === "mapping_preview") {
       steps.push({ id: "mapping", label: "Preview mappings and suggest coercions", tool: "runner.previewMapping" });
       steps.push({ id: "properties", label: "Plan app properties and environment usage", tool: "flogo.planProperties" });
+    } else if (analysisMode === "governance") {
+      steps.push({ id: "governance", label: "Validate alias, orphan, and version governance", tool: "runner.validateGovernance" });
+    } else if (analysisMode === "composition_compare") {
+      steps.push({ id: "compare", label: "Compare canonical JSON to programmatic composition", tool: "runner.compareComposition" });
     } else {
       if (/(trigger|activity|action|contrib|descriptor|catalog)/i.test(summary)) {
         steps.push({ id: "catalog", label: "Catalog Flogo contributions and descriptors", tool: "runner.catalogContribs" });
@@ -105,6 +111,14 @@ export class TaskPlanner {
 
       if (/(property|env|config)/i.test(summary)) {
         steps.push({ id: "properties", label: "Plan app properties and environment usage", tool: "flogo.planProperties" });
+      }
+
+      if (/(governance|orphan|alias|version drift|unused import)/i.test(summary)) {
+        steps.push({ id: "governance", label: "Validate alias, orphan, and version governance", tool: "runner.validateGovernance" });
+      }
+
+      if (/(composition|programmatic|core api|compare json)/i.test(summary)) {
+        steps.push({ id: "compare", label: "Compare canonical JSON to programmatic composition", tool: "runner.compareComposition" });
       }
     }
 

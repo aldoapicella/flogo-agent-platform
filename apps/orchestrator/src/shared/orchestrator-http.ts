@@ -24,6 +24,12 @@ export function resolveWorkflowRunnerSteps(start: OrchestratorStartRequest): Run
   if (mode === "mapping_preview") {
     return ["preview_mapping"];
   }
+  if (mode === "governance") {
+    return ["validate_governance"];
+  }
+  if (mode === "composition_compare") {
+    return ["compare_composition"];
+  }
   return defaultWorkflowRunnerSteps;
 }
 
@@ -57,21 +63,53 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
         ? "catalog"
         : stepType === "preview_mapping"
           ? "mapping_preview"
+          : stepType === "validate_governance"
+            ? "governance"
+            : stepType === "compare_composition"
+              ? "composition_compare"
           : stepType === "build" || stepType === "run"
         ? "build"
         : "eval";
   const sampleInput = start.request.inputs["sampleInput"];
   const analysisPayload =
-    sampleInput && typeof sampleInput === "object" && !Array.isArray(sampleInput)
-      ? (sampleInput as Record<string, unknown>)
-      : undefined;
+    stepType === "preview_mapping"
+      ? sampleInput && typeof sampleInput === "object" && !Array.isArray(sampleInput)
+        ? (sampleInput as Record<string, unknown>)
+        : undefined
+      : stepType === "compare_composition"
+        ? ({
+            target:
+              typeof start.request.inputs["target"] === "string"
+                ? (start.request.inputs["target"] as string)
+                : "app",
+            resourceId:
+              typeof start.request.inputs["resourceId"] === "string"
+                ? (start.request.inputs["resourceId"] as string)
+                : undefined
+          } satisfies Record<string, unknown>)
+        : stepType === "validate_governance"
+          ? ({ mode: "governance" } satisfies Record<string, unknown>)
+          : undefined;
   const targetNodeId = typeof start.request.inputs["nodeId"] === "string" ? (start.request.inputs["nodeId"] as string) : undefined;
   const targetRef = typeof start.request.inputs["ref"] === "string" ? (start.request.inputs["ref"] as string) : undefined;
+  const analysisKind =
+    stepType === "catalog_contribs"
+      ? "catalog"
+      : stepType === "inspect_descriptor"
+        ? "descriptor"
+        : stepType === "preview_mapping"
+          ? "mapping_preview"
+          : stepType === "validate_governance"
+            ? "governance"
+            : stepType === "compare_composition"
+              ? "composition_compare"
+              : undefined;
 
   return {
     taskId: start.taskId,
     jobKind,
     stepType,
+    analysisKind,
     snapshotUri: `workspace://${start.request.projectId}/${start.taskId}`,
     workspaceBlobPrefix: `workspace-snapshots/${start.taskId}`,
     appPath: start.request.appPath ?? "flogo.json",

@@ -5,11 +5,13 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  type CompositionCompareResult,
   type ArtifactRef,
   type ContribCatalog,
   type ContribDescriptor,
   type ContribDescriptorResponse,
   type Diagnostic,
+  type GovernanceReport,
   type MappingPreviewResult,
   type RunnerJobResult,
   type RunnerJobSpec,
@@ -61,6 +63,18 @@ function createCommand(spec: RunnerJobSpec): string[] {
       return createHelperCommand("inspect", "descriptor", "--app", spec.appPath, "--ref", spec.targetRef ?? "");
     case "preview_mapping":
       return ["echo", `mapping-preview:${spec.appPath}`];
+    case "validate_governance":
+      return createHelperCommand("governance", "validate", "--app", spec.appPath);
+    case "compare_composition":
+      return createHelperCommand(
+        "compose",
+        "compare",
+        "--app",
+        spec.appPath,
+        "--target",
+        typeof spec.analysisPayload?.target === "string" ? String(spec.analysisPayload.target) : "app",
+        ...(typeof spec.analysisPayload?.resourceId === "string" ? ["--resource", String(spec.analysisPayload.resourceId)] : [])
+      );
     default:
       return ["echo", `runner:${spec.stepType}`];
   }
@@ -97,7 +111,13 @@ function parseJsonResponse<T>(value: unknown): T {
 }
 
 function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
-  return stepType === "catalog_contribs" || stepType === "inspect_descriptor" || stepType === "preview_mapping";
+  return (
+    stepType === "catalog_contribs" ||
+    stepType === "inspect_descriptor" ||
+    stepType === "preview_mapping" ||
+    stepType === "validate_governance" ||
+    stepType === "compare_composition"
+  );
 }
 
 function createAnalysisArtifact(
@@ -163,6 +183,26 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
         createAnalysisArtifact(spec, "contrib_catalog", `descriptor-${spec.targetRef ?? "target"}`, {
           descriptor,
           diagnostics: [...(response.diagnostics ?? []), ...diagnostics]
+        })
+      ];
+    }
+
+    if (spec.stepType === "validate_governance") {
+      const report = JSON.parse(stdout) as GovernanceReport;
+      return [
+        createAnalysisArtifact(spec, "governance_report", "governance-report", {
+          report,
+          diagnostics
+        })
+      ];
+    }
+
+    if (spec.stepType === "compare_composition") {
+      const comparison = JSON.parse(stdout) as CompositionCompareResult;
+      return [
+        createAnalysisArtifact(spec, "composition_compare", "composition-compare", {
+          comparison,
+          diagnostics
         })
       ];
     }
