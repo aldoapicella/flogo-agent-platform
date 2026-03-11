@@ -49,10 +49,34 @@ type contribCatalog struct {
 	Diagnostics []diagnostic        `json:"diagnostics"`
 }
 
+type contributionInventoryEntry struct {
+	Ref            string             `json:"ref"`
+	Alias          string             `json:"alias,omitempty"`
+	Type           string             `json:"type"`
+	Name           string             `json:"name"`
+	Version        string             `json:"version,omitempty"`
+	Title          string             `json:"title,omitempty"`
+	Source         string             `json:"source"`
+	DescriptorPath string             `json:"descriptorPath,omitempty"`
+	PackageRoot    string             `json:"packageRoot,omitempty"`
+	Settings       []contribField     `json:"settings"`
+	Inputs         []contribField     `json:"inputs"`
+	Outputs        []contribField     `json:"outputs"`
+	Diagnostics    []diagnostic       `json:"diagnostics"`
+	Descriptor     *contribDescriptor `json:"descriptor,omitempty"`
+}
+
+type contributionInventory struct {
+	AppName     string                       `json:"appName,omitempty"`
+	Entries     []contributionInventoryEntry `json:"entries"`
+	Diagnostics []diagnostic                 `json:"diagnostics"`
+}
+
 type contribEvidence struct {
 	Source         string       `json:"source"`
 	ResolvedRef    string       `json:"resolvedRef"`
 	DescriptorPath string       `json:"descriptorPath,omitempty"`
+	PackageRoot    string       `json:"packageRoot,omitempty"`
 	ImportAlias    string       `json:"importAlias,omitempty"`
 	Version        string       `json:"version,omitempty"`
 	Diagnostics    []diagnostic `json:"diagnostics"`
@@ -90,12 +114,19 @@ type versionFinding struct {
 }
 
 type governanceReport struct {
-	AppName         string           `json:"appName"`
-	Ok              bool             `json:"ok"`
-	AliasIssues     []aliasIssue     `json:"aliasIssues"`
-	OrphanedRefs    []orphanedRef    `json:"orphanedRefs"`
-	VersionFindings []versionFinding `json:"versionFindings"`
-	Diagnostics     []diagnostic     `json:"diagnostics"`
+	AppName          string           `json:"appName"`
+	Ok               bool             `json:"ok"`
+	AliasIssues      []aliasIssue     `json:"aliasIssues"`
+	OrphanedRefs     []orphanedRef    `json:"orphanedRefs"`
+	VersionFindings  []versionFinding `json:"versionFindings"`
+	InventorySummary *struct {
+		EntryCount         int `json:"entryCount"`
+		PackageBackedCount int `json:"packageBackedCount"`
+		FallbackCount      int `json:"fallbackCount"`
+	} `json:"inventorySummary,omitempty"`
+	UnresolvedPackages []string     `json:"unresolvedPackages"`
+	FallbackContribs   []string     `json:"fallbackContribs"`
+	Diagnostics        []diagnostic `json:"diagnostics"`
 }
 
 type compositionDifference struct {
@@ -107,12 +138,14 @@ type compositionDifference struct {
 }
 
 type compositionCompareResult struct {
-	AppName          string                  `json:"appName"`
-	Ok               bool                    `json:"ok"`
-	CanonicalHash    string                  `json:"canonicalHash"`
-	ProgrammaticHash string                  `json:"programmaticHash"`
-	Differences      []compositionDifference `json:"differences"`
-	Diagnostics      []diagnostic            `json:"diagnostics"`
+	AppName           string                  `json:"appName"`
+	Ok                bool                    `json:"ok"`
+	CanonicalHash     string                  `json:"canonicalHash"`
+	ProgrammaticHash  string                  `json:"programmaticHash"`
+	ComparisonBasis   string                  `json:"comparisonBasis"`
+	InventoryRefsUsed []string                `json:"inventoryRefsUsed"`
+	Differences       []compositionDifference `json:"differences"`
+	Diagnostics       []diagnostic            `json:"diagnostics"`
 }
 
 type mappingPreviewContext struct {
@@ -270,6 +303,8 @@ func main() {
 	app := loadApp(appPath)
 
 	switch command {
+	case "inventory contribs":
+		encode(buildContributionInventory(app, appPath))
 	case "catalog contribs":
 		encode(buildContribCatalog(app, appPath))
 	case "inspect descriptor":
@@ -293,7 +328,7 @@ func main() {
 		if target == "" {
 			target = "app"
 		}
-		encode(compareComposition(app, target, resourceID))
+		encode(compareComposition(app, appPath, target, resourceID))
 	case "preview mapping":
 		nodeID := lookupFlag("--node")
 		if nodeID == "" {
@@ -561,50 +596,89 @@ func normalizeTasks(value any) []flogoTask {
 	return tasks
 }
 
-func buildContribCatalog(app flogoApp, appPath string) contribCatalog {
-	entries := map[string]contribDescriptor{}
+func buildContributionInventory(app flogoApp, appPath string) contributionInventory {
+	entries := map[string]contributionInventoryEntry{}
 	diagnostics := []diagnostic{}
+	upsert := func(entry contributionInventoryEntry) {
+		key := entry.Type + ":" + valueOrFallback(entry.Alias, entry.Ref)
+		existing, ok := entries[key]
+		if !ok || compareEvidenceStrength(entry.Source, existing.Source) >= 0 {
+			entries[key] = entry
+		}
+	}
+
+	for _, entry := range app.Imports {
+		inventoryEntry, entryDiagnostics := buildInventoryEntryForApp(app, appPath, entry.Ref, entry.Alias, entry.Version, "")
+		upsert(inventoryEntry)
+		diagnostics = append(diagnostics, entryDiagnostics...)
+	}
+
+	for _, trigger := range app.Triggers {
+		alias := inferAlias(trigger.Ref)
+		if alias == "flow" {
+			continue
+		}
+		inventoryEntry, entryDiagnostics := buildInventoryEntryForApp(app, appPath, trigger.Ref, alias, "", "trigger")
+		upsert(inventoryEntry)
+		diagnostics = append(diagnostics, entryDiagnostics...)
+	}
+
+	for _, flow := range app.Resources {
+		upsert(buildFlowInventoryEntry(flow))
+		for _, task := range flow.Tasks {
+			if task.ActivityRef == "" {
+				continue
+			}
+			alias := inferAlias(task.ActivityRef)
+			if alias == "flow" {
+				continue
+			}
+			inventoryEntry, entryDiagnostics := buildInventoryEntryForApp(app, appPath, task.ActivityRef, alias, "", "")
+			upsert(inventoryEntry)
+			diagnostics = append(diagnostics, entryDiagnostics...)
+		}
+	}
+
+	sorted := make([]contributionInventoryEntry, 0, len(entries))
+	for _, entry := range entries {
+		sorted = append(sorted, entry)
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Name < sorted[j].Name
+	})
+
+	return contributionInventory{
+		AppName:     app.Name,
+		Entries:     sorted,
+		Diagnostics: dedupeDiagnostics(diagnostics),
+	}
+}
+
+func buildContribCatalog(app flogoApp, appPath string) contribCatalog {
+	inventory := buildContributionInventory(app, appPath)
+	entries := map[string]contribDescriptor{}
 	upsert := func(descriptor contribDescriptor) {
 		key := descriptor.Type + ":" + valueOrFallback(descriptor.Alias, descriptor.Ref)
 		entries[key] = descriptor
 	}
 
-	for _, entry := range app.Imports {
-		descriptor, entryDiagnostics := buildDescriptorForApp(app, appPath, entry.Ref, entry.Alias, entry.Version, "")
-		upsert(descriptor)
-		diagnostics = append(diagnostics, entryDiagnostics...)
+	for _, entry := range inventory.Entries {
+		upsert(inventoryEntryToDescriptor(entry))
 	}
 
 	for _, trigger := range app.Triggers {
-		descriptor, entryDiagnostics := buildDescriptorForApp(app, appPath, trigger.Ref, inferAlias(trigger.Ref), "", "trigger")
-		upsert(withCatalogRef(descriptor, trigger.Ref))
-		diagnostics = append(diagnostics, entryDiagnostics...)
+		entry, _ := buildInventoryEntryForApp(app, appPath, trigger.Ref, inferAlias(trigger.Ref), "", "trigger")
+		upsert(withCatalogRef(inventoryEntryToDescriptor(entry), trigger.Ref))
 	}
 
 	for _, flow := range app.Resources {
-		upsert(contribDescriptor{
-			Ref:      "#flow:" + flow.ID,
-			Alias:    "flow",
-			Type:     "action",
-			Name:     valueOrFallback(flow.Name, flow.ID),
-			Title:    valueOrFallback(flow.Name, flow.ID),
-			Settings: []contribField{},
-			Inputs:   metadataFieldsToContrib(flow.MetadataInput, "input"),
-			Outputs:  metadataFieldsToContrib(flow.MetadataOutput, "output"),
-			Examples: []string{"Invoke reusable flow " + flow.ID},
-			CompatibilityNotes: []string{
-				"Flow resources behave like reusable actions",
-			},
-			Source:   "flow-resource",
-			Evidence: createEvidence("flow_resource", "#flow:"+flow.ID, "flow", "", "", nil),
-		})
-
+		upsert(inventoryEntryToDescriptor(buildFlowInventoryEntry(flow)))
 		for _, task := range flow.Tasks {
-			if task.ActivityRef != "" {
-				descriptor, entryDiagnostics := buildDescriptorForApp(app, appPath, task.ActivityRef, inferAlias(task.ActivityRef), "", "")
-				upsert(withCatalogRef(descriptor, task.ActivityRef))
-				diagnostics = append(diagnostics, entryDiagnostics...)
+			if task.ActivityRef == "" {
+				continue
 			}
+			entry, _ := buildInventoryEntryForApp(app, appPath, task.ActivityRef, inferAlias(task.ActivityRef), "", "")
+			upsert(withCatalogRef(inventoryEntryToDescriptor(entry), task.ActivityRef))
 		}
 	}
 
@@ -619,11 +693,12 @@ func buildContribCatalog(app flogoApp, appPath string) contribCatalog {
 	return contribCatalog{
 		AppName:     app.Name,
 		Entries:     sorted,
-		Diagnostics: dedupeDiagnostics(diagnostics),
+		Diagnostics: inventory.Diagnostics,
 	}
 }
 
 func validateGovernance(app flogoApp, appPath string) governanceReport {
+	inventory := buildContributionInventory(app, appPath)
 	aliasIssues := []aliasIssue{}
 	orphanedRefs := []orphanedRef{}
 	versionFindings := []versionFinding{}
@@ -632,6 +707,23 @@ func validateGovernance(app flogoApp, appPath string) governanceReport {
 	refToAliases := map[string]map[string]bool{}
 	usedAliases := map[string]bool{}
 	resourceIDs := map[string]bool{}
+	inventoryByAlias := map[string]contributionInventoryEntry{}
+	unresolvedPackages := []string{}
+	fallbackContribs := []string{}
+
+	for _, entry := range inventory.Entries {
+		if entry.Alias != "" {
+			inventoryByAlias[entry.Alias] = entry
+		}
+		if entry.Source == "inferred" {
+			unresolvedPackages = append(unresolvedPackages, entry.Ref)
+		}
+		if entry.Source == "registry" || entry.Source == "inferred" {
+			fallbackContribs = append(fallbackContribs, entry.Ref)
+		}
+	}
+	sort.Strings(unresolvedPackages)
+	sort.Strings(fallbackContribs)
 
 	for _, resource := range app.Resources {
 		resourceIDs[resource.ID] = true
@@ -651,6 +743,40 @@ func validateGovernance(app flogoApp, appPath string) governanceReport {
 				Message:  fmt.Sprintf("Import alias %q does not declare a version", entry.Alias),
 				Severity: "info",
 			})
+		}
+		if inventoryEntry, ok := inventoryByAlias[entry.Alias]; ok {
+			inventoryVersion := inventoryEntry.Version
+			if inventoryEntry.Descriptor != nil && inventoryVersion == "" {
+				inventoryVersion = inventoryEntry.Descriptor.Version
+			}
+			if inventoryEntry.Source == "inferred" {
+				orphanedRefs = append(orphanedRefs, orphanedRef{
+					Ref:      entry.Ref,
+					Kind:     inferContribType(entry.Ref),
+					Path:     "imports." + entry.Alias,
+					Reason:   fmt.Sprintf("Import alias %q could not be resolved from workspace or package metadata", entry.Alias),
+					Severity: "error",
+				})
+			}
+			if inventoryEntry.Source == "registry" {
+				versionFindings = append(versionFindings, versionFinding{
+					Alias:    entry.Alias,
+					Ref:      entry.Ref,
+					Status:   "ok",
+					Message:  fmt.Sprintf("Import alias %q is using registry fallback metadata", entry.Alias),
+					Severity: "warning",
+				})
+			}
+			if entry.Version != "" && inventoryVersion != "" && entry.Version != inventoryVersion {
+				versionFindings = append(versionFindings, versionFinding{
+					Alias:           entry.Alias,
+					Ref:             entry.Ref,
+					DeclaredVersion: entry.Version,
+					Status:          "conflict",
+					Message:         fmt.Sprintf("Import alias %q declares version %q but resolved metadata reports %q", entry.Alias, entry.Version, inventoryVersion),
+					Severity:        "warning",
+				})
+			}
 		}
 	}
 
@@ -847,7 +973,7 @@ func validateGovernance(app flogoApp, appPath string) governanceReport {
 			},
 		})
 	}
-	diagnostics = append(diagnostics, buildContribCatalog(app, appPath).Diagnostics...)
+	diagnostics = append(diagnostics, inventory.Diagnostics...)
 	diagnostics = dedupeDiagnostics(diagnostics)
 
 	ok := true
@@ -864,11 +990,23 @@ func validateGovernance(app flogoApp, appPath string) governanceReport {
 		AliasIssues:     aliasIssues,
 		OrphanedRefs:    orphanedRefs,
 		VersionFindings: versionFindings,
-		Diagnostics:     diagnostics,
+		InventorySummary: &struct {
+			EntryCount         int `json:"entryCount"`
+			PackageBackedCount int `json:"packageBackedCount"`
+			FallbackCount      int `json:"fallbackCount"`
+		}{
+			EntryCount:         len(inventory.Entries),
+			PackageBackedCount: countPackageBackedInventoryEntries(inventory.Entries),
+			FallbackCount:      countFallbackInventoryEntries(inventory.Entries),
+		},
+		UnresolvedPackages: unresolvedPackages,
+		FallbackContribs:   fallbackContribs,
+		Diagnostics:        diagnostics,
 	}
 }
 
-func compareComposition(app flogoApp, target string, resourceID string) compositionCompareResult {
+func compareComposition(app flogoApp, appPath string, target string, resourceID string) compositionCompareResult {
+	inventory := buildContributionInventory(app, appPath)
 	diagnostics := []diagnostic{}
 	canonical := buildCanonicalProjection(app, target, resourceID)
 	programmatic := buildProgrammaticProjection(app, target, resourceID, &diagnostics)
@@ -890,12 +1028,14 @@ func compareComposition(app flogoApp, target string, resourceID string) composit
 	}
 
 	return compositionCompareResult{
-		AppName:          app.Name,
-		Ok:               ok,
-		CanonicalHash:    canonicalHash,
-		ProgrammaticHash: programmaticHash,
-		Differences:      differences,
-		Diagnostics:      diagnostics,
+		AppName:           app.Name,
+		Ok:                ok,
+		CanonicalHash:     canonicalHash,
+		ProgrammaticHash:  programmaticHash,
+		ComparisonBasis:   comparisonBasisForInventory(inventory.Entries),
+		InventoryRefsUsed: collectInventoryRefs(inventory.Entries),
+		Differences:       differences,
+		Diagnostics:       diagnostics,
 	}
 }
 
@@ -915,6 +1055,58 @@ func metadataFieldsToContrib(fields []map[string]any, prefix string) []contribFi
 	return result
 }
 
+func buildFlowInventoryEntry(flow flogoFlow) contributionInventoryEntry {
+	descriptor := contribDescriptor{
+		Ref:      "#flow:" + flow.ID,
+		Alias:    "flow",
+		Type:     "action",
+		Name:     valueOrFallback(flow.Name, flow.ID),
+		Title:    valueOrFallback(flow.Name, flow.ID),
+		Settings: []contribField{},
+		Inputs:   metadataFieldsToContrib(flow.MetadataInput, "input"),
+		Outputs:  metadataFieldsToContrib(flow.MetadataOutput, "output"),
+		Examples: []string{"Invoke reusable flow " + flow.ID},
+		CompatibilityNotes: []string{
+			"Flow resources behave like reusable actions",
+		},
+		Source:   "flow-resource",
+		Evidence: createEvidence("flow_resource", "#flow:"+flow.ID, "flow", "", "", "", nil),
+	}
+	return contributionInventoryEntry{
+		Ref:         descriptor.Ref,
+		Alias:       descriptor.Alias,
+		Type:        descriptor.Type,
+		Name:        descriptor.Name,
+		Version:     descriptor.Version,
+		Title:       descriptor.Title,
+		Source:      "flow_resource",
+		Settings:    descriptor.Settings,
+		Inputs:      descriptor.Inputs,
+		Outputs:     descriptor.Outputs,
+		Diagnostics: []diagnostic{},
+		Descriptor:  &descriptor,
+	}
+}
+
+func inventoryEntryToDescriptor(entry contributionInventoryEntry) contribDescriptor {
+	if entry.Descriptor != nil {
+		return *entry.Descriptor
+	}
+	return contribDescriptor{
+		Ref:      entry.Ref,
+		Alias:    entry.Alias,
+		Type:     entry.Type,
+		Name:     entry.Name,
+		Version:  entry.Version,
+		Title:    entry.Title,
+		Settings: entry.Settings,
+		Inputs:   entry.Inputs,
+		Outputs:  entry.Outputs,
+		Source:   entry.Source,
+		Evidence: createEvidence(entry.Source, entry.Ref, entry.Alias, entry.Version, entry.DescriptorPath, entry.PackageRoot, entry.Diagnostics),
+	}
+}
+
 func withCatalogRef(descriptor contribDescriptor, ref string) contribDescriptor {
 	if !strings.HasPrefix(ref, "#") {
 		return descriptor
@@ -923,30 +1115,163 @@ func withCatalogRef(descriptor contribDescriptor, ref string) contribDescriptor 
 	return descriptor
 }
 
-func createEvidence(source string, resolvedRef string, importAlias string, version string, descriptorPath string, diagnostics []diagnostic) *contribEvidence {
+func createEvidence(source string, resolvedRef string, importAlias string, version string, descriptorPath string, packageRoot string, diagnostics []diagnostic) *contribEvidence {
 	return &contribEvidence{
 		Source:         source,
 		ResolvedRef:    resolvedRef,
 		DescriptorPath: descriptorPath,
+		PackageRoot:    packageRoot,
 		ImportAlias:    importAlias,
 		Version:        version,
 		Diagnostics:    diagnostics,
 	}
 }
 
-func inferDescriptorSource(descriptorPath string, ref string) string {
+func compareEvidenceStrength(left string, right string) int {
+	rank := map[string]int{
+		"flow_resource":        100,
+		"app_descriptor":       90,
+		"workspace_descriptor": 80,
+		"package_descriptor":   70,
+		"package_source":       60,
+		"descriptor":           50,
+		"registry":             40,
+		"inferred":             30,
+	}
+	return rank[left] - rank[right]
+}
+
+func isPackageBackedSource(source string) bool {
+	return source == "app_descriptor" || source == "workspace_descriptor" || source == "package_descriptor" || source == "package_source" || source == "descriptor"
+}
+
+func countPackageBackedInventoryEntries(entries []contributionInventoryEntry) int {
+	count := 0
+	for _, entry := range entries {
+		if isPackageBackedSource(entry.Source) {
+			count++
+		}
+	}
+	return count
+}
+
+func countFallbackInventoryEntries(entries []contributionInventoryEntry) int {
+	count := 0
+	for _, entry := range entries {
+		if entry.Source == "registry" || entry.Source == "inferred" {
+			count++
+		}
+	}
+	return count
+}
+
+func collectInventoryRefs(entries []contributionInventoryEntry) []string {
+	refs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		ref := entry.Ref
+		if entry.Descriptor != nil && entry.Descriptor.Evidence != nil && entry.Descriptor.Evidence.ResolvedRef != "" {
+			ref = entry.Descriptor.Evidence.ResolvedRef
+		}
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	return refs
+}
+
+func comparisonBasisForInventory(entries []contributionInventoryEntry) string {
+	for _, entry := range entries {
+		if isPackageBackedSource(entry.Source) || entry.Source == "registry" {
+			return "inventory_backed"
+		}
+	}
+	return "normalized_only"
+}
+
+func buildInventoryEntryForApp(
+	app flogoApp,
+	appPath string,
+	ref string,
+	alias string,
+	version string,
+	forcedType string,
+) (contributionInventoryEntry, []diagnostic) {
+	descriptor, diagnostics := buildDescriptorForApp(app, appPath, ref, alias, version, forcedType)
+	resolvedRef := descriptor.Ref
+	if descriptor.Evidence != nil && descriptor.Evidence.ResolvedRef != "" {
+		resolvedRef = descriptor.Evidence.ResolvedRef
+	}
+	return contributionInventoryEntry{
+		Ref:            resolvedRef,
+		Alias:          descriptor.Alias,
+		Type:           descriptor.Type,
+		Name:           descriptor.Name,
+		Version:        descriptor.Version,
+		Title:          descriptor.Title,
+		Source:         descriptor.Evidence.Source,
+		DescriptorPath: descriptor.Evidence.DescriptorPath,
+		PackageRoot:    descriptor.Evidence.PackageRoot,
+		Settings:       descriptor.Settings,
+		Inputs:         descriptor.Inputs,
+		Outputs:        descriptor.Outputs,
+		Diagnostics:    dedupeDiagnostics(append(append([]diagnostic{}, descriptor.Evidence.Diagnostics...), diagnostics...)),
+		Descriptor:     &descriptor,
+	}, diagnostics
+}
+
+func findInventoryEntry(inventory contributionInventory, app flogoApp, refOrAlias string) (contributionInventoryEntry, bool) {
+	ref, alias, _, _, hasResolvedRef := resolveAppRef(app, refOrAlias)
+	normalized := normalizeAlias(refOrAlias)
+	for _, entry := range inventory.Entries {
+		resolvedRef := entry.Ref
+		if entry.Descriptor != nil && entry.Descriptor.Evidence != nil && entry.Descriptor.Evidence.ResolvedRef != "" {
+			resolvedRef = entry.Descriptor.Evidence.ResolvedRef
+		}
+		if entry.Ref == refOrAlias || resolvedRef == refOrAlias || normalizeAlias(entry.Ref) == normalized || normalizeAlias(resolvedRef) == normalized {
+			return entry, true
+		}
+		if entry.Alias != "" && normalizeAlias(entry.Alias) == normalized {
+			return entry, true
+		}
+		if hasResolvedRef {
+			canonicalRef := resolveImportRef(app, ref, alias)
+			if entry.Ref == canonicalRef || resolvedRef == canonicalRef {
+				return entry, true
+			}
+		}
+	}
+	return contributionInventoryEntry{}, false
+}
+
+func inferDescriptorSource(appPath string, descriptorPath string, ref string) string {
 	normalizedPath := strings.ReplaceAll(descriptorPath, "\\", "/")
 	normalizedRef := strings.TrimPrefix(strings.ReplaceAll(ref, "\\", "/"), "#")
-	if strings.Contains(normalizedPath, "/vendor/"+normalizedRef+"/descriptor.json") ||
-		strings.Contains(normalizedPath, "/.flogo/descriptors/"+normalizedRef+"/descriptor.json") ||
+	appDir := ""
+	if appPath != "" {
+		appDir = strings.ReplaceAll(filepath.Dir(appPath), "\\", "/")
+	}
+	if appDir != "" && strings.HasPrefix(normalizedPath, appDir+"/") &&
+		!strings.Contains(normalizedPath, "/.flogo/descriptors/") &&
+		!strings.Contains(normalizedPath, "/descriptors/") &&
+		!strings.Contains(normalizedPath, "/vendor/") {
+		return "app_descriptor"
+	}
+	if strings.Contains(normalizedPath, "/vendor/"+normalizedRef+"/descriptor.json") {
+		return "package_descriptor"
+	}
+	if strings.Contains(normalizedPath, "/.flogo/descriptors/"+normalizedRef+"/descriptor.json") ||
 		strings.Contains(normalizedPath, "/descriptors/"+normalizedRef+"/descriptor.json") {
-		return "descriptor"
+		return "workspace_descriptor"
 	}
 
 	return "workspace_descriptor"
 }
 
 func introspectContrib(app flogoApp, appPath string, refOrAlias string) (contribDescriptor, []diagnostic, bool) {
+	inventory := buildContributionInventory(app, appPath)
+	if entry, ok := findInventoryEntry(inventory, app, refOrAlias); ok {
+		return inventoryEntryToDescriptor(entry), dedupeDiagnostics(entry.Diagnostics), true
+	}
+
 	if strings.HasPrefix(refOrAlias, "#flow:") {
 		flowID := strings.TrimPrefix(refOrAlias, "#flow:")
 		for _, flow := range app.Resources {
@@ -962,7 +1287,7 @@ func introspectContrib(app flogoApp, appPath string, refOrAlias string) (contrib
 					Examples:           []string{"Invoke reusable flow " + flow.ID},
 					CompatibilityNotes: []string{"Flow resources behave like reusable actions"},
 					Source:             "flow-resource",
-					Evidence:           createEvidence("flow_resource", "#flow:"+flow.ID, "flow", "", "", nil),
+					Evidence:           createEvidence("flow_resource", "#flow:"+flow.ID, "flow", "", "", "", nil),
 				}, []diagnostic{}, true
 			}
 		}
@@ -1246,8 +1571,32 @@ func buildDescriptorForApp(
 
 	descriptorPath := findDescriptorFile(appPath, resolvedRef)
 	if descriptorPath != "" {
-		source := inferDescriptorSource(descriptorPath, resolvedRef)
+		source := inferDescriptorSource(appPath, descriptorPath, resolvedRef)
 		return parseDescriptorFile(descriptorPath, resolvedRef, normalizedAlias, version, forcedType, source), []diagnostic{}
+	}
+
+	packageRoot := findPackageRoot(appPath, resolvedRef)
+	if packageRoot != "" {
+		descriptor := buildDescriptor(resolvedRef, normalizedAlias, version, forcedType)
+		descriptor.Source = "package_source"
+		descriptor.Evidence = createEvidence(descriptor.Source, resolvedRef, normalizedAlias, version, "", packageRoot, nil)
+		return descriptor, []diagnostic{
+			{
+				Code:     "flogo.contrib.descriptor_not_found",
+				Message:  fmt.Sprintf("Descriptor metadata for %q was not found on disk", resolvedRef),
+				Severity: "info",
+				Path:     normalizedAlias,
+			},
+			{
+				Code:     "flogo.contrib.package_source_fallback",
+				Message:  fmt.Sprintf("Descriptor metadata for %q was not found on disk; using package source fallback metadata", resolvedRef),
+				Severity: "info",
+				Path:     normalizedAlias,
+				Details: map[string]any{
+					"packageRoot": packageRoot,
+				},
+			},
+		}
 	}
 
 	descriptor := buildDescriptor(resolvedRef, normalizedAlias, version, forcedType)
@@ -1348,6 +1697,27 @@ func findDescriptorFile(appPath string, ref string) string {
 	return ""
 }
 
+func findPackageRoot(appPath string, ref string) string {
+	normalizedRef := strings.TrimPrefix(strings.ReplaceAll(ref, "\\", "/"), "#")
+	refBase := filepath.Base(normalizedRef)
+	for _, root := range buildSearchRoots(appPath) {
+		candidates := []string{
+			filepath.Join(root, filepath.FromSlash(normalizedRef)),
+			filepath.Join(root, "vendor", filepath.FromSlash(normalizedRef)),
+			filepath.Join(root, ".flogo", "descriptors", filepath.FromSlash(normalizedRef)),
+		}
+		if refBase != "" {
+			candidates = append(candidates, filepath.Join(root, refBase))
+		}
+		for _, candidate := range candidates {
+			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
 func buildSearchRoots(appPath string) []string {
 	roots := map[string]struct{}{}
 	cwd, err := os.Getwd()
@@ -1408,7 +1778,7 @@ func parseDescriptorFile(descriptorPath string, ref string, alias string, versio
 		Examples:           normalizeStringArray(raw["examples"]),
 		CompatibilityNotes: normalizeStringArray(raw["compatibilityNotes"]),
 		Source:             source,
-		Evidence:           createEvidence(source, ref, alias, version, descriptorPath, nil),
+		Evidence:           createEvidence(source, ref, alias, version, descriptorPath, filepath.Dir(descriptorPath), nil),
 	}
 }
 
@@ -1798,7 +2168,7 @@ func buildDescriptor(ref string, alias string, version string, forcedType string
 		descriptor.Type = forcedType
 	}
 
-	descriptor.Evidence = createEvidence(descriptor.Source, ref, normalizedAlias, version, "", nil)
+	descriptor.Evidence = createEvidence(descriptor.Source, ref, normalizedAlias, version, "", "", nil)
 
 	return descriptor
 }

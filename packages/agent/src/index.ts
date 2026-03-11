@@ -43,9 +43,15 @@ const approvalMap: Record<TaskRequest["type"], ApprovalType[]> = {
   review: []
 };
 
-function getAnalysisMode(task: TaskRequest): "catalog" | "mapping_preview" | "governance" | "composition_compare" | undefined {
+function getAnalysisMode(
+  task: TaskRequest
+): "inventory" | "catalog" | "mapping_preview" | "governance" | "composition_compare" | undefined {
   const mode = task.inputs["mode"];
-  return mode === "catalog" || mode === "mapping_preview" || mode === "governance" || mode === "composition_compare"
+  return mode === "inventory" ||
+    mode === "catalog" ||
+    mode === "mapping_preview" ||
+    mode === "governance" ||
+    mode === "composition_compare"
     ? mode
     : undefined;
 }
@@ -91,7 +97,9 @@ export class TaskPlanner {
       { id: "validate", label: "Validate structure and mappings", tool: "flogo.validateApp" }
     ];
 
-    if (analysisMode === "catalog") {
+    if (analysisMode === "inventory") {
+      steps.push({ id: "inventory", label: "Inventory Flogo contributions and package evidence", tool: "runner.inventoryContribs" });
+    } else if (analysisMode === "catalog") {
       steps.push({ id: "catalog", label: "Catalog Flogo contributions and descriptors", tool: "runner.catalogContribs" });
     } else if (analysisMode === "mapping_preview") {
       steps.push({ id: "mapping", label: "Preview mappings and suggest coercions", tool: "runner.previewMapping" });
@@ -101,6 +109,10 @@ export class TaskPlanner {
     } else if (analysisMode === "composition_compare") {
       steps.push({ id: "compare", label: "Compare canonical JSON to programmatic composition", tool: "runner.compareComposition" });
     } else {
+      if (/(inventory|package metadata|descriptor source|contrib inventory)/i.test(summary)) {
+        steps.push({ id: "inventory", label: "Inventory Flogo contributions and package evidence", tool: "runner.inventoryContribs" });
+      }
+
       if (/(trigger|activity|action|contrib|descriptor|catalog)/i.test(summary)) {
         steps.push({ id: "catalog", label: "Catalog Flogo contributions and descriptors", tool: "runner.catalogContribs" });
       }

@@ -76,6 +76,19 @@ export class RunnerTools {
     });
   }
 
+  async inventoryContribs(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({ ...parsed, stepType: "inventory_contribs", jobKind: "inventory" });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued contribution inventory job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
   async previewMapping(spec: unknown): Promise<ToolResponse> {
     const parsed = RunnerJobSpecSchema.parse(spec);
     const result = await this.dispatcher.dispatch({ ...parsed, stepType: "preview_mapping", jobKind: "mapping_preview" });

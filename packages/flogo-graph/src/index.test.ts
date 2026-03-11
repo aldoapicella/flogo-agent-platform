@@ -7,6 +7,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   analyzePropertyUsage,
   buildAppGraph,
+  buildContributionInventory,
   buildContribCatalog,
   compareJsonVsProgrammatic,
   inspectContribDescriptor,
@@ -181,6 +182,18 @@ describe("flogo graph", () => {
     expect(catalog.entries.some((entry) => entry.type === "action" && entry.ref === "#flow:hello_flow")).toBe(true);
   });
 
+  it("builds a contribution inventory with package evidence and flow entries", () => {
+    const inventory = buildContributionInventory(validApp);
+
+    expect(inventory.entries.some((entry) => entry.alias === "rest" && entry.ref === "github.com/project-flogo/contrib/trigger/rest")).toBe(
+      true
+    );
+    expect(inventory.entries.some((entry) => entry.alias === "log" && entry.ref === "github.com/project-flogo/contrib/activity/log")).toBe(
+      true
+    );
+    expect(inventory.entries.some((entry) => entry.ref === "#flow:hello_flow" && entry.source === "flow_resource")).toBe(true);
+  });
+
   it("normalizes legacy object-shaped resources and task activity refs", () => {
     const graph = buildAppGraph(legacyShapeApp);
     const report = validateFlogoApp(legacyShapeApp);
@@ -328,6 +341,8 @@ describe("flogo graph", () => {
     expect(governance.aliasIssues.some((issue) => issue.kind === "duplicate_alias" && issue.alias === "log")).toBe(true);
     expect(governance.orphanedRefs.some((entry) => entry.ref === "#missing" && entry.kind === "activity")).toBe(true);
     expect(governance.versionFindings.some((finding) => finding.alias === "rest" && finding.status === "missing")).toBe(true);
+    expect(governance.inventorySummary?.entryCount).toBeGreaterThan(0);
+    expect(governance.fallbackContribs).toContain("github.com/project-flogo/contrib/activity/log");
   });
 
   it("compares canonical and programmatic composition for app and resource targets", () => {
@@ -348,6 +363,8 @@ describe("flogo graph", () => {
 
     expect(appComparison.ok).toBe(true);
     expect(appComparison.differences).toEqual([]);
+    expect(appComparison.comparisonBasis).toBe("inventory_backed");
+    expect(appComparison.inventoryRefsUsed).toContain("github.com/project-flogo/contrib/trigger/rest");
     expect(resourceComparison.ok).toBe(true);
     expect(resourceComparison.differences).toEqual([]);
     expect(missingResource.ok).toBe(false);

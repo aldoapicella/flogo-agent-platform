@@ -58,6 +58,7 @@ The Go helper binary exists to bridge into Flogo Core/Flow-native capability wit
 
 It currently supports:
 
+- contribution inventory,
 - contribution catalog generation,
 - descriptor inspection,
 - governance validation,
@@ -104,7 +105,7 @@ Responsibilities:
 - start orchestrations,
 - store tasks, events, approvals, artifacts, build runs, and test runs through Prisma,
 - expose task history and run summaries,
-- expose direct app-analysis endpoints for graph, catalog, descriptor inspection, governance reporting, composition comparison, artifact listing, and mapping preview,
+- expose direct app-analysis endpoints for graph, inventory, catalog, descriptor inspection, governance reporting, composition comparison, artifact listing, and mapping preview,
 - persist app-analysis payload JSON to Blob/Azurite-backed storage,
 - accept internal sync callbacks from the orchestrator and runner paths.
 
@@ -138,6 +139,7 @@ Current workflow modes:
   - `generate_smoke`
   - `run_smoke`
 - analysis-only workflow modes:
+  - `inventory_contribs`
   - `catalog_contribs`
   - `validate_governance`
   - `compare_composition`
@@ -162,6 +164,7 @@ Responsibilities:
 Current notable behavior:
 
 - local mode executes real helper commands for:
+  - `inventory_contribs`
   - `catalog_contribs`
   - `inspect_descriptor`
   - `validate_governance`
@@ -200,6 +203,7 @@ Defines runtime schemas and TypeScript types for:
 - orchestration requests and status,
 - runner job specs/results/status,
 - Flogo graphs,
+- contribution inventory,
 - contribution catalogs and descriptors,
 - mapping preview requests and results.
 
@@ -210,6 +214,7 @@ Implements the TypeScript-side Flogo domain model, including:
 - app parsing and normalization,
 - graph building,
 - structural, semantic, mapping, and dependency validation,
+- contribution inventory generation,
 - contribution catalog generation,
 - alias validation,
 - governance validation,
@@ -343,7 +348,7 @@ Persisted through Prisma today:
 
 ### Current partial persistence
 
-- app-scoped catalog, descriptor, governance, composition-compare, and mapping-preview artifacts are persisted through hidden synthetic analysis tasks,
+- app-scoped inventory, catalog, descriptor, governance, composition-compare, and mapping-preview artifacts are persisted through hidden synthetic analysis tasks,
 - those app-analysis payloads are stored in Blob/Azurite-backed JSON objects,
 - broader task artifacts outside the app-analysis slice still include logical/local URIs.
 
@@ -358,7 +363,7 @@ Persisted through Prisma today:
 
 - `flogo.json` is still the canonical artifact even as the Go helper path grows.
 - The Go helper is intentionally a finite execution binary, not a new always-on service.
-- The current helper uses normalized Flogo metadata and known-registry inference for part of the catalog/preview path; it is not yet a full Core/Flow-native runtime.
+- The current helper uses contribution inventory plus normalized Flogo metadata and known-registry inference for part of the analysis path; it is not yet a full Core/Flow-native runtime.
 - Flow-aware, runtime-aware, and extension-aware capabilities are still roadmap items.
 - In restricted shells on Windows, `next build` and Vitest can fail with `spawn EPERM` even when typecheck is clean.
 

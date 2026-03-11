@@ -49,6 +49,7 @@ Key fields:
 
 Important current `inputs` conventions:
 
+- `mode = "inventory"` for analysis-only contribution inventory work
 - `mode = "catalog"` for analysis-only contribution catalog work
 - `mode = "mapping_preview"` for analysis-only mapping preview work
 - `mode = "governance"` for analysis-only alias/orphan/version validation
@@ -137,6 +138,7 @@ Current artifact kinds:
 - `patch_bundle`
 - `review_report`
 - `workspace_snapshot`
+- `contrib_inventory`
 - `contrib_catalog`
 - `governance_report`
 - `composition_compare`
@@ -152,6 +154,8 @@ Current artifact kinds:
 
 Important schemas:
 
+- `ContributionInventory`
+- `ContributionInventoryResponse`
 - `ContribDescriptor`
 - `ContribDescriptorResponse`
 - `ContribCatalog`
@@ -159,6 +163,7 @@ Important schemas:
 
 These describe:
 
+- inventory-backed contribution evidence,
 - ref and alias,
 - evidence source and resolved-ref metadata,
 - contrib type,
@@ -204,6 +209,7 @@ These describe:
 - alias and import issues,
 - orphaned trigger/activity/action/flow refs,
 - version findings,
+- inventory summary, unresolved packages, and fallback contribs,
 - normalized diagnostics,
 - response artifact references.
 

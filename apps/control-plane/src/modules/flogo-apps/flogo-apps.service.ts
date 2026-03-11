@@ -9,6 +9,7 @@ import {
   CompositionCompareResponseSchema,
   ContribDescriptorResponseSchema,
   ContribCatalogResponseSchema,
+  ContributionInventoryResponseSchema,
   GovernanceResponseSchema,
   MappingPreviewRequestSchema,
   MappingPreviewResponseSchema
@@ -16,6 +17,7 @@ import {
 import {
   analyzePropertyUsage,
   buildAppGraph,
+  buildContributionInventory,
   buildContribCatalog,
   compareJsonVsProgrammatic,
   inspectContribDescriptor,
@@ -63,6 +65,33 @@ export class FlogoAppsService {
     }
 
     return buildAppGraph(resolved.content);
+  }
+
+  async getInventory(projectId: string, appId: string) {
+    const resolved = await this.resolveApp(projectId, appId);
+    if (!resolved) {
+      return undefined;
+    }
+
+    const inventory = buildContributionInventory(resolved.content, { appPath: resolved.appPath });
+    const artifact = await this.persistArtifact(
+      resolved,
+      "contrib_inventory",
+      `${appId}-contrib-inventory.json`,
+      {
+        analysisType: "inventory",
+        appId,
+        sourceType: resolved.sourceType
+      },
+      {
+        inventory
+      }
+    );
+
+    return ContributionInventoryResponseSchema.parse({
+      inventory,
+      artifact
+    });
   }
 
   async getCatalog(projectId: string, appId: string) {
@@ -371,7 +400,7 @@ export class FlogoAppsService {
 
   private async persistArtifact(
     resolved: ResolvedApp,
-    type: "contrib_catalog" | "mapping_preview" | "descriptor" | "governance_report" | "composition_compare",
+    type: "contrib_inventory" | "contrib_catalog" | "mapping_preview" | "descriptor" | "governance_report" | "composition_compare",
     name: string,
     metadata: Record<string, unknown>,
     payload: Record<string, unknown>

@@ -30,7 +30,7 @@ export class AppAnalysisStorageService {
     projectId: string;
     appId: string;
     artifactId: string;
-    kind: "contrib_catalog" | "mapping_preview" | "descriptor" | "governance_report" | "composition_compare";
+    kind: "contrib_inventory" | "contrib_catalog" | "mapping_preview" | "descriptor" | "governance_report" | "composition_compare";
     payload: Record<string, unknown>;
   }): Promise<StoredJsonArtifact> {
     if (!this.config) {

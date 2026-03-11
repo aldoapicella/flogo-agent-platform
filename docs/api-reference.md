@@ -45,6 +45,7 @@ Important fields:
 
 Important analysis-only modes:
 
+- `inputs.mode = "inventory"`
 - `inputs.mode = "catalog"`
 - `inputs.mode = "mapping_preview"`
 - `inputs.mode = "governance"`
@@ -191,6 +192,25 @@ Source resolution behavior:
 1. try a persisted `FlogoApp` for `projectId + appId`,
 2. fall back to `examples/<appId>/flogo.json`,
 3. return `404` if neither exists.
+
+### `GET /v1/projects/:projectId/apps/:appId/inventory`
+
+Returns the normalized contribution inventory plus a persisted artifact reference.
+
+Response shape:
+
+- `ContributionInventoryResponse`
+
+Key fields:
+
+- `inventory`
+- `artifact`
+
+Current implementation notes:
+
+- inventory entries expose source evidence such as `app_descriptor`, `workspace_descriptor`, `package_descriptor`, `package_source`, `registry`, `inferred`, and `flow_resource`,
+- the response artifact is backed by Blob/Azurite JSON storage and Prisma metadata,
+- the inventory is the evidence layer used by catalog, governance, and composition-comparison analysis.
 
 ### `GET /v1/projects/:projectId/apps/:appId/catalog`
 

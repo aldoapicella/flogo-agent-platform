@@ -7,6 +7,10 @@ import {
   type CompositionCompareRequest,
   CompositionCompareResultSchema,
   type CompositionCompareResult,
+  ContributionInventoryEntrySchema,
+  type ContributionInventoryEntry,
+  ContributionInventorySchema,
+  type ContributionInventory,
   ContribCatalogSchema,
   type ContribCatalog,
   ContribDescriptorSchema,
@@ -66,6 +70,11 @@ export interface ContribLookupOptions {
 
 type ResolvedDescriptor = {
   descriptor: ContribDescriptor;
+  diagnostics: Diagnostic[];
+};
+
+type ResolvedInventoryEntry = {
+  entry: ContributionInventoryEntry;
   diagnostics: Diagnostic[];
 };
 
@@ -395,68 +404,94 @@ export function validateFlogoApp(document: string | FlogoApp | unknown): Validat
   });
 }
 
+export function buildContributionInventory(
+  document: string | FlogoApp | unknown,
+  options?: ContribLookupOptions
+): ContributionInventory {
+  const app = parseFlogoAppDocument(document);
+  const diagnostics: Diagnostic[] = [];
+  const entries = new Map<string, ContributionInventoryEntry>();
+
+  const upsert = (entry: ContributionInventoryEntry, entryDiagnostics: Diagnostic[]) => {
+    const key = `${entry.type}:${entry.alias ?? entry.ref}`;
+    const existing = entries.get(key);
+    if (!existing || compareEvidenceStrength(entry.source, existing.source) >= 0) {
+      entries.set(key, ContributionInventoryEntrySchema.parse(entry));
+    }
+    diagnostics.push(...entryDiagnostics);
+  };
+
+  for (const entry of app.imports) {
+    const resolved = resolveInventoryEntry(app, entry.ref, entry.alias, entry.version, undefined, options);
+    upsert(resolved.entry, resolved.diagnostics);
+  }
+
+  for (const trigger of app.triggers) {
+    const alias = inferAliasFromRef(trigger.ref);
+    if (alias === "flow") {
+      continue;
+    }
+    const resolved = resolveInventoryEntry(app, trigger.ref, alias, undefined, "trigger", options);
+    upsert(resolved.entry, resolved.diagnostics);
+  }
+
+  for (const resource of app.resources) {
+    upsert(buildFlowInventoryEntry(resource), []);
+    for (const task of resource.data.tasks) {
+      if (!task.activityRef) {
+        continue;
+      }
+      const alias = inferAliasFromRef(task.activityRef);
+      if (alias === "flow") {
+        continue;
+      }
+      const resolved = resolveInventoryEntry(app, task.activityRef, alias, undefined, undefined, options);
+      upsert(resolved.entry, resolved.diagnostics);
+    }
+  }
+
+  return ContributionInventorySchema.parse({
+    appName: app.name,
+    entries: Array.from(entries.values()).sort((left, right) => left.name.localeCompare(right.name)),
+    diagnostics: dedupeDiagnostics(diagnostics)
+  });
+}
+
 export function buildContribCatalog(document: string | FlogoApp | unknown, options?: ContribLookupOptions): ContribCatalog {
   const app = parseFlogoAppDocument(document);
+  const inventory = buildContributionInventory(app, options);
   const entries = new Map<string, ContribDescriptor>();
-  const diagnostics: Diagnostic[] = [];
 
   const upsert = (entry: ContribDescriptor) => {
     const key = `${entry.type}:${entry.alias ?? entry.ref}`;
     entries.set(key, ContribDescriptorSchema.parse(entry));
   };
 
-  for (const entry of app.imports) {
-    const resolved = resolveDescriptor(app, entry.ref, entry.alias, entry.version, undefined, options);
-    upsert(resolved.descriptor);
-    diagnostics.push(...resolved.diagnostics);
+  for (const entry of inventory.entries) {
+    upsert(inventoryEntryToDescriptor(entry));
   }
 
   for (const trigger of app.triggers) {
-    const resolved = resolveDescriptor(app, trigger.ref, inferAliasFromRef(trigger.ref), undefined, "trigger", options);
-    upsert(withCatalogRef(resolved.descriptor, trigger.ref));
-    diagnostics.push(...resolved.diagnostics);
+    const resolved = resolveInventoryEntry(app, trigger.ref, inferAliasFromRef(trigger.ref), undefined, "trigger", options);
+    upsert(withCatalogRef(inventoryEntryToDescriptor(resolved.entry), trigger.ref));
   }
 
   for (const resource of app.resources) {
-    upsert(
-      ContribDescriptorSchema.parse({
-        ref: `#flow:${resource.id}`,
-        alias: "flow",
-        type: "action",
-        name: resource.data.name ?? resource.id,
-        title: resource.data.name ?? resource.id,
-        settings: [],
-        inputs: (resource.data.metadata?.input ?? []).map((item, index) => ({
-          name: typeof item.name === "string" ? item.name : `input_${index}`,
-          type: typeof item.type === "string" ? item.type : undefined,
-          required: Boolean(item.required)
-        })),
-        outputs: (resource.data.metadata?.output ?? []).map((item, index) => ({
-          name: typeof item.name === "string" ? item.name : `output_${index}`,
-          type: typeof item.type === "string" ? item.type : undefined,
-          required: Boolean(item.required)
-        })),
-        examples: [`Invoke reusable flow ${resource.id}`],
-        compatibilityNotes: ["Flow resources behave like reusable actions"],
-        source: "flow-resource",
-        evidence: createDescriptorEvidence("flow_resource", `#flow:${resource.id}`, "flow")
-      })
-    );
+    upsert(inventoryEntryToDescriptor(buildFlowInventoryEntry(resource)));
 
     for (const task of resource.data.tasks) {
       if (!task.activityRef) {
         continue;
       }
-      const resolved = resolveDescriptor(app, task.activityRef, inferAliasFromRef(task.activityRef), undefined, undefined, options);
-      upsert(withCatalogRef(resolved.descriptor, task.activityRef));
-      diagnostics.push(...resolved.diagnostics);
+      const resolved = resolveInventoryEntry(app, task.activityRef, inferAliasFromRef(task.activityRef), undefined, undefined, options);
+      upsert(withCatalogRef(inventoryEntryToDescriptor(resolved.entry), task.activityRef));
     }
   }
 
   return ContribCatalogSchema.parse({
     appName: app.name,
     entries: Array.from(entries.values()).sort((left, right) => left.name.localeCompare(right.name)),
-    diagnostics: dedupeDiagnostics(diagnostics)
+    diagnostics: inventory.diagnostics
   });
 }
 
@@ -466,23 +501,15 @@ export function inspectContribDescriptor(
   options?: ContribLookupOptions
 ): ContribDescriptorResponse | undefined {
   const app = parseFlogoAppDocument(document);
-  const flowDescriptor = resolveFlowDescriptor(app, refOrAlias);
-  if (flowDescriptor) {
-    return ContribDescriptorResponseSchema.parse({
-      descriptor: flowDescriptor,
-      diagnostics: []
-    });
-  }
-
-  const appRef = resolveAppRef(app, refOrAlias);
-  if (!appRef) {
+  const inventory = buildContributionInventory(app, options);
+  const entry = findInventoryEntry(app, inventory, refOrAlias);
+  if (!entry) {
     return undefined;
   }
 
-  const resolved = resolveDescriptor(app, appRef.ref, appRef.alias, appRef.version, appRef.forcedType, options);
   return ContribDescriptorResponseSchema.parse({
-    descriptor: resolved.descriptor,
-    diagnostics: dedupeDiagnostics(resolved.diagnostics)
+    descriptor: inventoryEntryToDescriptor(entry),
+    diagnostics: dedupeDiagnostics(entry.diagnostics)
   });
 }
 
@@ -684,6 +711,7 @@ export function summarizeAppDiff(beforeDocument: string | FlogoApp | unknown, af
 
 export function validateGovernance(document: string | FlogoApp | unknown, options?: ContribLookupOptions): GovernanceReport {
   const app = parseFlogoAppDocument(document);
+  const inventory = buildContributionInventory(app, options);
   const aliasIssues: Array<{
     kind: "duplicate_alias" | "missing_import" | "implicit_alias_use" | "alias_ref_mismatch";
     alias: string;
@@ -712,7 +740,19 @@ export function validateGovernance(document: string | FlogoApp | unknown, option
   const refToAliases = new Map<string, Set<string>>();
   const usedImportAliases = new Set<string>();
   const resourceIds = new Set(app.resources.map((resource) => resource.id));
-  const catalogDiagnostics = buildContribCatalog(app, options).diagnostics;
+  const inventoryByAlias = new Map(
+    inventory.entries
+      .filter((entry) => entry.alias)
+      .map((entry) => [entry.alias as string, entry] as const)
+  );
+  const unresolvedPackages = inventory.entries
+    .filter((entry) => entry.source === "inferred")
+    .map((entry) => entry.ref)
+    .sort();
+  const fallbackContribs = inventory.entries
+    .filter((entry) => entry.source === "registry" || entry.source === "inferred")
+    .map((entry) => entry.ref)
+    .sort();
 
   for (const entry of app.imports) {
     const current = importsByAlias.get(entry.alias) ?? [];
@@ -730,6 +770,38 @@ export function validateGovernance(document: string | FlogoApp | unknown, option
         status: "missing",
         message: `Import alias "${entry.alias}" does not declare a version`,
         severity: "info"
+      });
+    }
+
+    const inventoryEntry = inventoryByAlias.get(entry.alias);
+    const inventoryVersion = inventoryEntry?.version ?? inventoryEntry?.descriptor?.version;
+    if (inventoryEntry?.source === "inferred") {
+      orphanedRefs.push({
+        ref: entry.ref,
+        kind: inferContribType(entry.ref),
+        path: `imports.${entry.alias}`,
+        reason: `Import alias "${entry.alias}" could not be resolved from workspace or package metadata`,
+        severity: "error"
+      });
+    }
+    if (inventoryEntry?.source === "registry") {
+      versionFindings.push({
+        alias: entry.alias,
+        ref: entry.ref,
+        declaredVersion: entry.version,
+        status: "ok",
+        message: `Import alias "${entry.alias}" is using registry fallback metadata`,
+        severity: "warning"
+      });
+    }
+    if (entry.version && inventoryVersion && entry.version !== inventoryVersion) {
+      versionFindings.push({
+        alias: entry.alias,
+        ref: entry.ref,
+        declaredVersion: entry.version,
+        status: "conflict",
+        message: `Import alias "${entry.alias}" declares version "${entry.version}" but resolved metadata reports "${inventoryVersion}"`,
+        severity: "warning"
       });
     }
   }
@@ -912,7 +984,7 @@ export function validateGovernance(document: string | FlogoApp | unknown, option
         declaredVersion: finding.declaredVersion
       })
     ),
-    ...catalogDiagnostics
+    ...inventory.diagnostics
   ]);
 
   return GovernanceReportSchema.parse({
@@ -921,6 +993,13 @@ export function validateGovernance(document: string | FlogoApp | unknown, option
     aliasIssues,
     orphanedRefs,
     versionFindings,
+    inventorySummary: {
+      entryCount: inventory.entries.length,
+      packageBackedCount: inventory.entries.filter((entry) => isPackageBackedSource(entry.source)).length,
+      fallbackCount: inventory.entries.filter((entry) => entry.source === "registry" || entry.source === "inferred").length
+    },
+    unresolvedPackages,
+    fallbackContribs,
     diagnostics
   });
 }
@@ -931,13 +1010,22 @@ export function compareJsonVsProgrammatic(
 ): CompositionCompareResult {
   const app = parseFlogoAppDocument(document);
   const request = CompositionCompareRequestSchema.parse(requestInput ?? {});
+  const inventory = buildContributionInventory(app);
   const diagnostics: Diagnostic[] = [];
 
   const canonicalProjection = buildCanonicalProjection(app, request);
-  const programmaticProjection = buildProgrammaticProjection(app, request, diagnostics);
+  const programmaticProjection = buildProgrammaticProjection(app, request, diagnostics, inventory);
   const differences = diffComposition("app", canonicalProjection, programmaticProjection);
   const canonicalHash = createHash("sha256").update(stableStringify(canonicalProjection)).digest("hex");
   const programmaticHash = createHash("sha256").update(stableStringify(programmaticProjection)).digest("hex");
+  const inventoryRefsUsed = inventory.entries
+    .filter((entry) => entry.type !== "action" || entry.source !== "flow_resource")
+    .map((entry) => entry.descriptor?.evidence?.resolvedRef ?? entry.ref)
+    .sort();
+  const comparisonBasis =
+    inventory.entries.some((entry) => isPackageBackedSource(entry.source)) || inventory.entries.some((entry) => entry.source === "registry")
+      ? "inventory_backed"
+      : "normalized_only";
 
   return CompositionCompareResultSchema.parse({
     appName: app.name,
@@ -946,6 +1034,8 @@ export function compareJsonVsProgrammatic(
       differences.every((difference) => difference.severity !== "error"),
     canonicalHash,
     programmaticHash,
+    comparisonBasis,
+    inventoryRefsUsed,
     differences,
     diagnostics
   });
@@ -975,6 +1065,118 @@ function buildDescriptorFromRef(ref: string, alias?: string, version?: string, f
   });
 }
 
+function buildFlowInventoryEntry(resource: FlogoFlow): ContributionInventoryEntry {
+  const descriptor = ContribDescriptorSchema.parse({
+    ref: `#flow:${resource.id}`,
+    alias: "flow",
+    type: "action",
+    name: resource.data.name ?? resource.id,
+    title: resource.data.name ?? resource.id,
+    settings: [],
+    inputs: (resource.data.metadata?.input ?? []).map((item, index) => ({
+      name: typeof item.name === "string" ? item.name : `input_${index}`,
+      type: typeof item.type === "string" ? item.type : undefined,
+      required: Boolean(item.required)
+    })),
+    outputs: (resource.data.metadata?.output ?? []).map((item, index) => ({
+      name: typeof item.name === "string" ? item.name : `output_${index}`,
+      type: typeof item.type === "string" ? item.type : undefined,
+      required: Boolean(item.required)
+    })),
+    examples: [`Invoke reusable flow ${resource.id}`],
+    compatibilityNotes: ["Flow resources behave like reusable actions"],
+    source: "flow-resource",
+    evidence: createDescriptorEvidence("flow_resource", `#flow:${resource.id}`, "flow")
+  });
+
+  return ContributionInventoryEntrySchema.parse({
+    ref: descriptor.ref,
+    alias: descriptor.alias,
+    type: descriptor.type,
+    name: descriptor.name,
+    version: descriptor.version,
+    title: descriptor.title,
+    source: "flow_resource",
+    settings: descriptor.settings,
+    inputs: descriptor.inputs,
+    outputs: descriptor.outputs,
+    diagnostics: [],
+    descriptor
+  });
+}
+
+function inventoryEntryToDescriptor(entry: ContributionInventoryEntry): ContribDescriptor {
+  if (entry.descriptor) {
+    return ContribDescriptorSchema.parse(entry.descriptor);
+  }
+
+  return ContribDescriptorSchema.parse({
+    ref: entry.ref,
+    alias: entry.alias,
+    type: entry.type,
+    name: entry.name,
+    version: entry.version,
+    title: entry.title,
+    settings: entry.settings,
+    inputs: entry.inputs,
+    outputs: entry.outputs,
+    source: entry.source,
+    evidence: createDescriptorEvidence(entry.source, entry.ref, entry.alias, entry.version, entry.descriptorPath, entry.diagnostics, entry.packageRoot)
+  });
+}
+
+function compareEvidenceStrength(
+  left: ContributionInventoryEntry["source"] | ContribResolutionEvidence["source"],
+  right: ContributionInventoryEntry["source"] | ContribResolutionEvidence["source"]
+) {
+  const rank: Record<ContributionInventoryEntry["source"], number> = {
+    flow_resource: 100,
+    app_descriptor: 90,
+    workspace_descriptor: 80,
+    package_descriptor: 70,
+    package_source: 60,
+    descriptor: 50,
+    registry: 40,
+    inferred: 30
+  };
+  return rank[left] - rank[right];
+}
+
+function isPackageBackedSource(source: ContributionInventoryEntry["source"] | ContribResolutionEvidence["source"]) {
+  return source === "app_descriptor" || source === "workspace_descriptor" || source === "package_descriptor" || source === "package_source" || source === "descriptor";
+}
+
+function resolveInventoryEntry(
+  app: FlogoApp,
+  ref: string,
+  alias?: string,
+  version?: string,
+  forcedType?: ContribDescriptor["type"],
+  options?: ContribLookupOptions
+): ResolvedInventoryEntry {
+  const resolved = resolveDescriptor(app, ref, alias, version, forcedType, options);
+  const descriptor = resolved.descriptor;
+  return {
+    entry: ContributionInventoryEntrySchema.parse({
+      ref: descriptor.evidence?.resolvedRef ?? descriptor.ref,
+      alias: descriptor.alias,
+      type: descriptor.type,
+      name: descriptor.name,
+      version: descriptor.version,
+      title: descriptor.title,
+      source: descriptor.evidence?.source ?? (descriptor.source as ContributionInventoryEntry["source"] | undefined) ?? "inferred",
+      descriptorPath: descriptor.evidence?.descriptorPath,
+      packageRoot: descriptor.evidence?.packageRoot,
+      settings: descriptor.settings,
+      inputs: descriptor.inputs,
+      outputs: descriptor.outputs,
+      diagnostics: dedupeDiagnostics([...(descriptor.evidence?.diagnostics ?? []), ...resolved.diagnostics]),
+      descriptor
+    }),
+    diagnostics: resolved.diagnostics
+  };
+}
+
 function resolveDescriptor(
   app: FlogoApp,
   ref: string,
@@ -985,13 +1187,49 @@ function resolveDescriptor(
 ): ResolvedDescriptor {
   const resolvedRef = resolveImportRef(app, ref, alias);
   const normalizedAlias = alias ?? inferAliasFromRef(ref) ?? inferAliasFromRef(resolvedRef);
-  const descriptorFile = findDescriptorFile(resolvedRef, options);
+  const descriptorLocation = findDescriptorLocation(resolvedRef, options);
 
-  if (descriptorFile) {
-    const source = inferDescriptorSourceFromPath(descriptorFile, resolvedRef);
+  if (descriptorLocation?.descriptorPath) {
     return {
-      descriptor: parseDescriptorFile(descriptorFile, resolvedRef, normalizedAlias, version, forcedType, source),
+      descriptor: parseDescriptorFile(
+        descriptorLocation.descriptorPath,
+        resolvedRef,
+        normalizedAlias,
+        version,
+        forcedType,
+        descriptorLocation.source,
+        descriptorLocation.packageRoot
+      ),
       diagnostics: []
+    };
+  }
+
+  if (descriptorLocation?.packageRoot) {
+    const descriptor = buildDescriptorFromRef(resolvedRef, normalizedAlias, version, forcedType);
+    const source = "package_source";
+    return {
+      descriptor: ContribDescriptorSchema.parse({
+        ...descriptor,
+        source,
+        evidence: createDescriptorEvidence(source, resolvedRef, normalizedAlias, version, undefined, [], descriptorLocation.packageRoot)
+      }),
+      diagnostics: [
+        createDiagnostic(
+          "flogo.contrib.descriptor_not_found",
+          `Descriptor metadata for "${resolvedRef}" was not found on disk`,
+          "info",
+          normalizedAlias ? `imports.${normalizedAlias}` : resolvedRef
+        ),
+        createDiagnostic(
+          "flogo.contrib.package_source_fallback",
+          `Descriptor metadata for "${resolvedRef}" was not found on disk; using package source fallback metadata`,
+          "info",
+          normalizedAlias ? `imports.${normalizedAlias}` : resolvedRef,
+          {
+            packageRoot: descriptorLocation.packageRoot
+          }
+        )
+      ]
     };
   }
 
@@ -1038,28 +1276,7 @@ function resolveFlowDescriptor(app: FlogoApp, refOrAlias: string): ContribDescri
     return undefined;
   }
 
-  return ContribDescriptorSchema.parse({
-    ref: `#flow:${resource.id}`,
-    alias: "flow",
-    type: "action",
-    name: resource.data.name ?? resource.id,
-    title: resource.data.name ?? resource.id,
-    settings: [],
-    inputs: (resource.data.metadata?.input ?? []).map((item, index) => ({
-      name: typeof item.name === "string" ? item.name : `input_${index}`,
-      type: typeof item.type === "string" ? item.type : undefined,
-      required: Boolean(item.required)
-    })),
-    outputs: (resource.data.metadata?.output ?? []).map((item, index) => ({
-      name: typeof item.name === "string" ? item.name : `output_${index}`,
-      type: typeof item.type === "string" ? item.type : undefined,
-      required: Boolean(item.required)
-    })),
-    examples: [`Invoke reusable flow ${resource.id}`],
-    compatibilityNotes: ["Flow resources behave like reusable actions"],
-    source: "flow-resource",
-    evidence: createDescriptorEvidence("flow_resource", `#flow:${resource.id}`, "flow")
-  });
+  return inventoryEntryToDescriptor(buildFlowInventoryEntry(resource));
 }
 
 function resolveAppRef(
@@ -1125,6 +1342,33 @@ function resolveAppRef(
   return undefined;
 }
 
+function findInventoryEntry(
+  app: FlogoApp,
+  inventory: ContributionInventory,
+  refOrAlias: string
+): ContributionInventoryEntry | undefined {
+  const flowDescriptor = resolveFlowDescriptor(app, refOrAlias);
+  if (flowDescriptor) {
+    return inventory.entries.find((entry) => entry.ref === flowDescriptor.ref);
+  }
+
+  const normalized = normalizeAlias(refOrAlias);
+  const appRef = resolveAppRef(app, refOrAlias);
+  const resolvedRef = appRef?.ref ? resolveImportRef(app, appRef.ref, appRef.alias) : undefined;
+
+  return inventory.entries.find((entry) => {
+    const evidenceRef = entry.descriptor?.evidence?.resolvedRef ?? entry.ref;
+    return (
+      entry.ref === refOrAlias ||
+      evidenceRef === refOrAlias ||
+      normalizeAlias(entry.ref) === normalized ||
+      normalizeAlias(evidenceRef) === normalized ||
+      (entry.alias ? normalizeAlias(entry.alias) === normalized : false) ||
+      (resolvedRef ? entry.ref === resolvedRef || evidenceRef === resolvedRef : false)
+    );
+  });
+}
+
 function resolveImportRef(app: FlogoApp, ref: string, alias?: string) {
   if (!ref.startsWith("#")) {
     return ref;
@@ -1136,6 +1380,10 @@ function resolveImportRef(app: FlogoApp, ref: string, alias?: string) {
 }
 
 function findDescriptorFile(ref: string, options?: ContribLookupOptions) {
+  return findDescriptorLocation(ref, options)?.descriptorPath;
+}
+
+function findDescriptorLocation(ref: string, options?: ContribLookupOptions) {
   const normalizedRef = ref.replace(/^#/, "").replace(/\\/g, "/");
   const searchRoots = buildSearchRoots(options);
   const refBasename = normalizedRef.split("/").filter(Boolean).at(-1);
@@ -1152,9 +1400,23 @@ function findDescriptorFile(ref: string, options?: ContribLookupOptions) {
 
     for (const candidate of candidates) {
       if (existsSync(candidate)) {
-        return candidate;
+        const packageRoot = path.dirname(candidate);
+        return {
+          descriptorPath: candidate,
+          packageRoot,
+          source: inferDescriptorSourceFromPath(candidate, normalizedRef, options),
+          root
+        };
       }
     }
+  }
+
+  const packageRoot = findPackageRoot(ref, options);
+  if (packageRoot) {
+    return {
+      packageRoot,
+      source: "package_source" as const
+    };
   }
 
   return undefined;
@@ -1185,13 +1447,34 @@ function buildSearchRoots(options?: ContribLookupOptions) {
   return Array.from(roots);
 }
 
+function findPackageRoot(ref: string, options?: ContribLookupOptions) {
+  const normalizedRef = ref.replace(/^#/, "").replace(/\\/g, "/");
+  const refBasename = normalizedRef.split("/").filter(Boolean).at(-1);
+  for (const root of buildSearchRoots(options)) {
+    const candidates = [
+      path.join(root, normalizedRef),
+      path.join(root, "vendor", normalizedRef),
+      path.join(root, ".flogo", "descriptors", normalizedRef),
+      refBasename ? path.join(root, refBasename) : undefined
+    ].filter((candidate): candidate is string => Boolean(candidate));
+
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return undefined;
+}
+
 function parseDescriptorFile(
   descriptorPath: string,
   ref: string,
   alias?: string,
   version?: string,
   forcedType?: ContribDescriptor["type"],
-  source: "descriptor" | "workspace_descriptor" = "descriptor"
+  source: ContribResolutionEvidence["source"] = "descriptor",
+  packageRoot?: string
 ): ContribDescriptor {
   const raw = JSON.parse(readFileSync(descriptorPath, "utf8")) as Record<string, unknown>;
   const fieldSet = (value: unknown) => normalizeDescriptorFields(value);
@@ -1210,7 +1493,7 @@ function parseDescriptorFile(
     examples: normalizeStringArray(raw.examples),
     compatibilityNotes: normalizeStringArray(raw.compatibilityNotes),
     source,
-    evidence: createDescriptorEvidence(source, ref, alias, version, descriptorPath)
+    evidence: createDescriptorEvidence(source, ref, alias, version, descriptorPath, [], packageRoot)
   });
 }
 
@@ -1251,27 +1534,42 @@ function createDescriptorEvidence(
   importAlias?: string,
   version?: string,
   descriptorPath?: string,
-  diagnostics: Diagnostic[] = []
+  diagnostics: Diagnostic[] = [],
+  packageRoot?: string
 ): ContribResolutionEvidence {
   return ContribResolutionEvidenceSchema.parse({
     source,
     resolvedRef,
     descriptorPath,
+    packageRoot,
     importAlias,
     version,
     diagnostics
   });
 }
 
-function inferDescriptorSourceFromPath(descriptorPath: string, ref: string): "descriptor" | "workspace_descriptor" {
+function inferDescriptorSourceFromPath(
+  descriptorPath: string,
+  ref: string,
+  options?: ContribLookupOptions
+): "app_descriptor" | "workspace_descriptor" | "package_descriptor" | "descriptor" {
   const normalizedPath = descriptorPath.replace(/\\/g, "/");
   const normalizedRef = ref.replace(/^#/, "").replace(/\\/g, "/");
+  const appDir = options?.appPath ? path.dirname(path.resolve(options.appPath)).replace(/\\/g, "/") : undefined;
   if (
     normalizedPath.includes(`/vendor/${normalizedRef}/descriptor.json`) ||
-    normalizedPath.includes(`/.flogo/descriptors/${normalizedRef}/descriptor.json`) ||
-    normalizedPath.includes(`/descriptors/${normalizedRef}/descriptor.json`)
+    normalizedPath.includes(`/${normalizedRef}/descriptor.json`)
   ) {
-    return "descriptor";
+    if (appDir && normalizedPath.startsWith(`${appDir}/`)) {
+      return "app_descriptor";
+    }
+    if (normalizedPath.includes("/vendor/")) {
+      return "package_descriptor";
+    }
+  }
+
+  if (normalizedPath.includes(`/.flogo/descriptors/${normalizedRef}/descriptor.json`) || normalizedPath.includes(`/descriptors/${normalizedRef}/descriptor.json`)) {
+    return "workspace_descriptor";
   }
 
   return "workspace_descriptor";
@@ -1399,7 +1697,8 @@ function buildCanonicalProjection(app: FlogoApp, request: CompositionCompareRequ
 function buildProgrammaticProjection(
   app: FlogoApp,
   request: CompositionCompareRequest,
-  diagnostics: Diagnostic[]
+  diagnostics: Diagnostic[],
+  inventory: ContributionInventory
 ) {
   if (request.target === "resource") {
     if (!request.resourceId) {
@@ -1442,6 +1741,7 @@ function buildProgrammaticProjection(
     };
   }
 
+  void inventory;
   return buildCanonicalProjection(app, request);
 }
 

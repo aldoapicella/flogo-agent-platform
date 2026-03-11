@@ -49,6 +49,10 @@ export class FlogoTools {
     return this.core.catalogContribs(raw);
   }
 
+  inventoryContribs(raw: string | FlogoApp | unknown): ToolResponse {
+    return this.core.inventoryContribs(raw);
+  }
+
   introspectDescriptor(raw: string | FlogoApp | unknown, refOrAlias: string): ToolResponse {
     return this.core.introspectDescriptor(raw, refOrAlias);
   }

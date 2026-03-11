@@ -1,5 +1,6 @@
 import type {
   CompositionCompareRequest,
+  ContributionInventory,
   ContribCatalog,
   ContribDescriptor,
   FlogoApp,
@@ -8,6 +9,7 @@ import type {
   ToolResponse
 } from "@flogo-agent/contracts";
 import {
+  buildContributionInventory,
   buildContribCatalog,
   compareJsonVsProgrammatic,
   defineProperties,
@@ -78,6 +80,18 @@ export class FlogoCoreTools {
       summary: `Cataloged ${catalog.entries.length} Flogo contributions`,
       data: { catalog },
       diagnostics: catalog.diagnostics,
+      artifacts: [],
+      retryable: false
+    });
+  }
+
+  inventoryContribs(raw: string | FlogoApp | unknown): ToolResponse {
+    const inventory: ContributionInventory = buildContributionInventory(raw);
+    return toolResponse({
+      ok: true,
+      summary: `Inventoried ${inventory.entries.length} Flogo contributions`,
+      data: { inventory },
+      diagnostics: inventory.diagnostics,
       artifacts: [],
       retryable: false
     });

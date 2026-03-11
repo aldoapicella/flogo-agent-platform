@@ -175,6 +175,7 @@ Current status:
 
 Implemented in repo:
 
+- contribution inventory contracts, graph logic, public endpoint, runner step, and Blob/Azurite-backed persisted artifact,
 - contribution catalog generation in `packages/flogo-graph`,
 - descriptor introspection contracts,
 - public descriptor inspection endpoint,
@@ -183,20 +184,20 @@ Implemented in repo:
 - typed mapping preview contracts,
 - coercion suggestion heuristics,
 - richer property and environment planning,
-- direct app-analysis APIs for graph, catalog, artifact listing, and mapping preview,
+- direct app-analysis APIs for graph, inventory, catalog, artifact listing, and mapping preview,
 - direct app-analysis APIs for governance and composition comparison,
 - direct app-analysis API for descriptor inspection,
 - app-scoped analysis artifact persistence using Prisma-backed hidden analysis tasks,
-- Blob/Azurite-backed JSON payload storage for catalog, descriptor, governance, composition-compare, and mapping-preview artifacts,
+- Blob/Azurite-backed JSON payload storage for inventory, catalog, descriptor, governance, composition-compare, and mapping-preview artifacts,
 - structured contribution-evidence fields in catalog and descriptor results,
-- Go helper skeleton with real command paths for catalog, descriptor inspection, governance validation, composition comparison, and mapping preview,
-- runner-worker support for `catalog_contribs`, `inspect_descriptor`, `validate_governance`, `compare_composition`, and `preview_mapping`,
-- planner support for analysis-only task modes including governance and composition comparison.
+- Go helper skeleton with real command paths for inventory, catalog, descriptor inspection, governance validation, composition comparison, and mapping preview,
+- runner-worker support for `inventory_contribs`, `catalog_contribs`, `inspect_descriptor`, `validate_governance`, `compare_composition`, and `preview_mapping`,
+- planner support for analysis-only task modes including inventory, governance, and composition comparison.
 
 Still missing in Phase 1:
 
 - real `project-flogo/core` package introspection instead of the current normalized helper registry/fallback approach,
-- deeper descriptor/package evidence beyond workspace-descriptor and registry fallback,
+- deeper descriptor/package evidence beyond contribution inventory, workspace/package descriptor discovery, and registry fallback,
 - fuller programmatic app composition beyond the current comparison probe,
 - deeper alias/orphan/version governance tied to real package metadata.
 
@@ -253,6 +254,7 @@ The current codebase already supports a narrow but real Phase 1 slice.
 - Graph-level Flogo app normalization and analysis in `packages/flogo-graph`
 - Direct control-plane APIs:
   - `GET /v1/projects/:projectId/apps/:appId/graph`
+  - `GET /v1/projects/:projectId/apps/:appId/inventory`
   - `GET /v1/projects/:projectId/apps/:appId/catalog`
   - `GET /v1/projects/:projectId/apps/:appId/descriptors?ref=...`
   - `GET /v1/projects/:projectId/apps/:appId/governance`
@@ -260,12 +262,14 @@ The current codebase already supports a narrow but real Phase 1 slice.
   - `POST /v1/projects/:projectId/apps/:appId/composition/compare`
   - `POST /v1/projects/:projectId/apps/:appId/mappings/preview`
 - Analysis-only planner modes:
+  - `inputs.mode = "inventory"`
   - `inputs.mode = "catalog"`
   - `inputs.mode = "governance"`
   - `inputs.mode = "composition_compare"`
   - `inputs.mode = "mapping_preview"`
-- Runner job kinds and execution steps for catalog, governance, composition comparison, and mapping preview
+- Runner job kinds and execution steps for inventory, catalog, governance, composition comparison, and mapping preview
 - Go helper commands:
+  - `inventory contribs`
   - `catalog contribs`
   - `inspect descriptor`
   - `governance validate`

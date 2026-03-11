@@ -178,6 +178,18 @@ describe("FlogoAppsService", () => {
     expect(storedPayloads).toHaveLength(1);
   });
 
+  it("returns a contribution inventory for example apps", async () => {
+    const { service, storedPayloads } = createService();
+    const response = await service.getInventory("demo", "hello-rest");
+
+    expect(response).toBeDefined();
+    expect(response?.inventory.entries.some((entry) => entry.alias === "rest")).toBe(true);
+    expect(response?.inventory.entries.some((entry) => entry.ref === "#flow:hello")).toBe(true);
+    expect(response?.artifact?.type).toBe("contrib_inventory");
+    expect(response?.artifact?.metadata?.blobPath).toBeDefined();
+    expect(storedPayloads).toHaveLength(1);
+  });
+
   it("previews mappings for example apps and returns an artifact ref", async () => {
     const { service } = createService();
     const preview = await service.previewMapping("demo", "hello-rest", {
@@ -201,6 +213,7 @@ describe("FlogoAppsService", () => {
 
   it("lists persisted app-scoped analysis artifacts", async () => {
     const { service } = createService();
+    await service.getInventory("demo", "hello-rest");
     await service.getCatalog("demo", "hello-rest");
     await service.previewMapping("demo", "hello-rest", {
       nodeId: "log-request",
@@ -214,7 +227,8 @@ describe("FlogoAppsService", () => {
     });
 
     const artifacts = await service.listArtifacts("demo", "hello-rest");
-    expect(artifacts).toHaveLength(2);
+    expect(artifacts).toHaveLength(3);
+    expect(artifacts?.some((artifact) => artifact.type === "contrib_inventory")).toBe(true);
     expect(artifacts?.some((artifact) => artifact.type === "contrib_catalog")).toBe(true);
     expect(artifacts?.some((artifact) => artifact.type === "mapping_preview")).toBe(true);
   });

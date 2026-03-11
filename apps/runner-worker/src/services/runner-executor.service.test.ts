@@ -66,6 +66,35 @@ describe("RunnerExecutorService", () => {
     expect(result.artifacts.some((artifact) => artifact.type === "contrib_catalog")).toBe(true);
   });
 
+  it("executes helper-backed inventory analysis and publishes an inventory artifact", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        appName: "demo",
+        entries: [],
+        diagnostics: []
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-inventory",
+      jobKind: "inventory",
+      stepType: "inventory_contribs",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://inventory",
+      jobTemplateName: "flogo-runner",
+      command: [],
+      containerArgs: []
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.artifacts.some((artifact) => artifact.type === "contrib_inventory")).toBe(true);
+  });
+
   it("executes helper-backed mapping preview analysis and publishes a preview artifact", async () => {
     process.env.FLOGO_HELPER_BIN = await createHelperScript(
       JSON.stringify({

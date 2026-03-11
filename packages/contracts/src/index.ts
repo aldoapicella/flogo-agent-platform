@@ -37,6 +37,7 @@ export const ArtifactTypeSchema = z.enum([
   "patch_bundle",
   "review_report",
   "workspace_snapshot",
+  "contrib_inventory",
   "contrib_catalog",
   "mapping_preview",
   "governance_report",
@@ -302,7 +303,10 @@ export type ContribType = z.infer<typeof ContribTypeSchema>;
 
 export const ContribEvidenceSourceSchema = z.enum([
   "descriptor",
+  "app_descriptor",
   "workspace_descriptor",
+  "package_descriptor",
+  "package_source",
   "registry",
   "inferred",
   "flow_resource"
@@ -321,6 +325,7 @@ export const ContribResolutionEvidenceSchema = z.object({
   source: ContribEvidenceSourceSchema,
   resolvedRef: z.string(),
   descriptorPath: z.string().optional(),
+  packageRoot: z.string().optional(),
   importAlias: z.string().optional(),
   version: z.string().optional(),
   diagnostics: z.array(DiagnosticSchema).default([])
@@ -356,6 +361,37 @@ export const ContribCatalogResponseSchema = z.object({
   artifact: ArtifactRefSchema.optional()
 });
 export type ContribCatalogResponse = z.infer<typeof ContribCatalogResponseSchema>;
+
+export const ContributionInventoryEntrySchema = z.object({
+  ref: z.string(),
+  alias: z.string().optional(),
+  type: ContribTypeSchema,
+  name: z.string(),
+  version: z.string().optional(),
+  title: z.string().optional(),
+  source: ContribEvidenceSourceSchema,
+  descriptorPath: z.string().optional(),
+  packageRoot: z.string().optional(),
+  settings: z.array(ContribFieldSchema).default([]),
+  inputs: z.array(ContribFieldSchema).default([]),
+  outputs: z.array(ContribFieldSchema).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([]),
+  descriptor: ContribDescriptorSchema.optional()
+});
+export type ContributionInventoryEntry = z.infer<typeof ContributionInventoryEntrySchema>;
+
+export const ContributionInventorySchema = z.object({
+  appName: z.string().optional(),
+  entries: z.array(ContributionInventoryEntrySchema).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([])
+});
+export type ContributionInventory = z.infer<typeof ContributionInventorySchema>;
+
+export const ContributionInventoryResponseSchema = z.object({
+  inventory: ContributionInventorySchema,
+  artifact: ArtifactRefSchema.optional()
+});
+export type ContributionInventoryResponse = z.infer<typeof ContributionInventoryResponseSchema>;
 
 export const ContribDescriptorResponseSchema = z.object({
   descriptor: ContribDescriptorSchema,
@@ -491,6 +527,15 @@ export const GovernanceReportSchema = z.object({
   aliasIssues: z.array(AliasIssueSchema).default([]),
   orphanedRefs: z.array(OrphanedRefSchema).default([]),
   versionFindings: z.array(VersionFindingSchema).default([]),
+  inventorySummary: z
+    .object({
+      entryCount: z.number().int().nonnegative(),
+      packageBackedCount: z.number().int().nonnegative(),
+      fallbackCount: z.number().int().nonnegative()
+    })
+    .optional(),
+  unresolvedPackages: z.array(z.string()).default([]),
+  fallbackContribs: z.array(z.string()).default([]),
   diagnostics: z.array(DiagnosticSchema).default([])
 });
 export type GovernanceReport = z.infer<typeof GovernanceReportSchema>;
@@ -522,6 +567,8 @@ export const CompositionCompareResultSchema = z.object({
   ok: z.boolean(),
   canonicalHash: z.string(),
   programmaticHash: z.string(),
+  comparisonBasis: z.enum(["normalized_only", "inventory_backed"]).default("normalized_only"),
+  inventoryRefsUsed: z.array(z.string()).default([]),
   differences: z.array(CompositionDifferenceSchema).default([]),
   diagnostics: z.array(DiagnosticSchema).default([]),
   artifact: ArtifactRefSchema.optional()
@@ -539,6 +586,7 @@ export const RunnerStepTypeSchema = z.enum([
   "collect_logs",
   "generate_smoke",
   "run_smoke",
+  "inventory_contribs",
   "catalog_contribs",
   "inspect_descriptor",
   "preview_mapping",
@@ -552,6 +600,7 @@ export const RunnerJobKindSchema = z.enum([
   "smoke_test",
   "custom_contrib",
   "eval",
+  "inventory",
   "catalog",
   "mapping_preview",
   "governance",
@@ -560,6 +609,7 @@ export const RunnerJobKindSchema = z.enum([
 export type RunnerJobKind = z.infer<typeof RunnerJobKindSchema>;
 
 export const AnalysisKindSchema = z.enum([
+  "inventory",
   "catalog",
   "descriptor",
   "mapping_preview",

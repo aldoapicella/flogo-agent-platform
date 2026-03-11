@@ -95,6 +95,7 @@ Copy `.env.example` to `.env`.
 - `RUNNER_SMOKE_JOB_TEMPLATE_NAME`
 - `RUNNER_CUSTOM_CONTRIB_JOB_TEMPLATE_NAME`
 - `RUNNER_EVAL_JOB_TEMPLATE_NAME`
+- `RUNNER_INVENTORY_JOB_TEMPLATE_NAME`
 - `RUNNER_CATALOG_JOB_TEMPLATE_NAME`
 - `RUNNER_MAPPING_PREVIEW_JOB_TEMPLATE_NAME`
 - `RUNNER_GOVERNANCE_JOB_TEMPLATE_NAME`
@@ -258,6 +259,7 @@ Current contract:
 
 Current helper commands:
 
+- `inventory contribs`
 - `catalog contribs`
 - `inspect descriptor`
 - `governance validate`
@@ -321,8 +323,7 @@ Current important test areas:
 - Shared packages are consumed from `dist`, so stale package builds can look like app-level type errors.
 - `next build` and Vitest can hit environment-specific `spawn EPERM` failures in restricted Windows shells even when the code is type-correct.
 - Some artifact URIs are still logical/local rather than Blob-backed.
-- App-analysis catalog, descriptor, and mapping-preview artifacts are Blob/Azurite-backed, but broader runtime artifacts are not yet.
-- The Go helper currently covers only the Phase 1 catalog/descriptor/mapping-preview slice.
-- The Go helper currently covers the Phase 1 catalog/descriptor/governance/composition-compare/mapping-preview slice.
+- App-analysis inventory, catalog, descriptor, governance, composition-compare, and mapping-preview artifacts are Blob/Azurite-backed, but broader runtime artifacts are not yet.
+- The Go helper currently covers the Phase 1 inventory/catalog/descriptor/governance/composition-compare/mapping-preview slice.
 
 If the environment blocks build/test execution, validate the same commands again in CI or an unrestricted local shell before assuming the code is broken.

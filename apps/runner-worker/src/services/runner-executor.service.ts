@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   type CompositionCompareResult,
   type ArtifactRef,
+  type ContributionInventory,
   type ContribCatalog,
   type ContribDescriptor,
   type ContribDescriptorResponse,
@@ -57,6 +58,8 @@ function createCommand(spec: RunnerJobSpec): string[] {
       return ["echo", `logs:${spec.taskId}`];
     case "run_smoke":
       return ["echo", `smoke:${spec.appPath}`];
+    case "inventory_contribs":
+      return createHelperCommand("inventory", "contribs", "--app", spec.appPath);
     case "catalog_contribs":
       return createHelperCommand("catalog", "contribs", "--app", spec.appPath);
     case "inspect_descriptor":
@@ -112,6 +115,7 @@ function parseJsonResponse<T>(value: unknown): T {
 
 function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
   return (
+    stepType === "inventory_contribs" ||
     stepType === "catalog_contribs" ||
     stepType === "inspect_descriptor" ||
     stepType === "preview_mapping" ||
@@ -156,6 +160,16 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
 
 function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostics: Diagnostic[]): ArtifactRef[] {
   try {
+    if (spec.stepType === "inventory_contribs") {
+      const inventory = JSON.parse(stdout) as ContributionInventory;
+      return [
+        createAnalysisArtifact(spec, "contrib_inventory", "contrib-inventory", {
+          inventory,
+          diagnostics
+        })
+      ];
+    }
+
     if (spec.stepType === "catalog_contribs") {
       const catalog = JSON.parse(stdout) as ContribCatalog;
       return [

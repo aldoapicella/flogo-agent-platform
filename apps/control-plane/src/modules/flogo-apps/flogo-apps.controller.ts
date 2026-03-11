@@ -15,6 +15,15 @@ export class FlogoAppsController {
     return graph;
   }
 
+  @Get(":appId/inventory")
+  async getInventory(@Param("projectId") projectId: string, @Param("appId") appId: string) {
+    const inventory = await this.flogoAppsService.getInventory(projectId, appId);
+    if (!inventory) {
+      throw new NotFoundException(`Unknown app ${appId}`);
+    }
+    return inventory;
+  }
+
   @Get(":appId/catalog")
   async getCatalog(@Param("projectId") projectId: string, @Param("appId") appId: string) {
     const catalog = await this.flogoAppsService.getCatalog(projectId, appId);

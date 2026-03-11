@@ -18,6 +18,9 @@ const defaultWorkflowRunnerSteps: RunnerStepType[] = ["build", "run", "generate_
 
 export function resolveWorkflowRunnerSteps(start: OrchestratorStartRequest): RunnerStepType[] {
   const mode = start.request.inputs["mode"];
+  if (mode === "inventory") {
+    return ["inventory_contribs"];
+  }
   if (mode === "catalog") {
     return ["catalog_contribs"];
   }
@@ -59,7 +62,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
   const jobKind =
     stepType === "generate_smoke" || stepType === "run_smoke"
       ? "smoke_test"
-      : stepType === "catalog_contribs"
+      : stepType === "inventory_contribs"
+        ? "inventory"
+        : stepType === "catalog_contribs"
         ? "catalog"
         : stepType === "preview_mapping"
           ? "mapping_preview"
@@ -93,7 +98,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
   const targetNodeId = typeof start.request.inputs["nodeId"] === "string" ? (start.request.inputs["nodeId"] as string) : undefined;
   const targetRef = typeof start.request.inputs["ref"] === "string" ? (start.request.inputs["ref"] as string) : undefined;
   const analysisKind =
-    stepType === "catalog_contribs"
+    stepType === "inventory_contribs"
+      ? "inventory"
+      : stepType === "catalog_contribs"
       ? "catalog"
       : stepType === "inspect_descriptor"
         ? "descriptor"
