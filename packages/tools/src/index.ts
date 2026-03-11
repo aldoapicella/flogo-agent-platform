@@ -57,6 +57,10 @@ export class FlogoTools {
     return this.core.introspectDescriptor(raw, refOrAlias);
   }
 
+  inspectContribEvidence(raw: string | FlogoApp | unknown, refOrAlias: string): ToolResponse {
+    return this.core.inspectContribEvidence(raw, refOrAlias);
+  }
+
   validateGovernance(raw: string | FlogoApp | unknown): ToolResponse {
     return this.core.validateGovernance(raw);
   }

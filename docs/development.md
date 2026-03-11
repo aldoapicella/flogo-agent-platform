@@ -97,6 +97,7 @@ Copy `.env.example` to `.env`.
 - `RUNNER_EVAL_JOB_TEMPLATE_NAME`
 - `RUNNER_INVENTORY_JOB_TEMPLATE_NAME`
 - `RUNNER_CATALOG_JOB_TEMPLATE_NAME`
+- `RUNNER_CONTRIB_EVIDENCE_JOB_TEMPLATE_NAME`
 - `RUNNER_MAPPING_PREVIEW_JOB_TEMPLATE_NAME`
 - `RUNNER_GOVERNANCE_JOB_TEMPLATE_NAME`
 - `RUNNER_COMPOSITION_COMPARE_JOB_TEMPLATE_NAME`
@@ -132,6 +133,8 @@ Copy `.env.example` to `.env`.
 Use this when local descriptor metadata lives outside the app directory or repository root. Multiple paths can be provided using the platform path delimiter.
 
 The inventory/catalog path now also searches for nearest `go.mod` roots and vendored package trees so contribution refs can resolve to local package roots before falling back to registry or inferred metadata.
+
+The evidence path builds on the same inventory model and now exposes confidence plus `modulePath` and `goPackagePath` when a contribution can be tied back to local Go workspace/package structure.
 
 #### Model integration
 
@@ -259,6 +262,16 @@ Current contract:
 - logs/errors to stderr,
 - normalized exit code behavior for runner-worker consumption.
 
+Current Phase 1 helper commands:
+
+- `inventory contribs`
+- `catalog contribs`
+- `inspect descriptor`
+- `evidence inspect`
+- `governance validate`
+- `compose compare`
+- `preview mapping`
+
 Current helper commands:
 
 - `inventory contribs`
@@ -325,7 +338,7 @@ Current important test areas:
 - Shared packages are consumed from `dist`, so stale package builds can look like app-level type errors.
 - `next build` and Vitest can hit environment-specific `spawn EPERM` failures in restricted Windows shells even when the code is type-correct.
 - Some artifact URIs are still logical/local rather than Blob-backed.
-- App-analysis inventory, catalog, descriptor, governance, composition-compare, and mapping-preview artifacts are Blob/Azurite-backed, but broader runtime artifacts are not yet.
-- The Go helper currently covers the Phase 1 inventory/catalog/descriptor/governance/composition-compare/mapping-preview slice.
+- App-analysis inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, and mapping-preview artifacts are Blob/Azurite-backed, but broader runtime artifacts are not yet.
+- The Go helper currently covers the Phase 1 inventory/catalog/descriptor/contribution-evidence/governance/composition-compare/mapping-preview slice.
 
 If the environment blocks build/test execution, validate the same commands again in CI or an unrestricted local shell before assuming the code is broken.

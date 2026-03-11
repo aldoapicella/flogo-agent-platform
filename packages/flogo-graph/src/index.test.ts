@@ -10,6 +10,7 @@ import {
   buildContributionInventory,
   buildContribCatalog,
   compareJsonVsProgrammatic,
+  inspectContribEvidence,
   inspectContribDescriptor,
   previewMapping,
   suggestCoercions,
@@ -369,8 +370,51 @@ describe("flogo graph", () => {
 
     expect(customLog?.source).toBe("package_source");
     expect(customLog?.packageRoot).toContain(path.join("activity", "customlog"));
+    expect(customLog?.modulePath).toBe("github.com/project-flogo/contrib");
+    expect(customLog?.goPackagePath).toBe("github.com/project-flogo/contrib/activity/customlog");
+    expect(customLog?.confidence).toBe("high");
+    expect(customLog?.discoveryReason).toContain("Go package files");
     expect(customTimer?.source).toBe("package_descriptor");
     expect(customTimer?.descriptor?.version).toBe("0.1.0");
+    expect(customTimer?.modulePath).toBe("github.com/project-flogo/contrib");
+    expect(customTimer?.goPackagePath).toBe("github.com/project-flogo/contrib/trigger/customtimer");
+  });
+
+  it("inspects contribution evidence with confidence metadata", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "flogo-contrib-evidence-"));
+    tempPaths.push(tempDir);
+    const descriptorPath = path.join(
+      tempDir,
+      "github.com",
+      "project-flogo",
+      "contrib",
+      "activity",
+      "log",
+      "descriptor.json"
+    );
+    await fs.mkdir(path.dirname(descriptorPath), { recursive: true });
+    await fs.writeFile(
+      descriptorPath,
+      JSON.stringify(
+        {
+          name: "workspace-log",
+          type: "activity",
+          version: "2.1.0",
+          input: [{ name: "message", type: "string", required: true }]
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const evidence = inspectContribEvidence(validApp, "#log", { searchRoots: [tempDir] });
+
+    expect(evidence).toBeDefined();
+    expect(evidence?.source).toBe("workspace_descriptor");
+    expect(evidence?.confidence).toBe("high");
+    expect(evidence?.discoveryReason).toContain("workspace descriptor");
+    expect(evidence?.descriptor?.evidence?.confidence).toBe("high");
   });
 
   it("reports governance findings for duplicate aliases and missing refs", () => {
@@ -394,6 +438,7 @@ describe("flogo graph", () => {
     expect(governance.versionFindings.some((finding) => finding.alias === "rest" && finding.status === "missing")).toBe(true);
     expect(governance.inventorySummary?.entryCount).toBeGreaterThan(0);
     expect(governance.fallbackContribs).toContain("github.com/project-flogo/contrib/activity/log");
+    expect(governance.weakEvidenceContribs).toContain("github.com/project-flogo/contrib/activity/log");
   });
 
   it("compares canonical and programmatic composition for app and resource targets", () => {
@@ -415,6 +460,7 @@ describe("flogo graph", () => {
     expect(appComparison.ok).toBe(true);
     expect(appComparison.differences).toEqual([]);
     expect(appComparison.comparisonBasis).toBe("inventory_backed");
+    expect(appComparison.signatureEvidenceLevel).toBe("fallback_only");
     expect(appComparison.inventoryRefsUsed).toContain("github.com/project-flogo/contrib/trigger/rest");
     expect(resourceComparison.ok).toBe(true);
     expect(resourceComparison.differences).toEqual([]);

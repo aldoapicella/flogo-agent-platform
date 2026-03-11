@@ -115,6 +115,24 @@ export class RunnerTools {
     });
   }
 
+  async inspectContribEvidence(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "inspect_contrib_evidence",
+      jobKind: "contrib_evidence",
+      analysisKind: "contrib_evidence"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued contribution evidence inspection job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
   async validateGovernance(spec: unknown): Promise<ToolResponse> {
     const parsed = RunnerJobSpecSchema.parse(spec);
     const result = await this.dispatcher.dispatch({

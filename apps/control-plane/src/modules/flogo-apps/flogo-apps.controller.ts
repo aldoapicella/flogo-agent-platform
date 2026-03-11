@@ -55,6 +55,19 @@ export class FlogoAppsController {
     return descriptor;
   }
 
+  @Get(":appId/contribs/evidence")
+  async getContribEvidence(
+    @Param("projectId") projectId: string,
+    @Param("appId") appId: string,
+    @Query("ref") ref: string
+  ) {
+    const evidence = await this.flogoAppsService.getContribEvidence(projectId, appId, ref);
+    if (!evidence) {
+      throw new NotFoundException(`Unknown contribution evidence target ${ref} for app ${appId}`);
+    }
+    return evidence;
+  }
+
   @Get(":appId/governance")
   async getGovernance(@Param("projectId") projectId: string, @Param("appId") appId: string) {
     const governance = await this.flogoAppsService.getGovernance(projectId, appId);

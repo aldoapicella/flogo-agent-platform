@@ -7,6 +7,7 @@ import {
   ArtifactRefSchema,
   CompositionCompareRequestSchema,
   CompositionCompareResponseSchema,
+  ContribEvidenceResponseSchema,
   ContribDescriptorResponseSchema,
   ContribCatalogResponseSchema,
   ContributionInventoryResponseSchema,
@@ -20,6 +21,7 @@ import {
   buildContributionInventory,
   buildContribCatalog,
   compareJsonVsProgrammatic,
+  inspectContribEvidence,
   inspectContribDescriptor,
   parseFlogoAppDocument,
   previewMapping,
@@ -187,6 +189,39 @@ export class FlogoAppsService {
 
     return ContribDescriptorResponseSchema.parse({
       ...descriptorResponse,
+      artifact
+    });
+  }
+
+  async getContribEvidence(projectId: string, appId: string, refOrAlias: string) {
+    const resolved = await this.resolveApp(projectId, appId);
+    if (!resolved) {
+      return undefined;
+    }
+
+    const evidence = inspectContribEvidence(resolved.content, refOrAlias, { appPath: resolved.appPath });
+    if (!evidence) {
+      return undefined;
+    }
+
+    const artifact = await this.persistArtifact(
+      resolved,
+      "contrib_evidence",
+      `${appId}-${this.sanitizeArtifactName(refOrAlias)}-contrib-evidence.json`,
+      {
+        analysisType: "contrib_evidence",
+        appId,
+        refOrAlias,
+        sourceType: resolved.sourceType,
+        evidenceLevel: evidence.confidence
+      },
+      {
+        evidence
+      }
+    );
+
+    return ContribEvidenceResponseSchema.parse({
+      evidence,
       artifact
     });
   }
@@ -400,7 +435,14 @@ export class FlogoAppsService {
 
   private async persistArtifact(
     resolved: ResolvedApp,
-    type: "contrib_inventory" | "contrib_catalog" | "mapping_preview" | "descriptor" | "governance_report" | "composition_compare",
+    type:
+      | "contrib_inventory"
+      | "contrib_catalog"
+      | "contrib_evidence"
+      | "mapping_preview"
+      | "descriptor"
+      | "governance_report"
+      | "composition_compare",
     name: string,
     metadata: Record<string, unknown>,
     payload: Record<string, unknown>

@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   type CompositionCompareResult,
   type ArtifactRef,
+  type ContribEvidenceResponse,
   type ContributionInventory,
   type ContribCatalog,
   type ContribDescriptor,
@@ -64,6 +65,8 @@ function createCommand(spec: RunnerJobSpec): string[] {
       return createHelperCommand("catalog", "contribs", "--app", spec.appPath);
     case "inspect_descriptor":
       return createHelperCommand("inspect", "descriptor", "--app", spec.appPath, "--ref", spec.targetRef ?? "");
+    case "inspect_contrib_evidence":
+      return createHelperCommand("evidence", "inspect", "--app", spec.appPath, "--ref", spec.targetRef ?? "");
     case "preview_mapping":
       return ["echo", `mapping-preview:${spec.appPath}`];
     case "validate_governance":
@@ -118,6 +121,7 @@ function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
     stepType === "inventory_contribs" ||
     stepType === "catalog_contribs" ||
     stepType === "inspect_descriptor" ||
+    stepType === "inspect_contrib_evidence" ||
     stepType === "preview_mapping" ||
     stepType === "validate_governance" ||
     stepType === "compare_composition"
@@ -197,6 +201,16 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
         createAnalysisArtifact(spec, "contrib_catalog", `descriptor-${spec.targetRef ?? "target"}`, {
           descriptor,
           diagnostics: [...(response.diagnostics ?? []), ...diagnostics]
+        })
+      ];
+    }
+
+    if (spec.stepType === "inspect_contrib_evidence") {
+      const response = JSON.parse(stdout) as ContribEvidenceResponse;
+      return [
+        createAnalysisArtifact(spec, "contrib_evidence", `contrib-evidence-${spec.targetRef ?? "target"}`, {
+          evidence: response.evidence,
+          diagnostics
         })
       ];
     }

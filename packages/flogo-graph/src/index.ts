@@ -7,6 +7,8 @@ import {
   type CompositionCompareRequest,
   CompositionCompareResultSchema,
   type CompositionCompareResult,
+  ContribEvidenceDetailSchema,
+  type ContribEvidenceDetail,
   ContributionInventoryEntrySchema,
   type ContributionInventoryEntry,
   ContributionInventorySchema,
@@ -81,11 +83,15 @@ type ResolvedInventoryEntry = {
 type DescriptorCandidate = {
   descriptorPath: string;
   packageRoot?: string;
+  modulePath?: string;
+  goPackagePath?: string;
   source: "app_descriptor" | "workspace_descriptor" | "package_descriptor";
 };
 
 type PackageCandidate = {
   packageRoot: string;
+  modulePath?: string;
+  goPackagePath?: string;
   source: "package_source";
 };
 
@@ -529,6 +535,21 @@ export function inspectContribDescriptor(
   });
 }
 
+export function inspectContribEvidence(
+  document: string | FlogoApp | unknown,
+  refOrAlias: string,
+  options?: ContribLookupOptions
+): ContribEvidenceDetail | undefined {
+  const app = parseFlogoAppDocument(document);
+  const inventory = buildContributionInventory(app, options);
+  const entry = findInventoryEntry(app, inventory, refOrAlias);
+  if (!entry) {
+    return undefined;
+  }
+
+  return ContribEvidenceDetailSchema.parse(entry);
+}
+
 export function introspectContrib(
   document: string | FlogoApp | unknown,
   refOrAlias: string,
@@ -767,6 +788,18 @@ export function validateGovernance(document: string | FlogoApp | unknown, option
     .sort();
   const fallbackContribs = inventory.entries
     .filter((entry) => entry.source === "registry" || entry.source === "inferred")
+    .map((entry) => entry.ref)
+    .sort();
+  const weakEvidenceContribs = inventory.entries
+    .filter((entry) => entry.confidence === "low" || entry.source === "registry")
+    .map((entry) => entry.ref)
+    .sort();
+  const packageBackedContribs = inventory.entries
+    .filter((entry) => entry.source === "package_descriptor" || entry.source === "package_source")
+    .map((entry) => entry.ref)
+    .sort();
+  const descriptorOnlyContribs = inventory.entries
+    .filter((entry) => entry.source === "app_descriptor" || entry.source === "workspace_descriptor")
     .map((entry) => entry.ref)
     .sort();
 
@@ -1016,6 +1049,9 @@ export function validateGovernance(document: string | FlogoApp | unknown, option
     },
     unresolvedPackages,
     fallbackContribs,
+    weakEvidenceContribs,
+    packageBackedContribs,
+    descriptorOnlyContribs,
     diagnostics
   });
 }
@@ -1051,6 +1087,7 @@ export function compareJsonVsProgrammatic(
     canonicalHash,
     programmaticHash,
     comparisonBasis,
+    signatureEvidenceLevel: summarizeSignatureEvidenceLevel(inventory.entries),
     inventoryRefsUsed,
     differences,
     diagnostics
@@ -1113,6 +1150,8 @@ function buildFlowInventoryEntry(resource: FlogoFlow): ContributionInventoryEntr
     version: descriptor.version,
     title: descriptor.title,
     source: "flow_resource",
+    confidence: "high",
+    discoveryReason: describeDiscoveryReason("flow_resource", descriptor.ref),
     settings: descriptor.settings,
     inputs: descriptor.inputs,
     outputs: descriptor.outputs,
@@ -1137,7 +1176,18 @@ function inventoryEntryToDescriptor(entry: ContributionInventoryEntry): ContribD
     inputs: entry.inputs,
     outputs: entry.outputs,
     source: entry.source,
-    evidence: createDescriptorEvidence(entry.source, entry.ref, entry.alias, entry.version, entry.descriptorPath, entry.diagnostics, entry.packageRoot)
+    evidence: createDescriptorEvidence(
+      entry.source,
+      entry.ref,
+      entry.alias,
+      entry.version,
+      entry.descriptorPath,
+      entry.diagnostics,
+      entry.packageRoot,
+      entry.modulePath,
+      entry.goPackagePath,
+      entry.confidence
+    )
   });
 }
 
@@ -1162,6 +1212,62 @@ function isPackageBackedSource(source: ContributionInventoryEntry["source"] | Co
   return source === "app_descriptor" || source === "workspace_descriptor" || source === "package_descriptor" || source === "package_source" || source === "descriptor";
 }
 
+function deriveEvidenceConfidence(
+  source: ContributionInventoryEntry["source"] | ContribResolutionEvidence["source"]
+): ContribResolutionEvidence["confidence"] {
+  if (source === "registry") {
+    return "medium";
+  }
+
+  if (source === "inferred") {
+    return "low";
+  }
+
+  return "high";
+}
+
+function describeDiscoveryReason(
+  source: ContributionInventoryEntry["source"] | ContribResolutionEvidence["source"],
+  resolvedRef: string,
+  descriptorPath?: string,
+  packageRoot?: string
+) {
+  switch (source) {
+    case "app_descriptor":
+      return `Resolved ${resolvedRef} from an app-local descriptor${descriptorPath ? ` at ${descriptorPath}` : ""}.`;
+    case "workspace_descriptor":
+      return `Resolved ${resolvedRef} from a workspace descriptor${descriptorPath ? ` at ${descriptorPath}` : ""}.`;
+    case "package_descriptor":
+      return `Resolved ${resolvedRef} from a package descriptor${descriptorPath ? ` at ${descriptorPath}` : ""}.`;
+    case "package_source":
+      return `Resolved ${resolvedRef} from discovered Go package files${packageRoot ? ` under ${packageRoot}` : ""}.`;
+    case "registry":
+      return `Resolved ${resolvedRef} from built-in registry metadata because stronger package evidence was not found.`;
+    case "inferred":
+      return `Resolved ${resolvedRef} from inferred metadata because no descriptor or package evidence was found.`;
+    case "flow_resource":
+      return `Resolved ${resolvedRef} from a local flow resource definition.`;
+    case "descriptor":
+      return `Resolved ${resolvedRef} from descriptor metadata.`;
+    default:
+      return `Resolved ${resolvedRef} using ${source} evidence.`;
+  }
+}
+
+function summarizeSignatureEvidenceLevel(
+  entries: ContributionInventory["entries"]
+): CompositionCompareResult["signatureEvidenceLevel"] {
+  if (entries.some((entry) => entry.source === "package_descriptor" || entry.source === "package_source")) {
+    return "package_backed";
+  }
+
+  if (entries.some((entry) => entry.source === "app_descriptor" || entry.source === "workspace_descriptor")) {
+    return "descriptor_backed";
+  }
+
+  return "fallback_only";
+}
+
 function resolveInventoryEntry(
   app: FlogoApp,
   ref: string,
@@ -1183,6 +1289,15 @@ function resolveInventoryEntry(
       source: descriptor.evidence?.source ?? (descriptor.source as ContributionInventoryEntry["source"] | undefined) ?? "inferred",
       descriptorPath: descriptor.evidence?.descriptorPath,
       packageRoot: descriptor.evidence?.packageRoot,
+      modulePath: descriptor.evidence?.modulePath,
+      goPackagePath: descriptor.evidence?.goPackagePath,
+      confidence: descriptor.evidence?.confidence ?? deriveEvidenceConfidence(descriptor.evidence?.source ?? "inferred"),
+      discoveryReason: describeDiscoveryReason(
+        descriptor.evidence?.source ?? "inferred",
+        descriptor.evidence?.resolvedRef ?? descriptor.ref,
+        descriptor.evidence?.descriptorPath,
+        descriptor.evidence?.packageRoot
+      ),
       settings: descriptor.settings,
       inputs: descriptor.inputs,
       outputs: descriptor.outputs,
@@ -1206,6 +1321,10 @@ function resolveDescriptor(
   const descriptorLocation = findDescriptorLocation(resolvedRef, options);
 
   if (descriptorLocation && "descriptorPath" in descriptorLocation) {
+    const descriptorModuleInfo =
+      descriptorLocation.packageRoot && !descriptorLocation.modulePath
+        ? findNearestGoModule(descriptorLocation.packageRoot)
+        : undefined;
     return {
       descriptor: parseDescriptorFile(
         descriptorLocation.descriptorPath,
@@ -1214,7 +1333,9 @@ function resolveDescriptor(
         version,
         forcedType,
         descriptorLocation.source,
-        descriptorLocation.packageRoot
+        descriptorLocation.packageRoot,
+        descriptorLocation.modulePath ?? descriptorModuleInfo?.modulePath,
+        descriptorLocation.goPackagePath ?? deriveGoPackagePath(descriptorLocation.packageRoot ?? "", descriptorModuleInfo)
       ),
       diagnostics: []
     };
@@ -1227,7 +1348,17 @@ function resolveDescriptor(
       descriptor: ContribDescriptorSchema.parse({
         ...descriptor,
         source,
-        evidence: createDescriptorEvidence(source, resolvedRef, normalizedAlias, version, undefined, [], descriptorLocation.packageRoot)
+        evidence: createDescriptorEvidence(
+          source,
+          resolvedRef,
+          normalizedAlias,
+          version,
+          undefined,
+          [],
+          descriptorLocation.packageRoot,
+          descriptorLocation.modulePath,
+          descriptorLocation.goPackagePath
+        )
       }),
       diagnostics: [
         createDiagnostic(
@@ -1242,7 +1373,9 @@ function resolveDescriptor(
           "info",
           normalizedAlias ? `imports.${normalizedAlias}` : resolvedRef,
           {
-            packageRoot: descriptorLocation.packageRoot
+            packageRoot: descriptorLocation.packageRoot,
+            modulePath: descriptorLocation.modulePath,
+            goPackagePath: descriptorLocation.goPackagePath
           }
         )
       ]
@@ -1444,32 +1577,50 @@ function findPackageRoot(ref: string, options?: ContribLookupOptions) {
   const normalizedRef = ref.replace(/^#/, "").replace(/\\/g, "/");
   const refBasename = normalizedRef.split("/").filter(Boolean).at(-1);
   const seen = new Set<string>();
-  const candidates: string[] = [];
+  const candidates: Array<PackageCandidate> = [];
 
   for (const moduleInfo of collectGoModules(options)) {
     const relativePath = resolveModuleRelativePath(moduleInfo, normalizedRef);
     if (relativePath) {
-      candidates.push(path.join(moduleInfo.root, relativePath));
+      candidates.push({
+        packageRoot: path.join(moduleInfo.root, relativePath),
+        modulePath: moduleInfo.modulePath,
+        goPackagePath: normalizedRef,
+        source: "package_source"
+      });
     }
   }
 
   for (const root of buildSearchRoots(options)) {
-    candidates.push(path.join(root, "vendor", normalizedRef));
-    candidates.push(path.join(root, normalizedRef));
+    candidates.push({
+      packageRoot: path.join(root, "vendor", normalizedRef),
+      goPackagePath: normalizedRef,
+      source: "package_source"
+    });
+    candidates.push({
+      packageRoot: path.join(root, normalizedRef),
+      goPackagePath: normalizedRef,
+      source: "package_source"
+    });
     if (refBasename) {
-      candidates.push(path.join(root, refBasename));
+      candidates.push({
+        packageRoot: path.join(root, refBasename),
+        source: "package_source"
+      });
     }
   }
 
   for (const candidate of candidates) {
-    if (seen.has(candidate)) {
+    if (seen.has(candidate.packageRoot)) {
       continue;
     }
-    seen.add(candidate);
-    if (directoryLooksLikePackageRoot(candidate)) {
+    seen.add(candidate.packageRoot);
+    if (directoryLooksLikePackageRoot(candidate.packageRoot)) {
+      const moduleInfo = candidate.modulePath ? undefined : findNearestGoModule(candidate.packageRoot);
       return {
-        packageRoot: candidate,
-        source: "package_source" as const
+        ...candidate,
+        modulePath: candidate.modulePath ?? moduleInfo?.modulePath,
+        goPackagePath: candidate.goPackagePath ?? deriveGoPackagePath(candidate.packageRoot, moduleInfo)
       };
     }
   }
@@ -1484,7 +1635,9 @@ function parseDescriptorFile(
   version?: string,
   forcedType?: ContribDescriptor["type"],
   source: ContribResolutionEvidence["source"] = "descriptor",
-  packageRoot?: string
+  packageRoot?: string,
+  modulePath?: string,
+  goPackagePath?: string
 ): ContribDescriptor {
   const raw = JSON.parse(readFileSync(descriptorPath, "utf8")) as Record<string, unknown>;
   const fieldSet = (value: unknown) => normalizeDescriptorFields(value);
@@ -1503,7 +1656,7 @@ function parseDescriptorFile(
     examples: normalizeStringArray(raw.examples),
     compatibilityNotes: normalizeStringArray(raw.compatibilityNotes),
     source,
-    evidence: createDescriptorEvidence(source, ref, alias, version, descriptorPath, [], packageRoot)
+    evidence: createDescriptorEvidence(source, ref, alias, version, descriptorPath, [], packageRoot, modulePath, goPackagePath)
   });
 }
 
@@ -1545,15 +1698,21 @@ function createDescriptorEvidence(
   version?: string,
   descriptorPath?: string,
   diagnostics: Diagnostic[] = [],
-  packageRoot?: string
+  packageRoot?: string,
+  modulePath?: string,
+  goPackagePath?: string,
+  confidence?: ContribResolutionEvidence["confidence"]
 ): ContribResolutionEvidence {
   return ContribResolutionEvidenceSchema.parse({
     source,
     resolvedRef,
     descriptorPath,
     packageRoot,
+    modulePath,
+    goPackagePath,
     importAlias,
     version,
+    confidence: confidence ?? deriveEvidenceConfidence(source),
     diagnostics
   });
 }
@@ -1606,6 +1765,8 @@ function buildDescriptorCandidates(ref: string, options?: ContribLookupOptions):
     pushCandidate({
       descriptorPath: path.join(moduleInfo.root, relativePath, "descriptor.json"),
       packageRoot: path.join(moduleInfo.root, relativePath),
+      modulePath: moduleInfo.modulePath,
+      goPackagePath: normalizedRef,
       source: "package_descriptor"
     });
   }
@@ -1614,6 +1775,7 @@ function buildDescriptorCandidates(ref: string, options?: ContribLookupOptions):
     pushCandidate({
       descriptorPath: path.join(root, "vendor", normalizedRef, "descriptor.json"),
       packageRoot: path.join(root, "vendor", normalizedRef),
+      goPackagePath: normalizedRef,
       source: "package_descriptor"
     });
     pushCandidate({
@@ -1694,6 +1856,17 @@ function resolveModuleRelativePath(moduleInfo: GoModuleInfo, normalizedRef: stri
   }
   const relativePath = normalizedRef.slice(moduleInfo.modulePath.length).replace(/^\/+/, "");
   return relativePath.length > 0 ? relativePath : undefined;
+}
+
+function deriveGoPackagePath(packageRoot: string, moduleInfo?: GoModuleInfo) {
+  if (!moduleInfo) {
+    return undefined;
+  }
+
+  const relativePath = path.relative(moduleInfo.root, packageRoot).replace(/\\/g, "/");
+  return relativePath.length > 0 && relativePath !== "."
+    ? `${moduleInfo.modulePath}/${relativePath}`
+    : moduleInfo.modulePath;
 }
 
 function directoryLooksLikePackageRoot(candidate: string) {

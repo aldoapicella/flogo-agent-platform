@@ -24,6 +24,9 @@ export function resolveWorkflowRunnerSteps(start: OrchestratorStartRequest): Run
   if (mode === "catalog") {
     return ["catalog_contribs"];
   }
+  if (mode === "contrib_evidence") {
+    return ["inspect_contrib_evidence"];
+  }
   if (mode === "mapping_preview") {
     return ["preview_mapping"];
   }
@@ -66,6 +69,8 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
         ? "inventory"
         : stepType === "catalog_contribs"
         ? "catalog"
+        : stepType === "inspect_contrib_evidence"
+          ? "contrib_evidence"
         : stepType === "preview_mapping"
           ? "mapping_preview"
           : stepType === "validate_governance"
@@ -94,6 +99,8 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
           } satisfies Record<string, unknown>)
         : stepType === "validate_governance"
           ? ({ mode: "governance" } satisfies Record<string, unknown>)
+          : stepType === "inspect_contrib_evidence"
+            ? ({ mode: "contrib_evidence" } satisfies Record<string, unknown>)
           : undefined;
   const targetNodeId = typeof start.request.inputs["nodeId"] === "string" ? (start.request.inputs["nodeId"] as string) : undefined;
   const targetRef = typeof start.request.inputs["ref"] === "string" ? (start.request.inputs["ref"] as string) : undefined;
@@ -104,6 +111,8 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
       ? "catalog"
       : stepType === "inspect_descriptor"
         ? "descriptor"
+        : stepType === "inspect_contrib_evidence"
+          ? "contrib_evidence"
         : stepType === "preview_mapping"
           ? "mapping_preview"
           : stepType === "validate_governance"

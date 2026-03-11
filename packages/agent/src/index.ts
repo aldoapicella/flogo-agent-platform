@@ -45,10 +45,11 @@ const approvalMap: Record<TaskRequest["type"], ApprovalType[]> = {
 
 function getAnalysisMode(
   task: TaskRequest
-): "inventory" | "catalog" | "mapping_preview" | "governance" | "composition_compare" | undefined {
+): "inventory" | "catalog" | "contrib_evidence" | "mapping_preview" | "governance" | "composition_compare" | undefined {
   const mode = task.inputs["mode"];
   return mode === "inventory" ||
     mode === "catalog" ||
+    mode === "contrib_evidence" ||
     mode === "mapping_preview" ||
     mode === "governance" ||
     mode === "composition_compare"
@@ -101,6 +102,8 @@ export class TaskPlanner {
       steps.push({ id: "inventory", label: "Inventory Flogo contributions and package evidence", tool: "runner.inventoryContribs" });
     } else if (analysisMode === "catalog") {
       steps.push({ id: "catalog", label: "Catalog Flogo contributions and descriptors", tool: "runner.catalogContribs" });
+    } else if (analysisMode === "contrib_evidence") {
+      steps.push({ id: "evidence", label: "Inspect contribution evidence quality", tool: "runner.inspectContribEvidence" });
     } else if (analysisMode === "mapping_preview") {
       steps.push({ id: "mapping", label: "Preview mappings and suggest coercions", tool: "runner.previewMapping" });
       steps.push({ id: "properties", label: "Plan app properties and environment usage", tool: "flogo.planProperties" });
@@ -115,6 +118,10 @@ export class TaskPlanner {
 
       if (/(trigger|activity|action|contrib|descriptor|catalog)/i.test(summary)) {
         steps.push({ id: "catalog", label: "Catalog Flogo contributions and descriptors", tool: "runner.catalogContribs" });
+      }
+
+      if (/(evidence|confidence|package metadata proof|contrib proof)/i.test(summary)) {
+        steps.push({ id: "evidence", label: "Inspect contribution evidence quality", tool: "runner.inspectContribEvidence" });
       }
 
       if (/(mapping|coercion|resolver|property|env)/i.test(summary)) {

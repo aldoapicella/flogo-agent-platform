@@ -39,6 +39,7 @@ export const ArtifactTypeSchema = z.enum([
   "workspace_snapshot",
   "contrib_inventory",
   "contrib_catalog",
+  "contrib_evidence",
   "mapping_preview",
   "governance_report",
   "composition_compare",
@@ -313,6 +314,9 @@ export const ContribEvidenceSourceSchema = z.enum([
 ]);
 export type ContribEvidenceSource = z.infer<typeof ContribEvidenceSourceSchema>;
 
+export const EvidenceConfidenceSchema = z.enum(["high", "medium", "low"]);
+export type EvidenceConfidence = z.infer<typeof EvidenceConfidenceSchema>;
+
 export const ContribFieldSchema = z.object({
   name: z.string(),
   type: z.string().optional(),
@@ -326,8 +330,11 @@ export const ContribResolutionEvidenceSchema = z.object({
   resolvedRef: z.string(),
   descriptorPath: z.string().optional(),
   packageRoot: z.string().optional(),
+  modulePath: z.string().optional(),
+  goPackagePath: z.string().optional(),
   importAlias: z.string().optional(),
   version: z.string().optional(),
+  confidence: EvidenceConfidenceSchema.default("low"),
   diagnostics: z.array(DiagnosticSchema).default([])
 });
 export type ContribResolutionEvidence = z.infer<typeof ContribResolutionEvidenceSchema>;
@@ -372,6 +379,10 @@ export const ContributionInventoryEntrySchema = z.object({
   source: ContribEvidenceSourceSchema,
   descriptorPath: z.string().optional(),
   packageRoot: z.string().optional(),
+  modulePath: z.string().optional(),
+  goPackagePath: z.string().optional(),
+  confidence: EvidenceConfidenceSchema.default("low"),
+  discoveryReason: z.string().optional(),
   settings: z.array(ContribFieldSchema).default([]),
   inputs: z.array(ContribFieldSchema).default([]),
   outputs: z.array(ContribFieldSchema).default([]),
@@ -392,6 +403,17 @@ export const ContributionInventoryResponseSchema = z.object({
   artifact: ArtifactRefSchema.optional()
 });
 export type ContributionInventoryResponse = z.infer<typeof ContributionInventoryResponseSchema>;
+
+export const ContribEvidenceDetailSchema = ContributionInventoryEntrySchema.extend({
+  descriptor: ContribDescriptorSchema.optional()
+});
+export type ContribEvidenceDetail = z.infer<typeof ContribEvidenceDetailSchema>;
+
+export const ContribEvidenceResponseSchema = z.object({
+  evidence: ContribEvidenceDetailSchema,
+  artifact: ArtifactRefSchema.optional()
+});
+export type ContribEvidenceResponse = z.infer<typeof ContribEvidenceResponseSchema>;
 
 export const ContribDescriptorResponseSchema = z.object({
   descriptor: ContribDescriptorSchema,
@@ -536,6 +558,9 @@ export const GovernanceReportSchema = z.object({
     .optional(),
   unresolvedPackages: z.array(z.string()).default([]),
   fallbackContribs: z.array(z.string()).default([]),
+  weakEvidenceContribs: z.array(z.string()).default([]),
+  packageBackedContribs: z.array(z.string()).default([]),
+  descriptorOnlyContribs: z.array(z.string()).default([]),
   diagnostics: z.array(DiagnosticSchema).default([])
 });
 export type GovernanceReport = z.infer<typeof GovernanceReportSchema>;
@@ -568,6 +593,7 @@ export const CompositionCompareResultSchema = z.object({
   canonicalHash: z.string(),
   programmaticHash: z.string(),
   comparisonBasis: z.enum(["normalized_only", "inventory_backed"]).default("normalized_only"),
+  signatureEvidenceLevel: z.enum(["fallback_only", "descriptor_backed", "package_backed"]).default("fallback_only"),
   inventoryRefsUsed: z.array(z.string()).default([]),
   differences: z.array(CompositionDifferenceSchema).default([]),
   diagnostics: z.array(DiagnosticSchema).default([]),
@@ -589,6 +615,7 @@ export const RunnerStepTypeSchema = z.enum([
   "inventory_contribs",
   "catalog_contribs",
   "inspect_descriptor",
+  "inspect_contrib_evidence",
   "preview_mapping",
   "validate_governance",
   "compare_composition"
@@ -602,6 +629,7 @@ export const RunnerJobKindSchema = z.enum([
   "eval",
   "inventory",
   "catalog",
+  "contrib_evidence",
   "mapping_preview",
   "governance",
   "composition_compare"
@@ -612,6 +640,7 @@ export const AnalysisKindSchema = z.enum([
   "inventory",
   "catalog",
   "descriptor",
+  "contrib_evidence",
   "mapping_preview",
   "governance",
   "composition_compare"

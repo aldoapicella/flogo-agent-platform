@@ -174,6 +174,45 @@ describe("RunnerExecutorService", () => {
     expect(result.artifacts.some((artifact) => artifact.name.includes("descriptor"))).toBe(true);
   });
 
+  it("executes helper-backed contribution evidence inspection and publishes an evidence artifact", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        evidence: {
+          ref: "github.com/project-flogo/contrib/activity/log",
+          alias: "log",
+          type: "activity",
+          name: "log",
+          source: "registry",
+          confidence: "medium",
+          settings: [],
+          inputs: [],
+          outputs: [],
+          diagnostics: []
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-evidence",
+      jobKind: "contrib_evidence",
+      stepType: "inspect_contrib_evidence",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://evidence",
+      jobTemplateName: "flogo-runner",
+      targetRef: "#log",
+      command: [],
+      containerArgs: []
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.artifacts.some((artifact) => artifact.type === "contrib_evidence")).toBe(true);
+  });
+
   it("executes helper-backed governance validation and publishes a governance artifact", async () => {
     process.env.FLOGO_HELPER_BIN = await createHelperScript(
       JSON.stringify({
@@ -213,6 +252,7 @@ describe("RunnerExecutorService", () => {
         ok: true,
         canonicalHash: "abc",
         programmaticHash: "abc",
+        signatureEvidenceLevel: "fallback_only",
         differences: [],
         diagnostics: []
       })

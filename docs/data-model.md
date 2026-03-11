@@ -51,6 +51,7 @@ Important current `inputs` conventions:
 
 - `mode = "inventory"` for analysis-only contribution inventory work
 - `mode = "catalog"` for analysis-only contribution catalog work
+- `mode = "contrib_evidence"` for analysis-only contribution evidence inspection
 - `mode = "mapping_preview"` for analysis-only mapping preview work
 - `mode = "governance"` for analysis-only alias/orphan/version validation
 - `mode = "composition_compare"` for analysis-only JSON vs programmatic comparison
@@ -140,6 +141,7 @@ Current artifact kinds:
 - `workspace_snapshot`
 - `contrib_inventory`
 - `contrib_catalog`
+- `contrib_evidence`
 - `governance_report`
 - `composition_compare`
 - `mapping_preview`
@@ -158,6 +160,8 @@ Important schemas:
 - `ContributionInventoryResponse`
 - `ContribDescriptor`
 - `ContribDescriptorResponse`
+- `ContribEvidenceDetail`
+- `ContribEvidenceResponse`
 - `ContribCatalog`
 - `ContribCatalogResponse`
 
@@ -166,6 +170,7 @@ These describe:
 - inventory-backed contribution evidence,
 - ref and alias,
 - evidence source and resolved-ref metadata,
+- evidence confidence, module path, Go package path, and discovery reason,
 - contrib type,
 - descriptor source and diagnostics,
 - settings,
@@ -210,6 +215,7 @@ These describe:
 - orphaned trigger/activity/action/flow refs,
 - version findings,
 - inventory summary, unresolved packages, and fallback contribs,
+- weak-evidence, package-backed, and descriptor-only contrib summaries,
 - normalized diagnostics,
 - response artifact references.
 
@@ -226,6 +232,7 @@ These describe:
 
 - comparison target and mode,
 - canonical and programmatic hashes,
+- comparison basis and signature evidence level,
 - machine-readable differences,
 - diagnostics,
 - response artifact references.

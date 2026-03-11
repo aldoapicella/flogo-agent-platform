@@ -50,20 +50,24 @@ type contribCatalog struct {
 }
 
 type contributionInventoryEntry struct {
-	Ref            string             `json:"ref"`
-	Alias          string             `json:"alias,omitempty"`
-	Type           string             `json:"type"`
-	Name           string             `json:"name"`
-	Version        string             `json:"version,omitempty"`
-	Title          string             `json:"title,omitempty"`
-	Source         string             `json:"source"`
-	DescriptorPath string             `json:"descriptorPath,omitempty"`
-	PackageRoot    string             `json:"packageRoot,omitempty"`
-	Settings       []contribField     `json:"settings"`
-	Inputs         []contribField     `json:"inputs"`
-	Outputs        []contribField     `json:"outputs"`
-	Diagnostics    []diagnostic       `json:"diagnostics"`
-	Descriptor     *contribDescriptor `json:"descriptor,omitempty"`
+	Ref             string             `json:"ref"`
+	Alias           string             `json:"alias,omitempty"`
+	Type            string             `json:"type"`
+	Name            string             `json:"name"`
+	Version         string             `json:"version,omitempty"`
+	Title           string             `json:"title,omitempty"`
+	Source          string             `json:"source"`
+	DescriptorPath  string             `json:"descriptorPath,omitempty"`
+	PackageRoot     string             `json:"packageRoot,omitempty"`
+	ModulePath      string             `json:"modulePath,omitempty"`
+	GoPackagePath   string             `json:"goPackagePath,omitempty"`
+	Confidence      string             `json:"confidence"`
+	DiscoveryReason string             `json:"discoveryReason,omitempty"`
+	Settings        []contribField     `json:"settings"`
+	Inputs          []contribField     `json:"inputs"`
+	Outputs         []contribField     `json:"outputs"`
+	Diagnostics     []diagnostic       `json:"diagnostics"`
+	Descriptor      *contribDescriptor `json:"descriptor,omitempty"`
 }
 
 type contributionInventory struct {
@@ -77,14 +81,21 @@ type contribEvidence struct {
 	ResolvedRef    string       `json:"resolvedRef"`
 	DescriptorPath string       `json:"descriptorPath,omitempty"`
 	PackageRoot    string       `json:"packageRoot,omitempty"`
+	ModulePath     string       `json:"modulePath,omitempty"`
+	GoPackagePath  string       `json:"goPackagePath,omitempty"`
 	ImportAlias    string       `json:"importAlias,omitempty"`
 	Version        string       `json:"version,omitempty"`
+	Confidence     string       `json:"confidence"`
 	Diagnostics    []diagnostic `json:"diagnostics"`
 }
 
 type contribDescriptorResponse struct {
 	Descriptor  contribDescriptor `json:"descriptor"`
 	Diagnostics []diagnostic      `json:"diagnostics"`
+}
+
+type contribEvidenceResponse struct {
+	Evidence contributionInventoryEntry `json:"evidence"`
 }
 
 type aliasIssue struct {
@@ -124,9 +135,12 @@ type governanceReport struct {
 		PackageBackedCount int `json:"packageBackedCount"`
 		FallbackCount      int `json:"fallbackCount"`
 	} `json:"inventorySummary,omitempty"`
-	UnresolvedPackages []string     `json:"unresolvedPackages"`
-	FallbackContribs   []string     `json:"fallbackContribs"`
-	Diagnostics        []diagnostic `json:"diagnostics"`
+	UnresolvedPackages     []string     `json:"unresolvedPackages"`
+	FallbackContribs       []string     `json:"fallbackContribs"`
+	WeakEvidenceContribs   []string     `json:"weakEvidenceContribs"`
+	PackageBackedContribs  []string     `json:"packageBackedContribs"`
+	DescriptorOnlyContribs []string     `json:"descriptorOnlyContribs"`
+	Diagnostics            []diagnostic `json:"diagnostics"`
 }
 
 type compositionDifference struct {
@@ -138,14 +152,15 @@ type compositionDifference struct {
 }
 
 type compositionCompareResult struct {
-	AppName           string                  `json:"appName"`
-	Ok                bool                    `json:"ok"`
-	CanonicalHash     string                  `json:"canonicalHash"`
-	ProgrammaticHash  string                  `json:"programmaticHash"`
-	ComparisonBasis   string                  `json:"comparisonBasis"`
-	InventoryRefsUsed []string                `json:"inventoryRefsUsed"`
-	Differences       []compositionDifference `json:"differences"`
-	Diagnostics       []diagnostic            `json:"diagnostics"`
+	AppName                string                  `json:"appName"`
+	Ok                     bool                    `json:"ok"`
+	CanonicalHash          string                  `json:"canonicalHash"`
+	ProgrammaticHash       string                  `json:"programmaticHash"`
+	ComparisonBasis        string                  `json:"comparisonBasis"`
+	SignatureEvidenceLevel string                  `json:"signatureEvidenceLevel"`
+	InventoryRefsUsed      []string                `json:"inventoryRefsUsed"`
+	Differences            []compositionDifference `json:"differences"`
+	Diagnostics            []diagnostic            `json:"diagnostics"`
 }
 
 type mappingPreviewContext struct {
@@ -221,6 +236,8 @@ type flogoApp struct {
 type descriptorCandidate struct {
 	DescriptorPath string
 	PackageRoot    string
+	ModulePath     string
+	GoPackagePath  string
 	Source         string
 }
 
@@ -330,6 +347,18 @@ func main() {
 		encode(contribDescriptorResponse{
 			Descriptor:  descriptor,
 			Diagnostics: diagnostics,
+		})
+	case "evidence inspect":
+		ref := lookupFlag("--ref")
+		if ref == "" {
+			fail("missing required --ref flag")
+		}
+		evidence, ok := inspectContribEvidence(app, appPath, ref)
+		if !ok {
+			fail(fmt.Sprintf("contribution evidence %q was not found", ref))
+		}
+		encode(contribEvidenceResponse{
+			Evidence: evidence,
 		})
 	case "governance validate":
 		encode(validateGovernance(app, appPath))
@@ -721,6 +750,9 @@ func validateGovernance(app flogoApp, appPath string) governanceReport {
 	inventoryByAlias := map[string]contributionInventoryEntry{}
 	unresolvedPackages := []string{}
 	fallbackContribs := []string{}
+	weakEvidenceContribs := []string{}
+	packageBackedContribs := []string{}
+	descriptorOnlyContribs := []string{}
 
 	for _, entry := range inventory.Entries {
 		if entry.Alias != "" {
@@ -732,9 +764,21 @@ func validateGovernance(app flogoApp, appPath string) governanceReport {
 		if entry.Source == "registry" || entry.Source == "inferred" {
 			fallbackContribs = append(fallbackContribs, entry.Ref)
 		}
+		if entry.Confidence == "low" || entry.Source == "registry" {
+			weakEvidenceContribs = append(weakEvidenceContribs, entry.Ref)
+		}
+		if entry.Source == "package_descriptor" || entry.Source == "package_source" {
+			packageBackedContribs = append(packageBackedContribs, entry.Ref)
+		}
+		if entry.Source == "app_descriptor" || entry.Source == "workspace_descriptor" {
+			descriptorOnlyContribs = append(descriptorOnlyContribs, entry.Ref)
+		}
 	}
 	sort.Strings(unresolvedPackages)
 	sort.Strings(fallbackContribs)
+	sort.Strings(weakEvidenceContribs)
+	sort.Strings(packageBackedContribs)
+	sort.Strings(descriptorOnlyContribs)
 
 	for _, resource := range app.Resources {
 		resourceIDs[resource.ID] = true
@@ -1010,9 +1054,12 @@ func validateGovernance(app flogoApp, appPath string) governanceReport {
 			PackageBackedCount: countPackageBackedInventoryEntries(inventory.Entries),
 			FallbackCount:      countFallbackInventoryEntries(inventory.Entries),
 		},
-		UnresolvedPackages: unresolvedPackages,
-		FallbackContribs:   fallbackContribs,
-		Diagnostics:        diagnostics,
+		UnresolvedPackages:     unresolvedPackages,
+		FallbackContribs:       fallbackContribs,
+		WeakEvidenceContribs:   weakEvidenceContribs,
+		PackageBackedContribs:  packageBackedContribs,
+		DescriptorOnlyContribs: descriptorOnlyContribs,
+		Diagnostics:            diagnostics,
 	}
 }
 
@@ -1039,14 +1086,15 @@ func compareComposition(app flogoApp, appPath string, target string, resourceID 
 	}
 
 	return compositionCompareResult{
-		AppName:           app.Name,
-		Ok:                ok,
-		CanonicalHash:     canonicalHash,
-		ProgrammaticHash:  programmaticHash,
-		ComparisonBasis:   comparisonBasisForInventory(inventory.Entries),
-		InventoryRefsUsed: collectInventoryRefs(inventory.Entries),
-		Differences:       differences,
-		Diagnostics:       diagnostics,
+		AppName:                app.Name,
+		Ok:                     ok,
+		CanonicalHash:          canonicalHash,
+		ProgrammaticHash:       programmaticHash,
+		ComparisonBasis:        comparisonBasisForInventory(inventory.Entries),
+		SignatureEvidenceLevel: signatureEvidenceLevelForInventory(inventory.Entries),
+		InventoryRefsUsed:      collectInventoryRefs(inventory.Entries),
+		Differences:            differences,
+		Diagnostics:            diagnostics,
 	}
 }
 
@@ -1081,21 +1129,23 @@ func buildFlowInventoryEntry(flow flogoFlow) contributionInventoryEntry {
 			"Flow resources behave like reusable actions",
 		},
 		Source:   "flow-resource",
-		Evidence: createEvidence("flow_resource", "#flow:"+flow.ID, "flow", "", "", "", nil),
+		Evidence: createEvidence("flow_resource", "#flow:"+flow.ID, "flow", "", "", "", "", "", nil),
 	}
 	return contributionInventoryEntry{
-		Ref:         descriptor.Ref,
-		Alias:       descriptor.Alias,
-		Type:        descriptor.Type,
-		Name:        descriptor.Name,
-		Version:     descriptor.Version,
-		Title:       descriptor.Title,
-		Source:      "flow_resource",
-		Settings:    descriptor.Settings,
-		Inputs:      descriptor.Inputs,
-		Outputs:     descriptor.Outputs,
-		Diagnostics: []diagnostic{},
-		Descriptor:  &descriptor,
+		Ref:             descriptor.Ref,
+		Alias:           descriptor.Alias,
+		Type:            descriptor.Type,
+		Name:            descriptor.Name,
+		Version:         descriptor.Version,
+		Title:           descriptor.Title,
+		Source:          "flow_resource",
+		Confidence:      "high",
+		DiscoveryReason: describeDiscoveryReason("flow_resource", descriptor.Ref, "", ""),
+		Settings:        descriptor.Settings,
+		Inputs:          descriptor.Inputs,
+		Outputs:         descriptor.Outputs,
+		Diagnostics:     []diagnostic{},
+		Descriptor:      &descriptor,
 	}
 }
 
@@ -1114,7 +1164,17 @@ func inventoryEntryToDescriptor(entry contributionInventoryEntry) contribDescrip
 		Inputs:   entry.Inputs,
 		Outputs:  entry.Outputs,
 		Source:   entry.Source,
-		Evidence: createEvidence(entry.Source, entry.Ref, entry.Alias, entry.Version, entry.DescriptorPath, entry.PackageRoot, entry.Diagnostics),
+		Evidence: createEvidence(
+			entry.Source,
+			entry.Ref,
+			entry.Alias,
+			entry.Version,
+			entry.DescriptorPath,
+			entry.PackageRoot,
+			entry.ModulePath,
+			entry.GoPackagePath,
+			entry.Diagnostics,
+		),
 	}
 }
 
@@ -1126,14 +1186,27 @@ func withCatalogRef(descriptor contribDescriptor, ref string) contribDescriptor 
 	return descriptor
 }
 
-func createEvidence(source string, resolvedRef string, importAlias string, version string, descriptorPath string, packageRoot string, diagnostics []diagnostic) *contribEvidence {
+func createEvidence(
+	source string,
+	resolvedRef string,
+	importAlias string,
+	version string,
+	descriptorPath string,
+	packageRoot string,
+	modulePath string,
+	goPackagePath string,
+	diagnostics []diagnostic,
+) *contribEvidence {
 	return &contribEvidence{
 		Source:         source,
 		ResolvedRef:    resolvedRef,
 		DescriptorPath: descriptorPath,
 		PackageRoot:    packageRoot,
+		ModulePath:     modulePath,
+		GoPackagePath:  goPackagePath,
 		ImportAlias:    importAlias,
 		Version:        version,
+		Confidence:     deriveEvidenceConfidence(source),
 		Diagnostics:    diagnostics,
 	}
 }
@@ -1154,6 +1227,48 @@ func compareEvidenceStrength(left string, right string) int {
 
 func isPackageBackedSource(source string) bool {
 	return source == "app_descriptor" || source == "workspace_descriptor" || source == "package_descriptor" || source == "package_source" || source == "descriptor"
+}
+
+func deriveEvidenceConfidence(source string) string {
+	switch source {
+	case "registry":
+		return "medium"
+	case "inferred":
+		return "low"
+	default:
+		return "high"
+	}
+}
+
+func describeDiscoveryReason(source string, resolvedRef string, descriptorPath string, packageRoot string) string {
+	switch source {
+	case "app_descriptor":
+		return fmt.Sprintf("Resolved %s from an app-local descriptor%s.", resolvedRef, optionalPathSuffix(descriptorPath))
+	case "workspace_descriptor":
+		return fmt.Sprintf("Resolved %s from a workspace descriptor%s.", resolvedRef, optionalPathSuffix(descriptorPath))
+	case "package_descriptor":
+		return fmt.Sprintf("Resolved %s from a package descriptor%s.", resolvedRef, optionalPathSuffix(descriptorPath))
+	case "package_source":
+		if packageRoot != "" {
+			return fmt.Sprintf("Resolved %s from discovered Go package files under %s.", resolvedRef, packageRoot)
+		}
+		return fmt.Sprintf("Resolved %s from discovered Go package files.", resolvedRef)
+	case "registry":
+		return fmt.Sprintf("Resolved %s from built-in registry metadata because stronger package evidence was not found.", resolvedRef)
+	case "inferred":
+		return fmt.Sprintf("Resolved %s from inferred metadata because no descriptor or package evidence was found.", resolvedRef)
+	case "flow_resource":
+		return fmt.Sprintf("Resolved %s from a local flow resource definition.", resolvedRef)
+	default:
+		return fmt.Sprintf("Resolved %s using %s evidence.", resolvedRef, source)
+	}
+}
+
+func optionalPathSuffix(path string) string {
+	if path == "" {
+		return ""
+	}
+	return " at " + path
 }
 
 func countPackageBackedInventoryEntries(entries []contributionInventoryEntry) int {
@@ -1198,6 +1313,20 @@ func comparisonBasisForInventory(entries []contributionInventoryEntry) string {
 	return "normalized_only"
 }
 
+func signatureEvidenceLevelForInventory(entries []contributionInventoryEntry) string {
+	for _, entry := range entries {
+		if entry.Source == "package_descriptor" || entry.Source == "package_source" {
+			return "package_backed"
+		}
+	}
+	for _, entry := range entries {
+		if entry.Source == "app_descriptor" || entry.Source == "workspace_descriptor" {
+			return "descriptor_backed"
+		}
+	}
+	return "fallback_only"
+}
+
 func buildInventoryEntryForApp(
 	app flogoApp,
 	appPath string,
@@ -1221,11 +1350,20 @@ func buildInventoryEntryForApp(
 		Source:         descriptor.Evidence.Source,
 		DescriptorPath: descriptor.Evidence.DescriptorPath,
 		PackageRoot:    descriptor.Evidence.PackageRoot,
-		Settings:       descriptor.Settings,
-		Inputs:         descriptor.Inputs,
-		Outputs:        descriptor.Outputs,
-		Diagnostics:    dedupeDiagnostics(append(append([]diagnostic{}, descriptor.Evidence.Diagnostics...), diagnostics...)),
-		Descriptor:     &descriptor,
+		ModulePath:     descriptor.Evidence.ModulePath,
+		GoPackagePath:  descriptor.Evidence.GoPackagePath,
+		Confidence:     descriptor.Evidence.Confidence,
+		DiscoveryReason: describeDiscoveryReason(
+			descriptor.Evidence.Source,
+			descriptor.Evidence.ResolvedRef,
+			descriptor.Evidence.DescriptorPath,
+			descriptor.Evidence.PackageRoot,
+		),
+		Settings:    descriptor.Settings,
+		Inputs:      descriptor.Inputs,
+		Outputs:     descriptor.Outputs,
+		Diagnostics: dedupeDiagnostics(append(append([]diagnostic{}, descriptor.Evidence.Diagnostics...), diagnostics...)),
+		Descriptor:  &descriptor,
 	}, diagnostics
 }
 
@@ -1298,7 +1436,7 @@ func introspectContrib(app flogoApp, appPath string, refOrAlias string) (contrib
 					Examples:           []string{"Invoke reusable flow " + flow.ID},
 					CompatibilityNotes: []string{"Flow resources behave like reusable actions"},
 					Source:             "flow-resource",
-					Evidence:           createEvidence("flow_resource", "#flow:"+flow.ID, "flow", "", "", "", nil),
+					Evidence:           createEvidence("flow_resource", "#flow:"+flow.ID, "flow", "", "", "", "", "", nil),
 				}, []diagnostic{}, true
 			}
 		}
@@ -1311,6 +1449,11 @@ func introspectContrib(app flogoApp, appPath string, refOrAlias string) (contrib
 
 	descriptor, diagnostics := buildDescriptorForApp(app, appPath, ref, alias, version, forcedType)
 	return descriptor, diagnostics, true
+}
+
+func inspectContribEvidence(app flogoApp, appPath string, refOrAlias string) (contributionInventoryEntry, bool) {
+	inventory := buildContributionInventory(app, appPath)
+	return findInventoryEntry(inventory, app, refOrAlias)
 }
 
 func previewMapping(app flogoApp, nodeID string, context mappingPreviewContext) mappingPreviewResult {
@@ -1582,14 +1725,43 @@ func buildDescriptorForApp(
 
 	for _, candidate := range buildDescriptorCandidates(appPath, resolvedRef) {
 		if _, err := os.Stat(candidate.DescriptorPath); err == nil {
-			return parseDescriptorFile(candidate.DescriptorPath, resolvedRef, normalizedAlias, version, forcedType, candidate.Source), []diagnostic{}
+			modulePath := candidate.ModulePath
+			goPackagePath := candidate.GoPackagePath
+			if candidate.PackageRoot != "" && modulePath == "" {
+				if moduleInfo, ok := findNearestGoModule(candidate.PackageRoot); ok {
+					modulePath = moduleInfo.ModulePath
+					if goPackagePath == "" {
+						goPackagePath = deriveGoPackagePath(candidate.PackageRoot, moduleInfo)
+					}
+				}
+			}
+			return parseDescriptorFile(
+				candidate.DescriptorPath,
+				resolvedRef,
+				normalizedAlias,
+				version,
+				forcedType,
+				candidate.Source,
+				modulePath,
+				goPackagePath,
+			), []diagnostic{}
 		}
 	}
 
-	if packageRoot := findPackageRoot(appPath, resolvedRef); packageRoot != "" {
+	if packageCandidate, ok := findPackageCandidate(appPath, resolvedRef); ok {
 		descriptor := buildDescriptor(resolvedRef, normalizedAlias, version, forcedType)
 		descriptor.Source = "package_source"
-		descriptor.Evidence = createEvidence(descriptor.Source, resolvedRef, normalizedAlias, version, "", packageRoot, nil)
+		descriptor.Evidence = createEvidence(
+			descriptor.Source,
+			resolvedRef,
+			normalizedAlias,
+			version,
+			"",
+			packageCandidate.PackageRoot,
+			packageCandidate.ModulePath,
+			packageCandidate.GoPackagePath,
+			nil,
+		)
 		return descriptor, []diagnostic{
 			{
 				Code:     "flogo.contrib.descriptor_not_found",
@@ -1603,7 +1775,9 @@ func buildDescriptorForApp(
 				Severity: "info",
 				Path:     normalizedAlias,
 				Details: map[string]any{
-					"packageRoot": packageRoot,
+					"packageRoot":   packageCandidate.PackageRoot,
+					"modulePath":    packageCandidate.ModulePath,
+					"goPackagePath": packageCandidate.GoPackagePath,
 				},
 			},
 		}
@@ -1687,32 +1861,56 @@ func findDescriptorFile(appPath string, ref string) string {
 	return ""
 }
 
-func findPackageRoot(appPath string, ref string) string {
+func findPackageCandidate(appPath string, ref string) (descriptorCandidate, bool) {
 	normalizedRef := strings.TrimPrefix(strings.ReplaceAll(ref, "\\", "/"), "#")
 	refBase := filepath.Base(normalizedRef)
 	for _, moduleInfo := range collectGoModules(appPath) {
 		if relativePath := resolveModuleRelativePath(moduleInfo, normalizedRef); relativePath != "" {
 			candidate := filepath.Join(moduleInfo.Root, filepath.FromSlash(relativePath))
 			if directoryLooksLikePackageRoot(candidate) {
-				return candidate
+				return descriptorCandidate{
+					PackageRoot:   candidate,
+					ModulePath:    moduleInfo.ModulePath,
+					GoPackagePath: normalizedRef,
+					Source:        "package_source",
+				}, true
 			}
 		}
 	}
 	for _, root := range buildSearchRoots(appPath) {
-		candidates := []string{
-			filepath.Join(root, filepath.FromSlash(normalizedRef)),
-			filepath.Join(root, "vendor", filepath.FromSlash(normalizedRef)),
+		candidates := []descriptorCandidate{
+			{
+				PackageRoot:   filepath.Join(root, filepath.FromSlash(normalizedRef)),
+				GoPackagePath: normalizedRef,
+				Source:        "package_source",
+			},
+			{
+				PackageRoot:   filepath.Join(root, "vendor", filepath.FromSlash(normalizedRef)),
+				GoPackagePath: normalizedRef,
+				Source:        "package_source",
+			},
 		}
 		if refBase != "" {
-			candidates = append(candidates, filepath.Join(root, refBase))
+			candidates = append(candidates, descriptorCandidate{
+				PackageRoot: filepath.Join(root, refBase),
+				Source:      "package_source",
+			})
 		}
 		for _, candidate := range candidates {
-			if directoryLooksLikePackageRoot(candidate) {
-				return candidate
+			if directoryLooksLikePackageRoot(candidate.PackageRoot) {
+				if candidate.ModulePath == "" {
+					if moduleInfo, ok := findNearestGoModule(candidate.PackageRoot); ok {
+						candidate.ModulePath = moduleInfo.ModulePath
+						if candidate.GoPackagePath == "" {
+							candidate.GoPackagePath = deriveGoPackagePath(candidate.PackageRoot, moduleInfo)
+						}
+					}
+				}
+				return candidate, true
 			}
 		}
 	}
-	return ""
+	return descriptorCandidate{}, false
 }
 
 func buildSearchRoots(appPath string) []string {
@@ -1791,6 +1989,8 @@ func buildDescriptorCandidates(appPath string, ref string) []descriptorCandidate
 			pushCandidate(descriptorCandidate{
 				DescriptorPath: filepath.Join(moduleInfo.Root, filepath.FromSlash(relativePath), "descriptor.json"),
 				PackageRoot:    filepath.Join(moduleInfo.Root, filepath.FromSlash(relativePath)),
+				ModulePath:     moduleInfo.ModulePath,
+				GoPackagePath:  normalizedRef,
 				Source:         "package_descriptor",
 			})
 		}
@@ -1800,6 +2000,7 @@ func buildDescriptorCandidates(appPath string, ref string) []descriptorCandidate
 		pushCandidate(descriptorCandidate{
 			DescriptorPath: filepath.Join(root, "vendor", filepath.FromSlash(normalizedRef), "descriptor.json"),
 			PackageRoot:    filepath.Join(root, "vendor", filepath.FromSlash(normalizedRef)),
+			GoPackagePath:  normalizedRef,
 			Source:         "package_descriptor",
 		})
 		pushCandidate(descriptorCandidate{
@@ -1894,6 +2095,18 @@ func resolveModuleRelativePath(moduleInfo goModuleInfo, normalizedRef string) st
 	return relativePath
 }
 
+func deriveGoPackagePath(packageRoot string, moduleInfo goModuleInfo) string {
+	relativePath, err := filepath.Rel(moduleInfo.Root, packageRoot)
+	if err != nil {
+		return ""
+	}
+	relativePath = filepath.ToSlash(relativePath)
+	if relativePath == "." || relativePath == "" {
+		return moduleInfo.ModulePath
+	}
+	return moduleInfo.ModulePath + "/" + relativePath
+}
+
 func directoryLooksLikePackageRoot(candidate string) bool {
 	entries, err := os.ReadDir(candidate)
 	if err != nil {
@@ -1907,7 +2120,16 @@ func directoryLooksLikePackageRoot(candidate string) bool {
 	return false
 }
 
-func parseDescriptorFile(descriptorPath string, ref string, alias string, version string, forcedType string, source string) contribDescriptor {
+func parseDescriptorFile(
+	descriptorPath string,
+	ref string,
+	alias string,
+	version string,
+	forcedType string,
+	source string,
+	modulePath string,
+	goPackagePath string,
+) contribDescriptor {
 	contents, err := os.ReadFile(descriptorPath)
 	if err != nil {
 		fail(err.Error())
@@ -1939,7 +2161,7 @@ func parseDescriptorFile(descriptorPath string, ref string, alias string, versio
 		Examples:           normalizeStringArray(raw["examples"]),
 		CompatibilityNotes: normalizeStringArray(raw["compatibilityNotes"]),
 		Source:             source,
-		Evidence:           createEvidence(source, ref, alias, version, descriptorPath, filepath.Dir(descriptorPath), nil),
+		Evidence:           createEvidence(source, ref, alias, version, descriptorPath, filepath.Dir(descriptorPath), modulePath, goPackagePath, nil),
 	}
 }
 
@@ -2329,7 +2551,7 @@ func buildDescriptor(ref string, alias string, version string, forcedType string
 		descriptor.Type = forcedType
 	}
 
-	descriptor.Evidence = createEvidence(descriptor.Source, ref, normalizedAlias, version, "", "", nil)
+	descriptor.Evidence = createEvidence(descriptor.Source, ref, normalizedAlias, version, "", "", "", "", nil)
 
 	return descriptor
 }

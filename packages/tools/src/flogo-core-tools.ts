@@ -1,5 +1,6 @@
 import type {
   CompositionCompareRequest,
+  ContribEvidenceDetail,
   ContributionInventory,
   ContribCatalog,
   ContribDescriptor,
@@ -12,6 +13,7 @@ import {
   buildContributionInventory,
   buildContribCatalog,
   compareJsonVsProgrammatic,
+  inspectContribEvidence,
   defineProperties,
   inspectContribDescriptor,
   parseFlogoAppDocument,
@@ -110,6 +112,26 @@ export class FlogoCoreTools {
             {
               code: "flogo.catalog.missing_descriptor",
               message: `No descriptor found for ${refOrAlias}`,
+              severity: "warning"
+            }
+          ],
+      artifacts: [],
+      retryable: false
+    });
+  }
+
+  inspectContribEvidence(raw: string | FlogoApp | unknown, refOrAlias: string): ToolResponse {
+    const evidence: ContribEvidenceDetail | undefined = inspectContribEvidence(raw, refOrAlias);
+    return toolResponse({
+      ok: Boolean(evidence),
+      summary: evidence ? `Resolved contribution evidence for ${evidence.name}` : `Unable to resolve evidence for ${refOrAlias}`,
+      data: { evidence },
+      diagnostics: evidence
+        ? evidence.diagnostics
+        : [
+            {
+              code: "flogo.catalog.missing_evidence",
+              message: `No contribution evidence found for ${refOrAlias}`,
               severity: "warning"
             }
           ],

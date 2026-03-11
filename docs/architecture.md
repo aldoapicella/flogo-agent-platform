@@ -61,6 +61,7 @@ It currently supports:
 - contribution inventory,
 - contribution catalog generation,
 - descriptor inspection,
+- contribution evidence inspection,
 - governance validation,
 - composition comparison,
 - mapping preview.
@@ -105,7 +106,7 @@ Responsibilities:
 - start orchestrations,
 - store tasks, events, approvals, artifacts, build runs, and test runs through Prisma,
 - expose task history and run summaries,
-- expose direct app-analysis endpoints for graph, inventory, catalog, descriptor inspection, governance reporting, composition comparison, artifact listing, and mapping preview,
+- expose direct app-analysis endpoints for graph, inventory, catalog, descriptor inspection, contribution evidence inspection, governance reporting, composition comparison, artifact listing, and mapping preview,
 - persist app-analysis payload JSON to Blob/Azurite-backed storage,
 - accept internal sync callbacks from the orchestrator and runner paths.
 
@@ -141,6 +142,7 @@ Current workflow modes:
 - analysis-only workflow modes:
   - `inventory_contribs`
   - `catalog_contribs`
+  - `inspect_contrib_evidence`
   - `validate_governance`
   - `compare_composition`
   - `preview_mapping`
@@ -167,6 +169,7 @@ Current notable behavior:
   - `inventory_contribs`
   - `catalog_contribs`
   - `inspect_descriptor`
+  - `inspect_contrib_evidence`
   - `validate_governance`
   - `compare_composition`
   - `preview_mapping`
@@ -205,6 +208,7 @@ Defines runtime schemas and TypeScript types for:
 - Flogo graphs,
 - contribution inventory,
 - contribution catalogs and descriptors,
+- contribution evidence inspection,
 - mapping preview requests and results.
 
 ## `packages/flogo-graph`
@@ -216,6 +220,7 @@ Implements the TypeScript-side Flogo domain model, including:
 - structural, semantic, mapping, and dependency validation,
 - contribution inventory generation,
 - contribution catalog generation,
+- contribution evidence inspection,
 - alias validation,
 - governance validation,
 - composition comparison,
@@ -257,8 +262,10 @@ Stores eval fixtures and scoring helpers.
 
 Implements the current Go-side Flogo-native command surface:
 
+- `inventory contribs`
 - `catalog contribs`
 - `inspect descriptor`
+- `evidence inspect`
 - `governance validate`
 - `compose compare`
 - `preview mapping`
@@ -322,8 +329,10 @@ sequenceDiagram
 
 The platform is currently strongest in the Phase 1 capability area:
 
+- contribution inventory,
 - contribution cataloging,
 - descriptor inspection,
+- contribution evidence inspection,
 - governance validation,
 - composition comparison,
 - mapping preview,
@@ -348,7 +357,7 @@ Persisted through Prisma today:
 
 ### Current partial persistence
 
-- app-scoped inventory, catalog, descriptor, governance, composition-compare, and mapping-preview artifacts are persisted through hidden synthetic analysis tasks,
+- app-scoped inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, and mapping-preview artifacts are persisted through hidden synthetic analysis tasks,
 - those app-analysis payloads are stored in Blob/Azurite-backed JSON objects,
 - broader task artifacts outside the app-analysis slice still include logical/local URIs.
 
@@ -363,7 +372,7 @@ Persisted through Prisma today:
 
 - `flogo.json` is still the canonical artifact even as the Go helper path grows.
 - The Go helper is intentionally a finite execution binary, not a new always-on service.
-- The current helper uses contribution inventory plus module-aware package discovery, normalized Flogo metadata, and known-registry inference for the Phase 1 analysis path; it is not yet a full Core/Flow-native runtime.
+- The current helper uses contribution inventory plus module-aware package discovery, evidence confidence, normalized Flogo metadata, and known-registry inference for the Phase 1 analysis path; it is not yet a full Core/Flow-native runtime.
 - Flow-aware, runtime-aware, and extension-aware capabilities are still roadmap items.
 - In restricted shells on Windows, `next build` and Vitest can fail with `spawn EPERM` even when typecheck is clean.
 

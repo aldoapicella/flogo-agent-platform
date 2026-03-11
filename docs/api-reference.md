@@ -47,6 +47,7 @@ Important analysis-only modes:
 
 - `inputs.mode = "inventory"`
 - `inputs.mode = "catalog"`
+- `inputs.mode = "contrib_evidence"`
 - `inputs.mode = "mapping_preview"`
 - `inputs.mode = "governance"`
 - `inputs.mode = "composition_compare"`
@@ -261,6 +262,30 @@ Current implementation notes:
 - descriptor resolution prefers discovered descriptor metadata and falls back to normalized registry or inferred metadata with diagnostics,
 - the response artifact is backed by Blob/Azurite JSON storage and Prisma metadata.
 
+### `GET /v1/projects/:projectId/apps/:appId/contribs/evidence?ref=...`
+
+Returns the normalized evidence view for one contribution ref or alias.
+
+Request query:
+
+- `ref`
+
+Response shape:
+
+- `ContribEvidenceResponse`
+
+Key fields:
+
+- `evidence`
+- `artifact`
+
+Current implementation notes:
+
+- refs are passed as a query parameter because contrib refs commonly contain `/`,
+- the evidence response is inventory-backed and exposes source, confidence, descriptor path, package root, module path, and Go package path when available,
+- this route is the most explicit way to inspect whether a contrib is package-backed, descriptor-backed, registry-backed, or inferred,
+- the response artifact is backed by Blob/Azurite JSON storage and Prisma metadata.
+
 ### `GET /v1/projects/:projectId/apps/:appId/artifacts`
 
 Returns app-scoped analysis artifacts currently associated with the resolved app.
@@ -289,6 +314,7 @@ Key fields:
 Current implementation notes:
 
 - governance currently checks duplicate aliases, missing imports, implicit alias use, missing flow/action refs, unused imports, and version drift heuristics,
+- governance now reports unresolved packages, fallback contribs, weak-evidence contribs, package-backed contribs, and descriptor-only contribs,
 - the report artifact is backed by Blob/Azurite JSON storage and Prisma metadata.
 
 ### `POST /v1/projects/:projectId/apps/:appId/mappings/preview`
@@ -345,6 +371,7 @@ Key fields:
 Current implementation notes:
 
 - this is an analysis/probe path, not full programmatic generation,
+- the comparison result includes `comparisonBasis`, `signatureEvidenceLevel`, and the inventory refs used during the probe,
 - the comparison artifact is backed by Blob/Azurite JSON storage and Prisma metadata.
 
 ### `GET /v1/health`
@@ -460,7 +487,7 @@ Request shape:
 Workflow behavior:
 
 - mutating workflows use build/run/smoke-oriented runner steps,
-- analysis-only workflows use `catalog_contribs`, `validate_governance`, `compare_composition`, or `preview_mapping`.
+- analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, or `preview_mapping`.
 
 ## Runner-worker API
 

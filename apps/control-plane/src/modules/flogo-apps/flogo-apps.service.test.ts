@@ -268,6 +268,19 @@ describe("FlogoAppsService", () => {
     expect(storedPayloads.some((entry) => entry.blobPath.includes("/descriptor/"))).toBe(true);
   });
 
+  it("returns contribution evidence and persists an evidence artifact", async () => {
+    const { service, storedPayloads } = createService();
+
+    const evidence = await service.getContribEvidence("demo", "hello-rest", "#log");
+
+    expect(evidence).toBeDefined();
+    expect(evidence?.evidence.name).toBe("log");
+    expect(evidence?.evidence.confidence).toBeDefined();
+    expect(evidence?.artifact?.type).toBe("contrib_evidence");
+    expect(evidence?.artifact?.metadata?.analysisType).toBe("contrib_evidence");
+    expect(storedPayloads.some((entry) => entry.blobPath.includes("/contrib_evidence/"))).toBe(true);
+  });
+
   it("returns a governance report and persists a governance artifact", async () => {
     const { service, storedPayloads } = createService();
 
@@ -299,6 +312,7 @@ describe("FlogoAppsService", () => {
     const { service } = createService();
 
     await service.getCatalog("demo", "hello-rest");
+    await service.getContribEvidence("demo", "hello-rest", "#log");
     await service.getGovernance("demo", "hello-rest");
     await service.compareComposition("demo", "hello-rest", {
       mode: "analyze",
@@ -307,8 +321,9 @@ describe("FlogoAppsService", () => {
 
     const artifacts = await service.listArtifacts("demo", "hello-rest");
 
-    expect(artifacts).toHaveLength(3);
+    expect(artifacts).toHaveLength(4);
     expect(artifacts?.some((artifact) => artifact.type === "contrib_catalog")).toBe(true);
+    expect(artifacts?.some((artifact) => artifact.type === "contrib_evidence")).toBe(true);
     expect(artifacts?.some((artifact) => artifact.type === "governance_report")).toBe(true);
     expect(artifacts?.some((artifact) => artifact.type === "composition_compare")).toBe(true);
   });
