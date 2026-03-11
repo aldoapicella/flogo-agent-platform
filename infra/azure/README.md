@@ -16,3 +16,5 @@ Provisioned components:
 - System-assigned managed identities on each app and job with `AcrPull` role assignments
 
 Use `main.bicep` as the entry point and adjust parameters for your subscription, region, image tags, and network requirements.
+
+For full deployment guidance, see [docs/deployment.md](C:/Users/aapicella/dev/flogo-agent-platform/docs/deployment.md).

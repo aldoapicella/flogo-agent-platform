@@ -10,3 +10,5 @@ The local stack is Docker-first and mirrors the Container Apps-first control pla
 - `web-console` launched from the workspace
 
 Run `pnpm compose:up` from the repo root after `pnpm install`.
+
+For full local-development guidance, see [docs/development.md](C:/Users/aapicella/dev/flogo-agent-platform/docs/development.md) and [docs/deployment.md](C:/Users/aapicella/dev/flogo-agent-platform/docs/deployment.md).
