@@ -45,12 +45,14 @@ const approvalMap: Record<TaskRequest["type"], ApprovalType[]> = {
 
 function getAnalysisMode(
   task: TaskRequest
-): "inventory" | "catalog" | "contrib_evidence" | "mapping_preview" | "governance" | "composition_compare" | undefined {
+): "inventory" | "catalog" | "contrib_evidence" | "mapping_preview" | "mapping_test" | "property_plan" | "governance" | "composition_compare" | undefined {
   const mode = task.inputs["mode"];
   return mode === "inventory" ||
     mode === "catalog" ||
     mode === "contrib_evidence" ||
     mode === "mapping_preview" ||
+    mode === "mapping_test" ||
+    mode === "property_plan" ||
     mode === "governance" ||
     mode === "composition_compare"
     ? mode
@@ -107,6 +109,10 @@ export class TaskPlanner {
     } else if (analysisMode === "mapping_preview") {
       steps.push({ id: "mapping", label: "Preview mappings and suggest coercions", tool: "runner.previewMapping" });
       steps.push({ id: "properties", label: "Plan app properties and environment usage", tool: "flogo.planProperties" });
+    } else if (analysisMode === "mapping_test") {
+      steps.push({ id: "mapping-test", label: "Run deterministic mapping resolution test", tool: "runner.testMapping" });
+    } else if (analysisMode === "property_plan") {
+      steps.push({ id: "properties", label: "Plan app properties and environment usage", tool: "runner.planProperties" });
     } else if (analysisMode === "governance") {
       steps.push({ id: "governance", label: "Validate alias, orphan, and version governance", tool: "runner.validateGovernance" });
     } else if (analysisMode === "composition_compare") {
@@ -126,6 +132,10 @@ export class TaskPlanner {
 
       if (/(mapping|coercion|resolver|property|env)/i.test(summary)) {
         steps.push({ id: "mapping", label: "Preview mappings and suggest coercions", tool: "runner.previewMapping" });
+      }
+
+      if (/(mapping test|assert mapping|expected mapping output|mapping assertion)/i.test(summary)) {
+        steps.push({ id: "mapping-test", label: "Run deterministic mapping resolution test", tool: "runner.testMapping" });
       }
 
       if (/(property|env|config)/i.test(summary)) {

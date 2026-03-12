@@ -11,9 +11,13 @@ import {
   ContribDescriptorResponseSchema,
   ContribCatalogResponseSchema,
   ContributionInventoryResponseSchema,
+  DeploymentProfileSchema,
   GovernanceResponseSchema,
   MappingPreviewRequestSchema,
-  MappingPreviewResponseSchema
+  MappingPreviewResponseSchema,
+  MappingTestResponseSchema,
+  MappingTestSpecSchema,
+  PropertyPlanResponseSchema
 } from "@flogo-agent/contracts";
 import {
   analyzePropertyUsage,
@@ -25,6 +29,7 @@ import {
   inspectContribDescriptor,
   parseFlogoAppDocument,
   previewMapping,
+  runMappingTest,
   suggestCoercions,
   validateGovernance
 } from "@flogo-agent/flogo-graph";
@@ -253,6 +258,33 @@ export class FlogoAppsService {
     });
   }
 
+  async getPropertyPlan(projectId: string, appId: string, profileInput?: string) {
+    const resolved = await this.resolveApp(projectId, appId);
+    if (!resolved) {
+      return undefined;
+    }
+
+    const profile = DeploymentProfileSchema.parse(profileInput ?? "rest_service");
+    const propertyPlan = analyzePropertyUsage(resolved.content, profile);
+    const artifact = await this.persistArtifact(
+      resolved,
+      "property_plan",
+      `${appId}-property-plan.json`,
+      {
+        analysisType: "property_plan",
+        appId,
+        profile,
+        sourceType: resolved.sourceType
+      },
+      { propertyPlan }
+    );
+
+    return PropertyPlanResponseSchema.parse({
+      propertyPlan,
+      artifact
+    });
+  }
+
   async compareComposition(projectId: string, appId: string, payload: unknown) {
     const resolved = await this.resolveApp(projectId, appId);
     if (!resolved) {
@@ -294,9 +326,6 @@ export class FlogoAppsService {
     const request = MappingPreviewRequestSchema.parse(payload);
     const preview = previewMapping(resolved.content, request.nodeId, request.sampleInput);
     const propertyPlan = analyzePropertyUsage(resolved.content);
-    const coercionSuggestions = suggestCoercions(resolved.content, request.sampleInput).filter((diagnostic) =>
-      diagnostic.path?.startsWith(request.nodeId)
-    );
     const artifact = await this.persistArtifact(
       resolved,
       "mapping_preview",
@@ -308,21 +337,56 @@ export class FlogoAppsService {
         sourceType: resolved.sourceType
       },
       {
-        preview: {
-          ...preview,
-          suggestedCoercions: coercionSuggestions
-        },
+        preview,
         propertyPlan
       }
     );
 
     return MappingPreviewResponseSchema.parse({
-      preview: {
-        ...preview,
-        suggestedCoercions: coercionSuggestions
-      },
+      preview,
       propertyPlan,
       artifact
+    });
+  }
+
+  async testMapping(projectId: string, appId: string, payload: unknown) {
+    const resolved = await this.resolveApp(projectId, appId);
+    if (!resolved) {
+      return undefined;
+    }
+
+    const request = MappingTestSpecSchema.parse(payload);
+    const result = runMappingTest(
+      resolved.content,
+      request.nodeId,
+      request.sampleInput,
+      request.expectedOutput,
+      request.strict
+    );
+    const propertyPlan = analyzePropertyUsage(resolved.content);
+    const artifact = await this.persistArtifact(
+      resolved,
+      "mapping_test",
+      `${appId}-${request.nodeId}-mapping-test.json`,
+      {
+        analysisType: "mapping_test",
+        appId,
+        nodeId: request.nodeId,
+        strict: request.strict,
+        sourceType: resolved.sourceType
+      },
+      {
+        result,
+        propertyPlan
+      }
+    );
+
+    return MappingTestResponseSchema.parse({
+      result: {
+        ...result,
+        artifact
+      },
+      propertyPlan
     });
   }
 
@@ -440,6 +504,8 @@ export class FlogoAppsService {
       | "contrib_catalog"
       | "contrib_evidence"
       | "mapping_preview"
+      | "mapping_test"
+      | "property_plan"
       | "descriptor"
       | "governance_report"
       | "composition_compare",

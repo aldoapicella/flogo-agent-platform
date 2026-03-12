@@ -35,6 +35,8 @@ export class AppAnalysisStorageService {
       | "contrib_catalog"
       | "contrib_evidence"
       | "mapping_preview"
+      | "mapping_test"
+      | "property_plan"
       | "descriptor"
       | "governance_report"
       | "composition_compare";

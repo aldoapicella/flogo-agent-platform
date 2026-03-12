@@ -102,6 +102,42 @@ export class RunnerTools {
     });
   }
 
+  async testMapping(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "test_mapping",
+      jobKind: "mapping_test",
+      analysisKind: "mapping_test"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued mapping test job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
+  async planProperties(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "plan_properties",
+      jobKind: "property_plan",
+      analysisKind: "property_plan"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued property planning job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
   async inspectDescriptor(spec: unknown): Promise<ToolResponse> {
     const parsed = RunnerJobSpecSchema.parse(spec);
     const result = await this.dispatcher.dispatch({ ...parsed, stepType: "inspect_descriptor", jobKind: "catalog" });

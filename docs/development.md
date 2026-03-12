@@ -99,6 +99,8 @@ Copy `.env.example` to `.env`.
 - `RUNNER_CATALOG_JOB_TEMPLATE_NAME`
 - `RUNNER_CONTRIB_EVIDENCE_JOB_TEMPLATE_NAME`
 - `RUNNER_MAPPING_PREVIEW_JOB_TEMPLATE_NAME`
+- `RUNNER_MAPPING_TEST_JOB_TEMPLATE_NAME`
+- `RUNNER_PROPERTY_PLAN_JOB_TEMPLATE_NAME`
 - `RUNNER_GOVERNANCE_JOB_TEMPLATE_NAME`
 - `RUNNER_COMPOSITION_COMPARE_JOB_TEMPLATE_NAME`
 - `FLOGO_HELPER_BIN` if you want to point runner-worker at a prebuilt helper
@@ -133,6 +135,8 @@ Copy `.env.example` to `.env`.
 Use this when local descriptor metadata lives outside the app directory or repository root. Multiple paths can be provided using the platform path delimiter.
 
 The inventory/catalog path now also searches for nearest `go.mod` roots and vendored package trees so contribution refs can resolve to local package roots before falling back to registry or inferred metadata.
+
+The contribution evidence path also searches the Go module cache (`GOMODCACHE`, `GOPATH/pkg/mod`, and the default user Go module cache) so installed contrib packages can surface package roots and discovered versions even when they are not vendored into the repo.
 
 The evidence path builds on the same inventory model and now exposes confidence plus `modulePath` and `goPackagePath` when a contribution can be tied back to local Go workspace/package structure.
 
@@ -271,15 +275,8 @@ Current Phase 1 helper commands:
 - `governance validate`
 - `compose compare`
 - `preview mapping`
-
-Current helper commands:
-
-- `inventory contribs`
-- `catalog contribs`
-- `inspect descriptor`
-- `governance validate`
-- `compose compare`
-- `preview mapping`
+- `mapping test`
+- `properties plan`
 
 When adding a helper command:
 
@@ -338,7 +335,7 @@ Current important test areas:
 - Shared packages are consumed from `dist`, so stale package builds can look like app-level type errors.
 - `next build` and Vitest can hit environment-specific `spawn EPERM` failures in restricted Windows shells even when the code is type-correct.
 - Some artifact URIs are still logical/local rather than Blob-backed.
-- App-analysis inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, and mapping-preview artifacts are Blob/Azurite-backed, but broader runtime artifacts are not yet.
-- The Go helper currently covers the Phase 1 inventory/catalog/descriptor/contribution-evidence/governance/composition-compare/mapping-preview slice.
+- App-analysis inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test artifacts are Blob/Azurite-backed, but broader runtime artifacts are not yet.
+- The Go helper currently covers the completed Phase 1 inventory/catalog/descriptor/contribution-evidence/governance/composition-compare/mapping-preview/mapping-test/property-plan slice.
 
 If the environment blocks build/test execution, validate the same commands again in CI or an unrestricted local shell before assuming the code is broken.

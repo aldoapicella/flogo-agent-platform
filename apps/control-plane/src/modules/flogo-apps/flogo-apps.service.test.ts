@@ -211,6 +211,41 @@ describe("FlogoAppsService", () => {
     expect(preview?.artifact?.metadata?.blobPath).toBeDefined();
   });
 
+  it("returns a property plan and persists a property-plan artifact", async () => {
+    const { service, storedPayloads } = createService();
+
+    const plan = await service.getPropertyPlan("demo", "hello-rest", "rest_service");
+
+    expect(plan).toBeDefined();
+    expect(plan?.propertyPlan.deploymentProfile).toBe("rest_service");
+    expect(plan?.artifact?.type).toBe("property_plan");
+    expect(storedPayloads.some((entry) => entry.blobPath.includes("/property_plan/"))).toBe(true);
+  });
+
+  it("runs a mapping test and persists a mapping-test artifact", async () => {
+    const { service, storedPayloads } = createService();
+
+    const result = await service.testMapping("demo", "hello-rest", {
+      nodeId: "log-request",
+      sampleInput: {
+        flow: {},
+        activity: {},
+        env: {},
+        property: {},
+        trigger: {}
+      },
+      expectedOutput: {
+        "input.message": "received hello request"
+      },
+      strict: true
+    });
+
+    expect(result).toBeDefined();
+    expect(result?.result.pass).toBe(true);
+    expect(result?.result.artifact?.type).toBe("mapping_test");
+    expect(storedPayloads.some((entry) => entry.blobPath.includes("/mapping_test/"))).toBe(true);
+  });
+
   it("lists persisted app-scoped analysis artifacts", async () => {
     const { service } = createService();
     await service.getInventory("demo", "hello-rest");
@@ -225,12 +260,29 @@ describe("FlogoAppsService", () => {
         trigger: {}
       }
     });
+    await service.getPropertyPlan("demo", "hello-rest", "rest_service");
+    await service.testMapping("demo", "hello-rest", {
+      nodeId: "log-request",
+      sampleInput: {
+        flow: {},
+        activity: {},
+        env: {},
+        property: {},
+        trigger: {}
+      },
+      expectedOutput: {
+        "input.message": "received hello request"
+      },
+      strict: true
+    });
 
     const artifacts = await service.listArtifacts("demo", "hello-rest");
-    expect(artifacts).toHaveLength(3);
+    expect(artifacts).toHaveLength(5);
     expect(artifacts?.some((artifact) => artifact.type === "contrib_inventory")).toBe(true);
     expect(artifacts?.some((artifact) => artifact.type === "contrib_catalog")).toBe(true);
     expect(artifacts?.some((artifact) => artifact.type === "mapping_preview")).toBe(true);
+    expect(artifacts?.some((artifact) => artifact.type === "property_plan")).toBe(true);
+    expect(artifacts?.some((artifact) => artifact.type === "mapping_test")).toBe(true);
   });
 
   it("prefers DB-backed app records when the app exists in persistence", async () => {

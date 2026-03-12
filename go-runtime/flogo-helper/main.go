@@ -50,24 +50,28 @@ type contribCatalog struct {
 }
 
 type contributionInventoryEntry struct {
-	Ref             string             `json:"ref"`
-	Alias           string             `json:"alias,omitempty"`
-	Type            string             `json:"type"`
-	Name            string             `json:"name"`
-	Version         string             `json:"version,omitempty"`
-	Title           string             `json:"title,omitempty"`
-	Source          string             `json:"source"`
-	DescriptorPath  string             `json:"descriptorPath,omitempty"`
-	PackageRoot     string             `json:"packageRoot,omitempty"`
-	ModulePath      string             `json:"modulePath,omitempty"`
-	GoPackagePath   string             `json:"goPackagePath,omitempty"`
-	Confidence      string             `json:"confidence"`
-	DiscoveryReason string             `json:"discoveryReason,omitempty"`
-	Settings        []contribField     `json:"settings"`
-	Inputs          []contribField     `json:"inputs"`
-	Outputs         []contribField     `json:"outputs"`
-	Diagnostics     []diagnostic       `json:"diagnostics"`
-	Descriptor      *contribDescriptor `json:"descriptor,omitempty"`
+	Ref                    string             `json:"ref"`
+	Alias                  string             `json:"alias,omitempty"`
+	Type                   string             `json:"type"`
+	Name                   string             `json:"name"`
+	Version                string             `json:"version,omitempty"`
+	Title                  string             `json:"title,omitempty"`
+	Source                 string             `json:"source"`
+	DescriptorPath         string             `json:"descriptorPath,omitempty"`
+	PackageRoot            string             `json:"packageRoot,omitempty"`
+	ModulePath             string             `json:"modulePath,omitempty"`
+	GoPackagePath          string             `json:"goPackagePath,omitempty"`
+	Confidence             string             `json:"confidence"`
+	DiscoveryReason        string             `json:"discoveryReason,omitempty"`
+	PackageDescriptorFound bool               `json:"packageDescriptorFound"`
+	PackageMetadataFound   bool               `json:"packageMetadataFound"`
+	VersionSource          string             `json:"versionSource,omitempty"`
+	SignatureCompleteness  string             `json:"signatureCompleteness"`
+	Settings               []contribField     `json:"settings"`
+	Inputs                 []contribField     `json:"inputs"`
+	Outputs                []contribField     `json:"outputs"`
+	Diagnostics            []diagnostic       `json:"diagnostics"`
+	Descriptor             *contribDescriptor `json:"descriptor,omitempty"`
 }
 
 type contributionInventory struct {
@@ -77,16 +81,20 @@ type contributionInventory struct {
 }
 
 type contribEvidence struct {
-	Source         string       `json:"source"`
-	ResolvedRef    string       `json:"resolvedRef"`
-	DescriptorPath string       `json:"descriptorPath,omitempty"`
-	PackageRoot    string       `json:"packageRoot,omitempty"`
-	ModulePath     string       `json:"modulePath,omitempty"`
-	GoPackagePath  string       `json:"goPackagePath,omitempty"`
-	ImportAlias    string       `json:"importAlias,omitempty"`
-	Version        string       `json:"version,omitempty"`
-	Confidence     string       `json:"confidence"`
-	Diagnostics    []diagnostic `json:"diagnostics"`
+	Source                 string       `json:"source"`
+	ResolvedRef            string       `json:"resolvedRef"`
+	DescriptorPath         string       `json:"descriptorPath,omitempty"`
+	PackageRoot            string       `json:"packageRoot,omitempty"`
+	ModulePath             string       `json:"modulePath,omitempty"`
+	GoPackagePath          string       `json:"goPackagePath,omitempty"`
+	ImportAlias            string       `json:"importAlias,omitempty"`
+	Version                string       `json:"version,omitempty"`
+	Confidence             string       `json:"confidence"`
+	PackageDescriptorFound bool         `json:"packageDescriptorFound"`
+	PackageMetadataFound   bool         `json:"packageMetadataFound"`
+	VersionSource          string       `json:"versionSource,omitempty"`
+	SignatureCompleteness  string       `json:"signatureCompleteness"`
+	Diagnostics            []diagnostic `json:"diagnostics"`
 }
 
 type contribDescriptorResponse struct {
@@ -180,12 +188,81 @@ type mappingPreviewField struct {
 	Diagnostics []diagnostic `json:"diagnostics"`
 }
 
+type mappingPath struct {
+	NodeID           string `json:"nodeId"`
+	MappingKey       string `json:"mappingKey"`
+	SourceExpression string `json:"sourceExpression,omitempty"`
+	TargetPath       string `json:"targetPath"`
+}
+
 type mappingPreviewResult struct {
-	NodeID             string                `json:"nodeId"`
-	FlowID             string                `json:"flowId,omitempty"`
-	Fields             []mappingPreviewField `json:"fields"`
-	SuggestedCoercions []diagnostic          `json:"suggestedCoercions"`
-	Diagnostics        []diagnostic          `json:"diagnostics"`
+	NodeID              string                `json:"nodeId"`
+	FlowID              string                `json:"flowId,omitempty"`
+	Fields              []mappingPreviewField `json:"fields"`
+	Paths               []mappingPath         `json:"paths"`
+	ResolvedValues      map[string]any        `json:"resolvedValues"`
+	ScopeDiagnostics    []diagnostic          `json:"scopeDiagnostics"`
+	CoercionDiagnostics []diagnostic          `json:"coercionDiagnostics"`
+	SuggestedCoercions  []diagnostic          `json:"suggestedCoercions"`
+	Diagnostics         []diagnostic          `json:"diagnostics"`
+}
+
+type propertyPlanRecommendation struct {
+	Source    string `json:"source"`
+	Name      string `json:"name"`
+	Rationale string `json:"rationale"`
+}
+
+type propertyDefinitionRecommendation struct {
+	Name         string `json:"name"`
+	Rationale    string `json:"rationale"`
+	InferredType string `json:"inferredType,omitempty"`
+}
+
+type envRecommendation struct {
+	Name      string `json:"name"`
+	Rationale string `json:"rationale"`
+}
+
+type propertyPlan struct {
+	DeclaredProperties    []string                           `json:"declaredProperties"`
+	PropertyRefs          []string                           `json:"propertyRefs"`
+	EnvRefs               []string                           `json:"envRefs"`
+	UndefinedPropertyRefs []string                           `json:"undefinedPropertyRefs"`
+	UnusedProperties      []string                           `json:"unusedProperties"`
+	DeploymentProfile     string                             `json:"deploymentProfile"`
+	Recommendations       []propertyPlanRecommendation       `json:"recommendations"`
+	RecommendedProperties []propertyDefinitionRecommendation `json:"recommendedProperties"`
+	RecommendedEnv        []envRecommendation                `json:"recommendedEnv"`
+	RecommendedSecretEnv  []envRecommendation                `json:"recommendedSecretEnv"`
+	RecommendedPlainEnv   []envRecommendation                `json:"recommendedPlainEnv"`
+	DeploymentNotes       []string                           `json:"deploymentNotes"`
+	ProfileSpecificNotes  []string                           `json:"profileSpecificNotes"`
+	Diagnostics           []diagnostic                       `json:"diagnostics"`
+}
+
+type propertyPlanResponse struct {
+	PropertyPlan propertyPlan `json:"propertyPlan"`
+}
+
+type mappingDifference struct {
+	Path     string `json:"path"`
+	Expected any    `json:"expected,omitempty"`
+	Actual   any    `json:"actual,omitempty"`
+	Message  string `json:"message"`
+}
+
+type mappingTestResult struct {
+	Pass         bool                `json:"pass"`
+	NodeID       string              `json:"nodeId"`
+	ActualOutput map[string]any      `json:"actualOutput"`
+	Differences  []mappingDifference `json:"differences"`
+	Diagnostics  []diagnostic        `json:"diagnostics"`
+}
+
+type mappingTestResponse struct {
+	Result       mappingTestResult `json:"result"`
+	PropertyPlan propertyPlan      `json:"propertyPlan"`
 }
 
 type flogoImport struct {
@@ -238,6 +315,7 @@ type descriptorCandidate struct {
 	PackageRoot    string
 	ModulePath     string
 	GoPackagePath  string
+	PackageVersion string
 	Source         string
 }
 
@@ -375,7 +453,24 @@ func main() {
 			fail("missing required --node flag")
 		}
 		context := loadPreviewContext(lookupFlag("--input"))
-		encode(previewMapping(app, nodeID, context))
+		encode(previewMapping(app, appPath, nodeID, context))
+	case "mapping test":
+		nodeID := lookupFlag("--node")
+		if nodeID == "" {
+			fail("missing required --node flag")
+		}
+		context := loadPreviewContext(lookupFlag("--input"))
+		expected := loadExpectedOutput(lookupFlag("--expected"))
+		strict := lookupFlag("--strict") != "false"
+		encode(runMappingTest(app, appPath, nodeID, context, expected, strict))
+	case "properties plan":
+		profile := lookupFlag("--profile")
+		if profile == "" {
+			profile = "rest_service"
+		}
+		encode(propertyPlanResponse{
+			PropertyPlan: analyzePropertyUsage(app, profile),
+		})
 	default:
 		fail(fmt.Sprintf("unsupported command %q", command))
 	}
@@ -438,6 +533,28 @@ func loadPreviewContext(inputPath string) mappingPreviewContext {
 	}
 
 	return context
+}
+
+func loadExpectedOutput(inputPath string) map[string]any {
+	if inputPath == "" {
+		return map[string]any{}
+	}
+
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	if len(contents) == 0 {
+		return map[string]any{}
+	}
+
+	var expected map[string]any
+	if err := json.Unmarshal(contents, &expected); err != nil {
+		fail(err.Error())
+	}
+
+	return expected
 }
 
 func normalizeApp(raw map[string]any) flogoApp {
@@ -1128,8 +1245,22 @@ func buildFlowInventoryEntry(flow flogoFlow) contributionInventoryEntry {
 		CompatibilityNotes: []string{
 			"Flow resources behave like reusable actions",
 		},
-		Source:   "flow-resource",
-		Evidence: createEvidence("flow_resource", "#flow:"+flow.ID, "flow", "", "", "", "", "", nil),
+		Source: "flow-resource",
+		Evidence: createEvidence(
+			"flow_resource",
+			"#flow:"+flow.ID,
+			"flow",
+			"",
+			"",
+			"",
+			"",
+			"",
+			nil,
+			false,
+			true,
+			"unknown",
+			inferSignatureCompleteness([]contribField{}, metadataFieldsToContrib(flow.MetadataInput, "input"), metadataFieldsToContrib(flow.MetadataOutput, "output")),
+		),
 	}
 	return contributionInventoryEntry{
 		Ref:             descriptor.Ref,
@@ -1174,6 +1305,10 @@ func inventoryEntryToDescriptor(entry contributionInventoryEntry) contribDescrip
 			entry.ModulePath,
 			entry.GoPackagePath,
 			entry.Diagnostics,
+			entry.PackageDescriptorFound,
+			entry.PackageMetadataFound,
+			entry.VersionSource,
+			entry.SignatureCompleteness,
 		),
 	}
 }
@@ -1196,18 +1331,26 @@ func createEvidence(
 	modulePath string,
 	goPackagePath string,
 	diagnostics []diagnostic,
+	packageDescriptorFound bool,
+	packageMetadataFound bool,
+	versionSource string,
+	signatureCompleteness string,
 ) *contribEvidence {
 	return &contribEvidence{
-		Source:         source,
-		ResolvedRef:    resolvedRef,
-		DescriptorPath: descriptorPath,
-		PackageRoot:    packageRoot,
-		ModulePath:     modulePath,
-		GoPackagePath:  goPackagePath,
-		ImportAlias:    importAlias,
-		Version:        version,
-		Confidence:     deriveEvidenceConfidence(source),
-		Diagnostics:    diagnostics,
+		Source:                 source,
+		ResolvedRef:            resolvedRef,
+		DescriptorPath:         descriptorPath,
+		PackageRoot:            packageRoot,
+		ModulePath:             modulePath,
+		GoPackagePath:          goPackagePath,
+		ImportAlias:            importAlias,
+		Version:                version,
+		Confidence:             deriveEvidenceConfidence(source),
+		PackageDescriptorFound: packageDescriptorFound,
+		PackageMetadataFound:   packageMetadataFound,
+		VersionSource:          versionSource,
+		SignatureCompleteness:  signatureCompleteness,
+		Diagnostics:            diagnostics,
 	}
 }
 
@@ -1436,7 +1579,21 @@ func introspectContrib(app flogoApp, appPath string, refOrAlias string) (contrib
 					Examples:           []string{"Invoke reusable flow " + flow.ID},
 					CompatibilityNotes: []string{"Flow resources behave like reusable actions"},
 					Source:             "flow-resource",
-					Evidence:           createEvidence("flow_resource", "#flow:"+flow.ID, "flow", "", "", "", "", "", nil),
+					Evidence: createEvidence(
+						"flow_resource",
+						"#flow:"+flow.ID,
+						"flow",
+						"",
+						"",
+						"",
+						"",
+						"",
+						nil,
+						false,
+						true,
+						"unknown",
+						inferSignatureCompleteness([]contribField{}, metadataFieldsToContrib(flow.MetadataInput, "input"), metadataFieldsToContrib(flow.MetadataOutput, "output")),
+					),
 				}, []diagnostic{}, true
 			}
 		}
@@ -1456,13 +1613,17 @@ func inspectContribEvidence(app flogoApp, appPath string, refOrAlias string) (co
 	return findInventoryEntry(inventory, app, refOrAlias)
 }
 
-func previewMapping(app flogoApp, nodeID string, context mappingPreviewContext) mappingPreviewResult {
+func previewMapping(app flogoApp, appPath string, nodeID string, context mappingPreviewContext) mappingPreviewResult {
 	flowID, task, ok := locateTask(app, nodeID)
 	if !ok {
 		return mappingPreviewResult{
-			NodeID:             nodeID,
-			Fields:             []mappingPreviewField{},
-			SuggestedCoercions: []diagnostic{},
+			NodeID:              nodeID,
+			Fields:              []mappingPreviewField{},
+			Paths:               []mappingPath{},
+			ResolvedValues:      map[string]any{},
+			ScopeDiagnostics:    []diagnostic{},
+			CoercionDiagnostics: []diagnostic{},
+			SuggestedCoercions:  []diagnostic{},
 			Diagnostics: []diagnostic{
 				{Code: "flogo.mapping.node_not_found", Message: fmt.Sprintf("Unable to locate node %q", nodeID), Severity: "error", Path: nodeID},
 			},
@@ -1478,13 +1639,21 @@ func previewMapping(app flogoApp, nodeID string, context mappingPreviewContext) 
 	for _, field := range fields {
 		diagnostics = append(diagnostics, field.Diagnostics...)
 	}
+	scopeDiagnostics := evaluateScopeDiagnostics(app, flowID, task, fields)
+	coercionDiagnostics := suggestCoercions(app, appPath, context, nodeID)
+	diagnostics = append(diagnostics, scopeDiagnostics...)
+	diagnostics = append(diagnostics, coercionDiagnostics...)
 
 	return mappingPreviewResult{
-		NodeID:             nodeID,
-		FlowID:             flowID,
-		Fields:             fields,
-		SuggestedCoercions: []diagnostic{},
-		Diagnostics:        diagnostics,
+		NodeID:              nodeID,
+		FlowID:              flowID,
+		Fields:              fields,
+		Paths:               collectMappingPaths(nodeID, fields),
+		ResolvedValues:      buildResolvedValueMap(fields),
+		ScopeDiagnostics:    dedupeDiagnostics(scopeDiagnostics),
+		CoercionDiagnostics: dedupeDiagnostics(coercionDiagnostics),
+		SuggestedCoercions:  dedupeDiagnostics(coercionDiagnostics),
+		Diagnostics:         dedupeDiagnostics(diagnostics),
 	}
 }
 
@@ -1561,6 +1730,91 @@ func collectMappingFields(prefix string, value any, context mappingPreviewContex
 			},
 		}
 	}
+}
+
+func collectMappingPaths(nodeID string, fields []mappingPreviewField) []mappingPath {
+	paths := make([]mappingPath, 0, len(fields))
+	for _, field := range fields {
+		if !strings.Contains(field.Path, ".") {
+			continue
+		}
+		mappingKey := field.Path
+		if lastDot := strings.LastIndex(field.Path, "."); lastDot >= 0 && lastDot < len(field.Path)-1 {
+			mappingKey = field.Path[lastDot+1:]
+		}
+		paths = append(paths, mappingPath{
+			NodeID:           nodeID,
+			MappingKey:       mappingKey,
+			SourceExpression: field.Expression,
+			TargetPath:       field.Path,
+		})
+	}
+	return paths
+}
+
+func buildResolvedValueMap(fields []mappingPreviewField) map[string]any {
+	resolved := map[string]any{}
+	for _, field := range fields {
+		if !strings.Contains(field.Path, ".") {
+			continue
+		}
+		resolved[field.Path] = field.Resolved
+	}
+	return resolved
+}
+
+func evaluateScopeDiagnostics(app flogoApp, flowID string, task flogoTask, fields []mappingPreviewField) []diagnostic {
+	diagnostics := []diagnostic{}
+	var flow *flogoFlow
+	for index := range app.Resources {
+		if app.Resources[index].ID == flowID {
+			flow = &app.Resources[index]
+			break
+		}
+	}
+	if flow == nil {
+		return diagnostics
+	}
+
+	taskIndex := -1
+	priorTasks := map[string]bool{}
+	for index, candidate := range flow.Tasks {
+		if candidate.ID == task.ID {
+			taskIndex = index
+			break
+		}
+		priorTasks[candidate.ID] = true
+	}
+	if taskIndex == -1 {
+		return diagnostics
+	}
+
+	for _, field := range fields {
+		for _, reference := range field.References {
+			if strings.HasPrefix(reference, "$trigger") {
+				diagnostics = append(diagnostics, diagnostic{
+					Code:     "flogo.mapping.invalid_trigger_scope",
+					Message:  fmt.Sprintf("Reference %q is not directly available inside flow task mappings", reference),
+					Severity: "warning",
+					Path:     field.Path,
+				})
+			}
+			if strings.HasPrefix(reference, "$activity[") {
+				pattern := regexp.MustCompile(`^\$activity\[([^\]]+)\]`)
+				match := pattern.FindStringSubmatch(reference)
+				if len(match) > 1 && !priorTasks[match[1]] {
+					diagnostics = append(diagnostics, diagnostic{
+						Code:     "flogo.mapping.invalid_activity_scope",
+						Message:  fmt.Sprintf("Reference %q points to an activity that is not available before task %q", reference, task.ID),
+						Severity: "error",
+						Path:     field.Path,
+					})
+				}
+			}
+		}
+	}
+
+	return diagnostics
 }
 
 func classifyValue(value any) string {
@@ -1709,6 +1963,307 @@ func resolveByPath(value map[string]any, path string) (any, bool) {
 	return current, true
 }
 
+func suggestCoercions(app flogoApp, appPath string, context mappingPreviewContext, nodeID string) []diagnostic {
+	diagnostics := []diagnostic{}
+	for _, flow := range app.Resources {
+		for _, task := range flow.Tasks {
+			if nodeID != "" && task.ID != nodeID {
+				continue
+			}
+			diagnostics = append(diagnostics, suggestTaskCoercions(app, appPath, task, context)...)
+		}
+	}
+	return dedupeDiagnostics(diagnostics)
+}
+
+func suggestTaskCoercions(app flogoApp, appPath string, task flogoTask, context mappingPreviewContext) []diagnostic {
+	diagnostics := []diagnostic{}
+	expectedTypes := buildExpectedFieldTypes(app, appPath, task)
+	fields := []mappingPreviewField{}
+	fields = append(fields, collectMappingFields("input", task.Input, context)...)
+	fields = append(fields, collectMappingFields("settings", task.Settings, context)...)
+	fields = append(fields, collectMappingFields("output", task.Output, context)...)
+
+	for _, field := range fields {
+		expectedType, ok := expectedTypes[field.Path]
+		if !ok || field.Resolved == nil {
+			continue
+		}
+		actualType := inferResolvedValueType(field.Resolved)
+		if actualType == "" || actualType == expectedType {
+			continue
+		}
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.mapping.coercion.expected_type",
+			Message:  fmt.Sprintf("Field %q expects %s based on contribution metadata but resolves to %s. Consider using toType(...) or toString(...).", field.Path, expectedType, actualType),
+			Severity: "warning",
+			Path:     field.Path,
+			Details: map[string]any{
+				"expression":   field.Expression,
+				"expectedType": expectedType,
+				"actualType":   actualType,
+				"resolved":     field.Resolved,
+			},
+		})
+	}
+
+	collectCoercionDiagnostics(task.Input, task.ID+".input", &diagnostics, context)
+	collectCoercionDiagnostics(task.Settings, task.ID+".settings", &diagnostics, context)
+	collectCoercionDiagnostics(task.Output, task.ID+".output", &diagnostics, context)
+	return dedupeDiagnostics(diagnostics)
+}
+
+func buildExpectedFieldTypes(app flogoApp, appPath string, task flogoTask) map[string]string {
+	expected := map[string]string{}
+	if task.ActivityRef == "" {
+		return expected
+	}
+
+	descriptor, _ := buildDescriptorForApp(app, appPath, task.ActivityRef, inferAlias(task.ActivityRef), "", "")
+	for _, field := range descriptor.Inputs {
+		if expectedType := normalizeExpectedFieldType(field.Type); expectedType != "" {
+			expected["input."+field.Name] = expectedType
+		}
+	}
+	for _, field := range descriptor.Settings {
+		if expectedType := normalizeExpectedFieldType(field.Type); expectedType != "" {
+			expected["settings."+field.Name] = expectedType
+		}
+	}
+	for _, field := range descriptor.Outputs {
+		if expectedType := normalizeExpectedFieldType(field.Type); expectedType != "" {
+			expected["output."+field.Name] = expectedType
+		}
+	}
+	return expected
+}
+
+func normalizeExpectedFieldType(value string) string {
+	switch strings.ToLower(value) {
+	case "integer", "int", "long", "float", "double", "number":
+		return "number"
+	case "bool", "boolean":
+		return "boolean"
+	case "array":
+		return "array"
+	case "object", "json", "map":
+		return "object"
+	case "string":
+		return "string"
+	default:
+		return ""
+	}
+}
+
+func inferResolvedValueType(value any) string {
+	switch value.(type) {
+	case []any:
+		return "array"
+	case map[string]any:
+		return "object"
+	case float64, int, int64, int32:
+		return "number"
+	case bool:
+		return "boolean"
+	case string:
+		return "string"
+	default:
+		return ""
+	}
+}
+
+func collectCoercionDiagnostics(value any, path string, diagnostics *[]diagnostic, context mappingPreviewContext) {
+	switch typed := value.(type) {
+	case []any:
+		for index, item := range typed {
+			collectCoercionDiagnostics(item, fmt.Sprintf("%s[%d]", path, index), diagnostics, context)
+		}
+	case map[string]any:
+		for key, nested := range typed {
+			collectCoercionDiagnostics(nested, path+"."+key, diagnostics, context)
+		}
+	case string:
+		references := collectResolverReferences(typed)
+		for _, reference := range references {
+			resolved, ok := resolveReference(reference, context)
+			if !ok {
+				continue
+			}
+			lowerPath := strings.ToLower(path)
+			if isNumericHint(lowerPath) {
+				if _, ok := resolved.(string); ok {
+					*diagnostics = append(*diagnostics, diagnostic{
+						Code:     "flogo.mapping.coercion.numeric",
+						Message:  fmt.Sprintf("Mapping at %q looks numeric and may need coercion", path),
+						Severity: "warning",
+						Path:     path,
+					})
+				}
+			}
+		}
+	}
+}
+
+func isNumericHint(value string) bool {
+	return strings.Contains(value, "count") ||
+		strings.Contains(value, "size") ||
+		strings.Contains(value, "length") ||
+		strings.Contains(value, "timeout") ||
+		strings.Contains(value, "interval") ||
+		strings.Contains(value, "port") ||
+		strings.Contains(value, "code") ||
+		strings.Contains(value, "status") ||
+		strings.Contains(value, "limit")
+}
+
+func analyzePropertyUsage(app flogoApp, profile string) propertyPlan {
+	propertyRefs := map[string]bool{}
+	envRefs := map[string]bool{}
+	diagnostics := []diagnostic{}
+	undefinedPropertyRefs := map[string]bool{}
+
+	for _, flow := range app.Resources {
+		for _, task := range flow.Tasks {
+			collectResolverKinds(task.Input, propertyRefs, envRefs)
+			collectResolverKinds(task.Settings, propertyRefs, envRefs)
+			collectResolverKinds(task.Output, propertyRefs, envRefs)
+		}
+	}
+
+	declaredSet := map[string]bool{}
+	for _, property := range app.Properties {
+		if name, ok := property["name"].(string); ok {
+			declaredSet[name] = true
+		}
+	}
+
+	for propertyRef := range propertyRefs {
+		if !declaredSet[propertyRef] {
+			undefinedPropertyRefs[propertyRef] = true
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.property.undefined",
+				Message:  fmt.Sprintf("Property %q is referenced but not declared on the app", propertyRef),
+				Severity: "warning",
+				Path:     "properties." + propertyRef,
+			})
+		}
+	}
+
+	unusedProperties := []string{}
+	for declared := range declaredSet {
+		if !propertyRefs[declared] {
+			unusedProperties = append(unusedProperties, declared)
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.property.unused",
+				Message:  fmt.Sprintf("Property %q is declared but not referenced", declared),
+				Severity: "info",
+				Path:     "properties." + declared,
+			})
+		}
+	}
+	sort.Strings(unusedProperties)
+
+	declaredProperties := sortedKeys(declaredSet)
+	propertyRefList := sortedKeys(propertyRefs)
+	envRefList := sortedKeys(envRefs)
+	undefinedPropertyList := sortedKeys(undefinedPropertyRefs)
+	recommendations := []propertyPlanRecommendation{}
+	for _, name := range propertyRefList {
+		recommendations = append(recommendations, propertyPlanRecommendation{
+			Source:    "property",
+			Name:      name,
+			Rationale: "Referenced through $property and suitable for reusable app-level configuration",
+		})
+	}
+	for _, name := range envRefList {
+		recommendations = append(recommendations, propertyPlanRecommendation{
+			Source:    "env",
+			Name:      name,
+			Rationale: "Referenced through $env and suitable for deployment-specific configuration",
+		})
+	}
+
+	recommendedProperties := []propertyDefinitionRecommendation{}
+	for _, name := range undefinedPropertyList {
+		recommendedProperties = append(recommendedProperties, propertyDefinitionRecommendation{
+			Name:         name,
+			Rationale:    "This property is referenced in mappings but is not declared on the app.",
+			InferredType: inferPropertyType(app, name),
+		})
+	}
+
+	recommendedEnv := []envRecommendation{}
+	recommendedSecretEnv := []envRecommendation{}
+	recommendedPlainEnv := []envRecommendation{}
+	for _, name := range envRefList {
+		entry := envRecommendation{
+			Name:      name,
+			Rationale: "This environment variable is referenced through $env and should be supplied per deployment environment.",
+		}
+		recommendedEnv = append(recommendedEnv, entry)
+		if looksSensitiveConfig(name) {
+			recommendedSecretEnv = append(recommendedSecretEnv, envRecommendation{
+				Name:      name,
+				Rationale: entry.Rationale + " Treat it as secret configuration.",
+			})
+		} else {
+			recommendedPlainEnv = append(recommendedPlainEnv, entry)
+		}
+	}
+
+	return propertyPlan{
+		DeclaredProperties:    declaredProperties,
+		PropertyRefs:          propertyRefList,
+		EnvRefs:               envRefList,
+		UndefinedPropertyRefs: undefinedPropertyList,
+		UnusedProperties:      unusedProperties,
+		DeploymentProfile:     profile,
+		Recommendations:       recommendations,
+		RecommendedProperties: recommendedProperties,
+		RecommendedEnv:        recommendedEnv,
+		RecommendedSecretEnv:  recommendedSecretEnv,
+		RecommendedPlainEnv:   recommendedPlainEnv,
+		DeploymentNotes:       buildDeploymentNotes(propertyRefs, envRefs, undefinedPropertyRefs, unusedProperties),
+		ProfileSpecificNotes:  buildProfileSpecificNotes(profile, propertyRefs, envRefs),
+		Diagnostics:           dedupeDiagnostics(diagnostics),
+	}
+}
+
+func runMappingTest(app flogoApp, appPath string, nodeID string, context mappingPreviewContext, expectedOutput map[string]any, strict bool) mappingTestResponse {
+	preview := previewMapping(app, appPath, nodeID, context)
+	actualOutput := preview.ResolvedValues
+	differences := diffResolvedValues(expectedOutput, actualOutput)
+	if strict {
+		for pathKey, actual := range actualOutput {
+			if _, ok := expectedOutput[pathKey]; !ok {
+				differences = append(differences, mappingDifference{
+					Path:     pathKey,
+					Expected: nil,
+					Actual:   actual,
+					Message:  fmt.Sprintf("Resolved value for %q was not expected", pathKey),
+				})
+			}
+		}
+	}
+	pass := len(differences) == 0
+	for _, diag := range preview.Diagnostics {
+		if diag.Severity == "error" {
+			pass = false
+			break
+		}
+	}
+	return mappingTestResponse{
+		Result: mappingTestResult{
+			Pass:         pass,
+			NodeID:       nodeID,
+			ActualOutput: actualOutput,
+			Differences:  differences,
+			Diagnostics:  preview.Diagnostics,
+		},
+		PropertyPlan: analyzePropertyUsage(app, "rest_service"),
+	}
+}
+
 func buildDescriptorForApp(
 	app flogoApp,
 	appPath string,
@@ -1744,23 +2299,35 @@ func buildDescriptorForApp(
 				candidate.Source,
 				modulePath,
 				goPackagePath,
+				candidate.PackageVersion,
 			), []diagnostic{}
 		}
 	}
 
 	if packageCandidate, ok := findPackageCandidate(appPath, resolvedRef); ok {
-		descriptor := buildDescriptor(resolvedRef, normalizedAlias, version, forcedType)
+		discoveredVersion := valueOrFallback(version, packageCandidate.PackageVersion)
+		versionSource := "unknown"
+		if version != "" {
+			versionSource = "import"
+		} else if packageCandidate.PackageVersion != "" {
+			versionSource = "package"
+		}
+		descriptor := buildDescriptor(resolvedRef, normalizedAlias, discoveredVersion, forcedType)
 		descriptor.Source = "package_source"
 		descriptor.Evidence = createEvidence(
 			descriptor.Source,
 			resolvedRef,
 			normalizedAlias,
-			version,
+			discoveredVersion,
 			"",
 			packageCandidate.PackageRoot,
 			packageCandidate.ModulePath,
 			packageCandidate.GoPackagePath,
 			nil,
+			false,
+			true,
+			versionSource,
+			inferSignatureCompleteness(descriptor.Settings, descriptor.Inputs, descriptor.Outputs),
 		)
 		return descriptor, []diagnostic{
 			{
@@ -1775,9 +2342,10 @@ func buildDescriptorForApp(
 				Severity: "info",
 				Path:     normalizedAlias,
 				Details: map[string]any{
-					"packageRoot":   packageCandidate.PackageRoot,
-					"modulePath":    packageCandidate.ModulePath,
-					"goPackagePath": packageCandidate.GoPackagePath,
+					"packageRoot":    packageCandidate.PackageRoot,
+					"modulePath":     packageCandidate.ModulePath,
+					"goPackagePath":  packageCandidate.GoPackagePath,
+					"packageVersion": packageCandidate.PackageVersion,
 				},
 			},
 		}
@@ -1875,6 +2443,11 @@ func findPackageCandidate(appPath string, ref string) (descriptorCandidate, bool
 					Source:        "package_source",
 				}, true
 			}
+		}
+	}
+	for _, candidate := range buildModuleCacheCandidates(normalizedRef) {
+		if directoryLooksLikePackageRoot(candidate.PackageRoot) {
+			return candidate, true
 		}
 	}
 	for _, root := range buildSearchRoots(appPath) {
@@ -1995,6 +2568,16 @@ func buildDescriptorCandidates(appPath string, ref string) []descriptorCandidate
 			})
 		}
 	}
+	for _, candidate := range buildModuleCacheCandidates(normalizedRef) {
+		pushCandidate(descriptorCandidate{
+			DescriptorPath: filepath.Join(candidate.PackageRoot, "descriptor.json"),
+			PackageRoot:    candidate.PackageRoot,
+			ModulePath:     candidate.ModulePath,
+			GoPackagePath:  candidate.GoPackagePath,
+			PackageVersion: candidate.PackageVersion,
+			Source:         "package_descriptor",
+		})
+	}
 
 	for _, root := range buildSearchRoots(appPath) {
 		pushCandidate(descriptorCandidate{
@@ -2049,6 +2632,106 @@ func collectGoModules(appPath string) []goModuleInfo {
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Root < result[j].Root
 	})
+	return result
+}
+
+func collectGoModuleCacheRoots() []string {
+	roots := map[string]bool{}
+	addRoot := func(root string) {
+		if root == "" {
+			return
+		}
+		if _, err := os.Stat(root); err == nil {
+			roots[root] = true
+		}
+	}
+
+	addRoot(strings.TrimSpace(os.Getenv("GOMODCACHE")))
+	for _, entry := range strings.Split(os.Getenv("GOPATH"), string(os.PathListSeparator)) {
+		trimmed := strings.TrimSpace(entry)
+		if trimmed == "" {
+			continue
+		}
+		addRoot(filepath.Join(trimmed, "pkg", "mod"))
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		addRoot(filepath.Join(home, "go", "pkg", "mod"))
+	}
+
+	result := make([]string, 0, len(roots))
+	for root := range roots {
+		result = append(result, root)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func escapeModuleCacheSegment(segment string) string {
+	builder := strings.Builder{}
+	for _, char := range segment {
+		if char >= 'A' && char <= 'Z' {
+			builder.WriteRune('!')
+			builder.WriteRune(char + ('a' - 'A'))
+			continue
+		}
+		builder.WriteRune(char)
+	}
+	return builder.String()
+}
+
+func buildModuleCacheCandidates(normalizedRef string) []descriptorCandidate {
+	segments := strings.Split(normalizedRef, "/")
+	if len(segments) < 2 {
+		return []descriptorCandidate{}
+	}
+
+	seen := map[string]bool{}
+	candidates := []descriptorCandidate{}
+	for _, moduleCacheRoot := range collectGoModuleCacheRoots() {
+		for index := len(segments); index >= 2; index-- {
+			moduleSegments := segments[:index]
+			relativeSegments := segments[index:]
+			modulePath := strings.Join(moduleSegments, "/")
+			moduleLeaf := escapeModuleCacheSegment(moduleSegments[len(moduleSegments)-1])
+			parentDir := filepath.Join(append([]string{moduleCacheRoot}, mapSegments(moduleSegments[:len(moduleSegments)-1], escapeModuleCacheSegment)...)...)
+			entries, err := os.ReadDir(parentDir)
+			if err != nil {
+				continue
+			}
+			sort.Slice(entries, func(i, j int) bool {
+				return entries[i].Name() > entries[j].Name()
+			})
+			for _, entry := range entries {
+				if !entry.IsDir() || !strings.HasPrefix(entry.Name(), moduleLeaf+"@") {
+					continue
+				}
+				packageRoot := filepath.Join(append([]string{parentDir, entry.Name()}, mapSegments(relativeSegments, escapeModuleCacheSegment)...)...)
+				descriptorPath := filepath.Join(packageRoot, "descriptor.json")
+				if _, err := os.Stat(descriptorPath); err != nil && !directoryLooksLikePackageRoot(packageRoot) {
+					continue
+				}
+				if seen[packageRoot] {
+					continue
+				}
+				seen[packageRoot] = true
+				candidates = append(candidates, descriptorCandidate{
+					PackageRoot:    packageRoot,
+					ModulePath:     modulePath,
+					GoPackagePath:  normalizedRef,
+					PackageVersion: strings.TrimPrefix(entry.Name(), moduleLeaf+"@"),
+					Source:         "package_source",
+				})
+			}
+		}
+	}
+	return candidates
+}
+
+func mapSegments(values []string, transform func(string) string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, transform(value))
+	}
 	return result
 }
 
@@ -2129,6 +2812,7 @@ func parseDescriptorFile(
 	source string,
 	modulePath string,
 	goPackagePath string,
+	packageVersion string,
 ) contribDescriptor {
 	contents, err := os.ReadFile(descriptorPath)
 	if err != nil {
@@ -2148,12 +2832,22 @@ func parseDescriptorFile(
 		descriptorType = inferContribType(ref)
 	}
 
+	resolvedVersion := valueOrFallback(stringValue(raw["version"]), valueOrFallback(version, packageVersion))
+	versionSource := "unknown"
+	if stringValue(raw["version"]) != "" {
+		versionSource = "descriptor"
+	} else if version != "" {
+		versionSource = "import"
+	} else if packageVersion != "" {
+		versionSource = "package"
+	}
+
 	return contribDescriptor{
 		Ref:                ref,
 		Alias:              alias,
 		Type:               descriptorType,
 		Name:               valueOrFallback(stringValue(raw["name"]), valueOrFallback(alias, inferAlias(ref))),
-		Version:            valueOrFallback(stringValue(raw["version"]), version),
+		Version:            resolvedVersion,
 		Title:              stringValue(raw["title"]),
 		Settings:           normalizeDescriptorFields(raw["settings"]),
 		Inputs:             normalizeDescriptorFields(firstNonNil(raw["input"], raw["inputs"])),
@@ -2161,7 +2855,25 @@ func parseDescriptorFile(
 		Examples:           normalizeStringArray(raw["examples"]),
 		CompatibilityNotes: normalizeStringArray(raw["compatibilityNotes"]),
 		Source:             source,
-		Evidence:           createEvidence(source, ref, alias, version, descriptorPath, filepath.Dir(descriptorPath), modulePath, goPackagePath, nil),
+		Evidence: createEvidence(
+			source,
+			ref,
+			alias,
+			resolvedVersion,
+			descriptorPath,
+			filepath.Dir(descriptorPath),
+			modulePath,
+			goPackagePath,
+			nil,
+			true,
+			true,
+			versionSource,
+			inferSignatureCompleteness(
+				normalizeDescriptorFields(raw["settings"]),
+				normalizeDescriptorFields(firstNonNil(raw["input"], raw["inputs"])),
+				normalizeDescriptorFields(firstNonNil(raw["output"], raw["outputs"])),
+			),
+		),
 	}
 }
 
@@ -2500,6 +3212,155 @@ func firstNonNil(values ...any) any {
 	return nil
 }
 
+func sortedKeys(values map[string]bool) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func collectResolverKinds(value any, propertyRefs map[string]bool, envRefs map[string]bool) {
+	switch typed := value.(type) {
+	case string:
+		for _, reference := range collectResolverReferences(typed) {
+			if strings.HasPrefix(reference, "$property.") {
+				propertyRefs[strings.TrimPrefix(reference, "$property.")] = true
+			}
+			if strings.HasPrefix(reference, "$env.") {
+				envRefs[strings.TrimPrefix(reference, "$env.")] = true
+			}
+		}
+	case []any:
+		for _, entry := range typed {
+			collectResolverKinds(entry, propertyRefs, envRefs)
+		}
+	case map[string]any:
+		for _, nested := range typed {
+			collectResolverKinds(nested, propertyRefs, envRefs)
+		}
+	}
+}
+
+func inferPropertyType(app flogoApp, propertyName string) string {
+	for _, property := range app.Properties {
+		if name, ok := property["name"].(string); ok && name == propertyName {
+			if typed, ok := property["type"].(string); ok && typed != "" {
+				return typed
+			}
+			switch property["value"].(type) {
+			case float64, int, int64:
+				return "number"
+			case bool:
+				return "boolean"
+			case string:
+				return "string"
+			}
+		}
+	}
+	lowerName := strings.ToLower(propertyName)
+	if isNumericHint(lowerName) {
+		return "number"
+	}
+	if strings.Contains(lowerName, "enabled") || strings.Contains(lowerName, "disabled") || strings.Contains(lowerName, "active") {
+		return "boolean"
+	}
+	return "string"
+}
+
+func looksSensitiveConfig(name string) bool {
+	return regexp.MustCompile(`(?i)(secret|token|password|key|credential|clientsecret|apikey)`).MatchString(name)
+}
+
+func buildDeploymentNotes(propertyRefs map[string]bool, envRefs map[string]bool, undefinedPropertyRefs map[string]bool, unusedProperties []string) []string {
+	notes := []string{}
+	if len(propertyRefs) > 0 {
+		notes = append(notes, "Property-backed configuration should be declared on the app so flows can be reused across trigger types.")
+	}
+	if len(envRefs) > 0 {
+		notes = append(notes, "Environment-backed configuration should be supplied per deployment target rather than embedded in flogo.json.")
+	}
+	if len(undefinedPropertyRefs) > 0 {
+		notes = append(notes, "Undefined property references should be declared before promoting the app beyond development.")
+	}
+	if len(unusedProperties) > 0 {
+		notes = append(notes, "Unused declared properties should be removed or wired into mappings to keep configuration intentional.")
+	}
+	return notes
+}
+
+func buildProfileSpecificNotes(profile string, propertyRefs map[string]bool, envRefs map[string]bool) []string {
+	notes := []string{}
+	switch profile {
+	case "rest_service":
+		if len(envRefs) > 0 {
+			notes = append(notes, "REST services should prefer environment variables for external endpoints, secrets, and operational timeouts.")
+		}
+		if len(propertyRefs) > 0 {
+			notes = append(notes, "REST services should keep reusable flow defaults in app properties when they are not deployment-secret values.")
+		}
+	case "timer_job":
+		notes = append(notes, "Timer jobs should keep schedule-local defaults in properties and use environment variables for external integrations.")
+	case "cli_tool":
+		notes = append(notes, "CLI tools should prefer environment variables for runtime invocation values and properties for baked-in defaults.")
+	case "channel_worker":
+		notes = append(notes, "Channel workers should keep internal reusable defaults in properties unless the value is deployment-specific.")
+	case "serverless":
+		notes = append(notes, "Serverless profiles should bias toward environment variables for operational configuration.")
+	case "edge_binary":
+		notes = append(notes, "Edge binaries should bias toward app properties for embedded and offline-safe defaults.")
+	}
+	return notes
+}
+
+func diffResolvedValues(expected map[string]any, actual map[string]any) []mappingDifference {
+	differences := []mappingDifference{}
+	for pathKey, expectedValue := range expected {
+		actualValue, ok := actual[pathKey]
+		if !ok {
+			differences = append(differences, mappingDifference{
+				Path:     pathKey,
+				Expected: expectedValue,
+				Actual:   nil,
+				Message:  fmt.Sprintf("Expected value for %q was not resolved", pathKey),
+			})
+			continue
+		}
+		if stableJSONString(expectedValue) != stableJSONString(actualValue) {
+			differences = append(differences, mappingDifference{
+				Path:     pathKey,
+				Expected: expectedValue,
+				Actual:   actualValue,
+				Message:  fmt.Sprintf("Resolved value for %q does not match the expected output", pathKey),
+			})
+		}
+	}
+	return differences
+}
+
+func stableJSONString(value any) string {
+	bytes, _ := json.Marshal(sortValue(value))
+	return string(bytes)
+}
+
+func versionSourceFor(version string, hasDescriptor bool) string {
+	if hasDescriptor && version != "" {
+		return "descriptor"
+	}
+	if version != "" {
+		return "import"
+	}
+	return "unknown"
+}
+
+func inferSignatureCompleteness(settings []contribField, inputs []contribField, outputs []contribField) string {
+	if len(settings)+len(inputs)+len(outputs) > 0 {
+		return "complete"
+	}
+	return "minimal"
+}
+
 func dedupeDiagnostics(items []diagnostic) []diagnostic {
 	seen := map[string]bool{}
 	result := make([]diagnostic, 0, len(items))
@@ -2551,7 +3412,21 @@ func buildDescriptor(ref string, alias string, version string, forcedType string
 		descriptor.Type = forcedType
 	}
 
-	descriptor.Evidence = createEvidence(descriptor.Source, ref, normalizedAlias, version, "", "", "", "", nil)
+	descriptor.Evidence = createEvidence(
+		descriptor.Source,
+		ref,
+		normalizedAlias,
+		version,
+		"",
+		"",
+		"",
+		"",
+		nil,
+		false,
+		ok,
+		versionSourceFor(version, false),
+		inferSignatureCompleteness(descriptor.Settings, descriptor.Inputs, descriptor.Outputs),
+	)
 
 	return descriptor
 }

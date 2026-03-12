@@ -49,6 +49,8 @@ Important analysis-only modes:
 - `inputs.mode = "catalog"`
 - `inputs.mode = "contrib_evidence"`
 - `inputs.mode = "mapping_preview"`
+- `inputs.mode = "mapping_test"`
+- `inputs.mode = "property_plan"`
 - `inputs.mode = "governance"`
 - `inputs.mode = "composition_compare"`
 
@@ -315,7 +317,32 @@ Current implementation notes:
 
 - governance currently checks duplicate aliases, missing imports, implicit alias use, missing flow/action refs, unused imports, and version drift heuristics,
 - governance now reports unresolved packages, fallback contribs, weak-evidence contribs, package-backed contribs, and descriptor-only contribs,
+- governance also returns categorized fields such as `unusedImports`, `missingImports`, `aliasRefMismatches`, `weakSignatureContribs`, `duplicateAliases`, and `conflictingVersions`,
 - the report artifact is backed by Blob/Azurite JSON storage and Prisma metadata.
+
+### `GET /v1/projects/:projectId/apps/:appId/properties/plan?profile=...`
+
+Returns the property/environment planning result plus a persisted artifact reference.
+
+Response shape:
+
+- `PropertyPlanResponse`
+
+Important query parameter:
+
+- `profile`
+  - `rest_service`
+  - `timer_job`
+  - `cli_tool`
+  - `channel_worker`
+  - `serverless`
+  - `edge_binary`
+
+Current implementation notes:
+
+- the planner now separates `recommendedSecretEnv` and `recommendedPlainEnv`,
+- planning is profile-aware, but it still stops short of generating deployment manifests,
+- the response artifact is backed by Blob/Azurite JSON storage and Prisma metadata.
 
 ### `POST /v1/projects/:projectId/apps/:appId/mappings/preview`
 
@@ -343,7 +370,33 @@ Key fields:
 Current implementation notes:
 
 - the preview artifact is backed by Blob/Azurite JSON storage and Prisma metadata,
-- `propertyPlan` now includes declared properties, undefined and unused refs, recommended properties, recommended environment variables, and deployment notes.
+- the preview now includes `paths`, `resolvedValues`, `scopeDiagnostics`, and `coercionDiagnostics`,
+- `propertyPlan` now includes declared properties, undefined and unused refs, recommended properties, recommended environment variables, profile-specific notes, and deployment notes.
+
+### `POST /v1/projects/:projectId/apps/:appId/mappings/test`
+
+Runs a deterministic mapping-resolution test for one node.
+
+Request shape:
+
+- `MappingTestSpec`
+
+Important fields:
+
+- `nodeId`
+- `sampleInput`
+- `expectedOutput`
+- `strict`
+
+Response shape:
+
+- `MappingTestResponse`
+
+Current implementation notes:
+
+- the test uses the same static mapping-analysis engine as preview, not runtime trace/replay,
+- unknown node IDs return a failing test result with diagnostics rather than a `404`,
+- the response artifact is backed by Blob/Azurite JSON storage and Prisma metadata.
 
 ### `POST /v1/projects/:projectId/apps/:appId/composition/compare`
 
@@ -488,6 +541,7 @@ Workflow behavior:
 
 - mutating workflows use build/run/smoke-oriented runner steps,
 - analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, or `preview_mapping`.
+- analysis-only workflows also support `test_mapping` and `plan_properties`.
 
 ## Runner-worker API
 
@@ -579,6 +633,10 @@ The most important ones are:
 - `MappingPreviewRequest`
 - `MappingPreviewResult`
 - `MappingPreviewResponse`
+- `PropertyPlanResponse`
+- `MappingTestSpec`
+- `MappingTestResult`
+- `MappingTestResponse`
 - `ValidationReport`
 - `RunnerJobSpec`
 - `RunnerJobResult`

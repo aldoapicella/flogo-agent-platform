@@ -104,10 +104,13 @@ The repo already supports a Phase 1 slice. Before adding new capability, underst
 - governance validation
 - composition comparison
 - mapping preview
+- deterministic mapping tests
 - coercion suggestions
-- property/environment planning
+- profile-aware property/environment planning
 - Blob/Azurite-backed app-analysis artifacts
 - analysis-only orchestration modes
+
+Treat the Phase 1 Core/mapping foundation as implemented. New Flogo-native work should generally target Phase 2 or later unless the task is explicitly about hardening existing Phase 1 behavior.
 
 Do not accidentally regress these while implementing later phases.
 
@@ -186,6 +189,13 @@ Be especially careful with:
 - `$trigger`
 
 Mapping/type/scope behavior is one of the highest-value areas in this repo. When adding Flogo-native logic, prefer deterministic mapping analysis over vague heuristics whenever possible.
+
+If you touch mapping behavior, account for both:
+
+- preview behavior
+- mapping-test behavior
+
+Those surfaces should stay aligned because the mapping-test API is intentionally built on the same static-analysis engine as preview.
 
 ### Flows are reusable units
 

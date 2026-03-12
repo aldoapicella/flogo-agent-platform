@@ -64,7 +64,11 @@ It currently supports:
 - contribution evidence inspection,
 - governance validation,
 - composition comparison,
-- mapping preview.
+- mapping preview,
+- mapping tests,
+- property planning,
+- Go module cache-aware package discovery for contribution evidence,
+- descriptor-aware coercion diagnostics.
 
 It is expected to grow into:
 
@@ -107,6 +111,7 @@ Responsibilities:
 - store tasks, events, approvals, artifacts, build runs, and test runs through Prisma,
 - expose task history and run summaries,
 - expose direct app-analysis endpoints for graph, inventory, catalog, descriptor inspection, contribution evidence inspection, governance reporting, composition comparison, artifact listing, and mapping preview,
+- expose direct app-analysis endpoints for property planning and mapping tests,
 - persist app-analysis payload JSON to Blob/Azurite-backed storage,
 - accept internal sync callbacks from the orchestrator and runner paths.
 
@@ -146,6 +151,8 @@ Current workflow modes:
   - `validate_governance`
   - `compare_composition`
   - `preview_mapping`
+  - `test_mapping`
+  - `plan_properties`
 
 ## Runner-worker
 
@@ -173,6 +180,8 @@ Current notable behavior:
   - `validate_governance`
   - `compare_composition`
   - `preview_mapping`
+  - `test_mapping`
+  - `plan_properties`
 - Container Apps Job mode includes ARM start/poll logic and job-template routing,
 - build/smoke steps are still less Flogo-native than the catalog/preview slice and remain an ongoing implementation area.
 
@@ -210,6 +219,8 @@ Defines runtime schemas and TypeScript types for:
 - contribution catalogs and descriptors,
 - contribution evidence inspection,
 - mapping preview requests and results.
+- mapping test requests and results,
+- property-plan responses.
 
 ## `packages/flogo-graph`
 
@@ -225,8 +236,9 @@ Implements the TypeScript-side Flogo domain model, including:
 - governance validation,
 - composition comparison,
 - mapping classification and preview,
+- mapping test execution,
 - coercion suggestions,
-- property analysis,
+- deployment-profile-aware property analysis,
 - app diff summarization.
 
 ## `packages/tools`
@@ -269,6 +281,8 @@ Implements the current Go-side Flogo-native command surface:
 - `governance validate`
 - `compose compare`
 - `preview mapping`
+- `mapping test`
+- `properties plan`
 
 ## End-to-end runtime flows
 
@@ -327,7 +341,7 @@ sequenceDiagram
 
 ## Flogo-native capability baseline
 
-The platform is currently strongest in the Phase 1 capability area:
+The platform has completed the Phase 1 capability area:
 
 - contribution inventory,
 - contribution cataloging,
@@ -336,8 +350,10 @@ The platform is currently strongest in the Phase 1 capability area:
 - governance validation,
 - composition comparison,
 - mapping preview,
+- deterministic mapping tests,
 - coercion suggestions,
 - richer property/environment planning,
+- deployment-profile-aware property/environment planning,
 - analysis-only orchestration modes.
 
 See [Capability Matrix](./capability-matrix.md) for the detailed breakdown.
@@ -357,7 +373,7 @@ Persisted through Prisma today:
 
 ### Current partial persistence
 
-- app-scoped inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, and mapping-preview artifacts are persisted through hidden synthetic analysis tasks,
+- app-scoped inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test artifacts are persisted through hidden synthetic analysis tasks,
 - those app-analysis payloads are stored in Blob/Azurite-backed JSON objects,
 - broader task artifacts outside the app-analysis slice still include logical/local URIs.
 
@@ -372,7 +388,7 @@ Persisted through Prisma today:
 
 - `flogo.json` is still the canonical artifact even as the Go helper path grows.
 - The Go helper is intentionally a finite execution binary, not a new always-on service.
-- The current helper uses contribution inventory plus module-aware package discovery, evidence confidence, normalized Flogo metadata, and known-registry inference for the Phase 1 analysis path; it is not yet a full Core/Flow-native runtime.
+- The current helper uses contribution inventory plus module-aware package discovery, evidence confidence, normalized Flogo metadata, static mapping evaluation, and known-registry inference for the Phase 1 analysis path; it is not yet a full Core/Flow-native runtime.
 - Flow-aware, runtime-aware, and extension-aware capabilities are still roadmap items.
 - In restricted shells on Windows, `next build` and Vitest can fail with `spawn EPERM` even when typecheck is clean.
 

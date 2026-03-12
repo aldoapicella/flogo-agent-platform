@@ -134,6 +134,116 @@ describe("RunnerExecutorService", () => {
     expect(result.artifacts.some((artifact) => artifact.type === "mapping_preview")).toBe(true);
   });
 
+  it("executes helper-backed mapping test analysis and publishes a mapping-test artifact", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          pass: true,
+          nodeId: "log-request",
+          actualOutput: {
+            "input.message": "received hello request"
+          },
+          differences: [],
+          diagnostics: []
+        },
+        propertyPlan: {
+          declaredProperties: [],
+          propertyRefs: [],
+          envRefs: [],
+          undefinedPropertyRefs: [],
+          unusedProperties: [],
+          deploymentProfile: "rest_service",
+          recommendations: [],
+          recommendedProperties: [],
+          recommendedEnv: [],
+          recommendedSecretEnv: [],
+          recommendedPlainEnv: [],
+          deploymentNotes: [],
+          profileSpecificNotes: [],
+          diagnostics: []
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-mapping-test",
+      jobKind: "mapping_test",
+      stepType: "test_mapping",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://mapping-test",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        sampleInput: {
+          flow: {},
+          activity: {},
+          env: {},
+          property: {},
+          trigger: {}
+        },
+        expectedOutput: {
+          "input.message": "received hello request"
+        },
+        strict: true
+      },
+      targetNodeId: "log-request",
+      command: [],
+      containerArgs: []
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.artifacts.some((artifact) => artifact.type === "mapping_test")).toBe(true);
+  });
+
+  it("executes helper-backed property planning and publishes a property-plan artifact", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        propertyPlan: {
+          declaredProperties: [],
+          propertyRefs: [],
+          envRefs: [],
+          undefinedPropertyRefs: [],
+          unusedProperties: [],
+          deploymentProfile: "rest_service",
+          recommendations: [],
+          recommendedProperties: [],
+          recommendedEnv: [],
+          recommendedSecretEnv: [],
+          recommendedPlainEnv: [],
+          deploymentNotes: [],
+          profileSpecificNotes: [],
+          diagnostics: []
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-property-plan",
+      jobKind: "property_plan",
+      stepType: "plan_properties",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://property-plan",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        profile: "rest_service"
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.artifacts.some((artifact) => artifact.type === "property_plan")).toBe(true);
+  });
+
   it("executes helper-backed descriptor inspection and publishes a descriptor artifact", async () => {
     process.env.FLOGO_HELPER_BIN = await createHelperScript(
       JSON.stringify({

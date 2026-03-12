@@ -77,6 +77,19 @@ export class FlogoAppsController {
     return governance;
   }
 
+  @Get(":appId/properties/plan")
+  async getPropertyPlan(
+    @Param("projectId") projectId: string,
+    @Param("appId") appId: string,
+    @Query("profile") profile?: string
+  ) {
+    const plan = await this.flogoAppsService.getPropertyPlan(projectId, appId, profile);
+    if (!plan) {
+      throw new NotFoundException(`Unknown app ${appId}`);
+    }
+    return plan;
+  }
+
   @Post(":appId/mappings/preview")
   async previewMapping(@Param("projectId") projectId: string, @Param("appId") appId: string, @Body() body: unknown) {
     const preview = await this.flogoAppsService.previewMapping(projectId, appId, body);
@@ -84,6 +97,15 @@ export class FlogoAppsController {
       throw new NotFoundException(`Unknown app ${appId}`);
     }
     return preview;
+  }
+
+  @Post(":appId/mappings/test")
+  async testMapping(@Param("projectId") projectId: string, @Param("appId") appId: string, @Body() body: unknown) {
+    const result = await this.flogoAppsService.testMapping(projectId, appId, body);
+    if (!result) {
+      throw new NotFoundException(`Unknown app ${appId}`);
+    }
+    return result;
   }
 
   @Post(":appId/composition/compare")

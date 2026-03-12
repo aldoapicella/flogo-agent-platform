@@ -22,17 +22,24 @@ import {
   ContribResolutionEvidenceSchema,
   type ContribResolutionEvidence,
   type Diagnostic,
+  DeploymentProfileSchema,
+  type DeploymentProfile,
   FlogoAppGraphSchema,
   FlogoAppSchema,
   type FlogoApp,
   type FlogoAppGraph,
   type FlogoFlow,
+  type FlogoTask,
   GovernanceReportSchema,
   type GovernanceReport,
   MappingKindSchema,
+  MappingTestResultSchema,
+  type MappingDifference,
+  type MappingPath,
   MappingPreviewResultSchema,
   type MappingPreviewContext,
   type MappingPreviewField,
+  type MappingTestResult,
   PropertyPlanSchema,
   type PropertyPlan,
   type ValidationReport,
@@ -85,6 +92,7 @@ type DescriptorCandidate = {
   packageRoot?: string;
   modulePath?: string;
   goPackagePath?: string;
+  packageVersion?: string;
   source: "app_descriptor" | "workspace_descriptor" | "package_descriptor";
 };
 
@@ -92,6 +100,7 @@ type PackageCandidate = {
   packageRoot: string;
   modulePath?: string;
   goPackagePath?: string;
+  packageVersion?: string;
   source: "package_source";
 };
 
@@ -582,6 +591,10 @@ export function previewMapping(
     return MappingPreviewResultSchema.parse({
       nodeId,
       fields: [],
+      paths: [],
+      resolvedValues: {},
+      scopeDiagnostics: [],
+      coercionDiagnostics: [],
       suggestedCoercions: [],
       diagnostics: [createDiagnostic("flogo.mapping.node_not_found", `Unable to locate node "${nodeId}"`, "error", nodeId)]
     });
@@ -592,14 +605,20 @@ export function previewMapping(
     ...collectMappingFields("settings", located.task.settings, sampleInput),
     ...collectMappingFields("output", located.task.output, sampleInput)
   ];
-  const suggestedCoercions = suggestCoercions(app, sampleInput).filter((diagnostic) => diagnostic.path?.startsWith(nodeId));
+  const scopeDiagnostics = evaluateScopeDiagnostics(located.flow, located.task, fieldEntries);
+  const coercionDiagnostics = suggestTaskCoercions(app, located.task, sampleInput);
+  const diagnostics = dedupeDiagnostics([...fieldEntries.flatMap((field) => field.diagnostics), ...scopeDiagnostics, ...coercionDiagnostics]);
 
   return MappingPreviewResultSchema.parse({
     nodeId,
     flowId: located.flowId,
     fields: fieldEntries,
-    suggestedCoercions,
-    diagnostics: fieldEntries.flatMap((field) => field.diagnostics)
+    paths: collectMappingPaths(nodeId, fieldEntries),
+    resolvedValues: buildResolvedValueMap(fieldEntries),
+    scopeDiagnostics,
+    coercionDiagnostics,
+    suggestedCoercions: coercionDiagnostics,
+    diagnostics
   });
 }
 
@@ -612,22 +631,17 @@ export function suggestCoercions(
 
   for (const resource of app.resources) {
     for (const task of resource.data.tasks) {
-      const sections = [
-        ["input", task.input] as const,
-        ["settings", task.settings] as const,
-        ["output", task.output] as const
-      ];
-
-      for (const [section, value] of sections) {
-        collectCoercionDiagnostics(value, `${task.id}.${section}`, diagnostics, sampleInput);
-      }
+      diagnostics.push(...suggestTaskCoercions(app, task, sampleInput));
     }
   }
 
-  return diagnostics;
+  return dedupeDiagnostics(diagnostics);
 }
 
-export function analyzePropertyUsage(document: string | FlogoApp | unknown): PropertyPlan {
+export function analyzePropertyUsage(
+  document: string | FlogoApp | unknown,
+  deploymentProfile: DeploymentProfile = "rest_service"
+): PropertyPlan {
   const app = parseFlogoAppDocument(document);
   const propertyRefs = new Set<string>();
   const envRefs = new Set<string>();
@@ -674,12 +688,25 @@ export function analyzePropertyUsage(document: string | FlogoApp | unknown): Pro
     }
   }
 
+  const recommendedEnv = Array.from(envRefs)
+    .sort()
+    .map((name) => ({
+      name,
+      rationale: "This environment variable is referenced through $env and should be supplied per deployment environment."
+    }));
+  const recommendedSecretEnv = recommendedEnv.filter((entry) => looksSensitiveConfig(entry.name)).map((entry) => ({
+    ...entry,
+    rationale: `${entry.rationale} Treat it as secret configuration.`
+  }));
+  const recommendedPlainEnv = recommendedEnv.filter((entry) => !looksSensitiveConfig(entry.name));
+
   return PropertyPlanSchema.parse({
     declaredProperties: Array.from(declaredProperties).sort(),
     propertyRefs: Array.from(propertyRefs).sort(),
     envRefs: Array.from(envRefs).sort(),
     undefinedPropertyRefs: Array.from(undefinedPropertyRefs).sort(),
     unusedProperties,
+    deploymentProfile,
     recommendations: [
       ...Array.from(propertyRefs)
         .sort()
@@ -703,13 +730,49 @@ export function analyzePropertyUsage(document: string | FlogoApp | unknown): Pro
         rationale: "This property is referenced in mappings but is not declared on the app.",
         inferredType: inferPropertyType(app, name)
       })),
-    recommendedEnv: Array.from(envRefs)
-      .sort()
-      .map((name) => ({
-        name,
-        rationale: "This environment variable is referenced through $env and should be supplied per deployment environment."
-      })),
+    recommendedEnv,
+    recommendedSecretEnv,
+    recommendedPlainEnv,
     deploymentNotes: buildDeploymentNotes(propertyRefs, envRefs, undefinedPropertyRefs, unusedProperties),
+    profileSpecificNotes: buildProfileSpecificNotes(deploymentProfile, propertyRefs, envRefs),
+    diagnostics
+  });
+}
+
+export function runMappingTest(
+  document: string | FlogoApp | unknown,
+  nodeId: string,
+  sampleInput: MappingPreviewContext = createEmptyMappingContext(),
+  expectedOutput: Record<string, unknown> = {},
+  strict = true
+): MappingTestResult {
+  const preview = previewMapping(document, nodeId, sampleInput);
+  const actualOutput = preview.resolvedValues;
+  const differences = diffResolvedValues(expectedOutput, actualOutput);
+  const diagnostics = [...preview.diagnostics];
+
+  if (strict) {
+    for (const pathKey of Object.keys(actualOutput)) {
+      if (!(pathKey in expectedOutput)) {
+        differences.push({
+          path: pathKey,
+          expected: undefined,
+          actual: actualOutput[pathKey],
+          message: `Resolved value for "${pathKey}" was not expected`
+        });
+      }
+    }
+  }
+
+  const pass =
+    differences.length === 0 &&
+    diagnostics.every((diagnostic) => diagnostic.severity !== "error");
+
+  return MappingTestResultSchema.parse({
+    pass,
+    nodeId,
+    actualOutput,
+    differences,
     diagnostics
   });
 }
@@ -802,6 +865,15 @@ export function validateGovernance(document: string | FlogoApp | unknown, option
     .filter((entry) => entry.source === "app_descriptor" || entry.source === "workspace_descriptor")
     .map((entry) => entry.ref)
     .sort();
+  const weakSignatureContribs = inventory.entries
+    .filter((entry) => entry.signatureCompleteness !== "complete")
+    .map((entry) => entry.ref)
+    .sort();
+  const duplicateAliases = Array.from(importsByAlias.entries())
+    .filter(([, entries]) => entries.length > 1)
+    .map(([alias]) => alias)
+    .sort();
+  const conflictingVersions: string[] = [];
 
   for (const entry of app.imports) {
     const current = importsByAlias.get(entry.alias) ?? [];
@@ -897,6 +969,7 @@ export function validateGovernance(document: string | FlogoApp | unknown, option
 
     const uniqueVersions = new Set(entries.map((entry) => entry.version).filter((value): value is string => Boolean(value)));
     if (uniqueVersions.size > 1) {
+      conflictingVersions.push(alias);
       versionFindings.push({
         alias,
         ref: entries[0]?.ref ?? "",
@@ -1042,6 +1115,9 @@ export function validateGovernance(document: string | FlogoApp | unknown, option
     aliasIssues,
     orphanedRefs,
     versionFindings,
+    unusedImports: app.imports.filter((entry) => !usedImportAliases.has(entry.alias)).map((entry) => entry.alias).sort(),
+    missingImports: aliasIssues.filter((issue) => issue.kind === "missing_import").map((issue) => issue.alias).sort(),
+    aliasRefMismatches: aliasIssues.filter((issue) => issue.kind === "alias_ref_mismatch").map((issue) => issue.alias).sort(),
     inventorySummary: {
       entryCount: inventory.entries.length,
       packageBackedCount: inventory.entries.filter((entry) => isPackageBackedSource(entry.source)).length,
@@ -1050,8 +1126,11 @@ export function validateGovernance(document: string | FlogoApp | unknown, option
     unresolvedPackages,
     fallbackContribs,
     weakEvidenceContribs,
+    weakSignatureContribs,
     packageBackedContribs,
     descriptorOnlyContribs,
+    duplicateAliases,
+    conflictingVersions: conflictingVersions.sort(),
     diagnostics
   });
 }
@@ -1088,6 +1167,8 @@ export function compareJsonVsProgrammatic(
     programmaticHash,
     comparisonBasis,
     signatureEvidenceLevel: summarizeSignatureEvidenceLevel(inventory.entries),
+    signatureCoverage: summarizeSignatureCoverage(inventory.entries),
+    comparisonLimitations: buildCompositionLimitations(inventory.entries, diagnostics, request),
     inventoryRefsUsed,
     differences,
     diagnostics
@@ -1114,7 +1195,22 @@ function buildDescriptorFromRef(ref: string, alias?: string, version?: string, f
     examples: registryMatch?.examples ?? [],
     compatibilityNotes: registryMatch?.compatibilityNotes ?? [],
     source: registryMatch?.source ?? "inferred",
-    evidence: createDescriptorEvidence(registryMatch ? "registry" : "inferred", ref, normalizedAlias, version)
+    evidence: createDescriptorEvidence(
+      registryMatch ? "registry" : "inferred",
+      ref,
+      normalizedAlias,
+      version,
+      undefined,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      Boolean(registryMatch),
+      Boolean(registryMatch),
+      version ? "import" : "unknown",
+      inferSignatureCompleteness(registryMatch?.settings ?? [], registryMatch?.inputs ?? [], registryMatch?.outputs ?? [])
+    )
   });
 }
 
@@ -1139,7 +1235,34 @@ function buildFlowInventoryEntry(resource: FlogoFlow): ContributionInventoryEntr
     examples: [`Invoke reusable flow ${resource.id}`],
     compatibilityNotes: ["Flow resources behave like reusable actions"],
     source: "flow-resource",
-    evidence: createDescriptorEvidence("flow_resource", `#flow:${resource.id}`, "flow")
+    evidence: createDescriptorEvidence(
+      "flow_resource",
+      `#flow:${resource.id}`,
+      "flow",
+      undefined,
+      undefined,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      "high",
+      false,
+      true,
+      "unknown",
+      inferSignatureCompleteness(
+        [],
+        (resource.data.metadata?.input ?? []).map((item, index) => ({
+          name: typeof item.name === "string" ? item.name : `input_${index}`,
+          type: typeof item.type === "string" ? item.type : undefined,
+          required: Boolean(item.required)
+        })),
+        (resource.data.metadata?.output ?? []).map((item, index) => ({
+          name: typeof item.name === "string" ? item.name : `output_${index}`,
+          type: typeof item.type === "string" ? item.type : undefined,
+          required: Boolean(item.required)
+        }))
+      )
+    )
   });
 
   return ContributionInventoryEntrySchema.parse({
@@ -1152,6 +1275,10 @@ function buildFlowInventoryEntry(resource: FlogoFlow): ContributionInventoryEntr
     source: "flow_resource",
     confidence: "high",
     discoveryReason: describeDiscoveryReason("flow_resource", descriptor.ref),
+    packageDescriptorFound: false,
+    packageMetadataFound: true,
+    versionSource: "unknown",
+    signatureCompleteness: inferSignatureCompleteness(descriptor.settings, descriptor.inputs, descriptor.outputs),
     settings: descriptor.settings,
     inputs: descriptor.inputs,
     outputs: descriptor.outputs,
@@ -1186,7 +1313,11 @@ function inventoryEntryToDescriptor(entry: ContributionInventoryEntry): ContribD
       entry.packageRoot,
       entry.modulePath,
       entry.goPackagePath,
-      entry.confidence
+      entry.confidence,
+      entry.packageDescriptorFound,
+      entry.packageMetadataFound,
+      entry.versionSource,
+      entry.signatureCompleteness
     )
   });
 }
@@ -1298,6 +1429,14 @@ function resolveInventoryEntry(
         descriptor.evidence?.descriptorPath,
         descriptor.evidence?.packageRoot
       ),
+      packageDescriptorFound: descriptor.evidence?.packageDescriptorFound ?? false,
+      packageMetadataFound: descriptor.evidence?.packageMetadataFound ?? false,
+      versionSource: descriptor.evidence?.versionSource,
+      signatureCompleteness: descriptor.evidence?.signatureCompleteness ?? inferSignatureCompleteness(
+        descriptor.settings,
+        descriptor.inputs,
+        descriptor.outputs
+      ),
       settings: descriptor.settings,
       inputs: descriptor.inputs,
       outputs: descriptor.outputs,
@@ -1335,14 +1474,16 @@ function resolveDescriptor(
         descriptorLocation.source,
         descriptorLocation.packageRoot,
         descriptorLocation.modulePath ?? descriptorModuleInfo?.modulePath,
-        descriptorLocation.goPackagePath ?? deriveGoPackagePath(descriptorLocation.packageRoot ?? "", descriptorModuleInfo)
+        descriptorLocation.goPackagePath ?? deriveGoPackagePath(descriptorLocation.packageRoot ?? "", descriptorModuleInfo),
+        descriptorLocation.packageVersion
       ),
       diagnostics: []
     };
   }
 
   if (descriptorLocation?.packageRoot) {
-    const descriptor = buildDescriptorFromRef(resolvedRef, normalizedAlias, version, forcedType);
+    const discoveredVersion = version ?? descriptorLocation.packageVersion;
+    const descriptor = buildDescriptorFromRef(resolvedRef, normalizedAlias, discoveredVersion, forcedType);
     const source = "package_source";
     return {
       descriptor: ContribDescriptorSchema.parse({
@@ -1352,12 +1493,17 @@ function resolveDescriptor(
           source,
           resolvedRef,
           normalizedAlias,
-          version,
+          discoveredVersion,
           undefined,
           [],
           descriptorLocation.packageRoot,
           descriptorLocation.modulePath,
-          descriptorLocation.goPackagePath
+          descriptorLocation.goPackagePath,
+          undefined,
+          false,
+          true,
+          discoveredVersion ? (version ? "import" : "package") : "unknown",
+          inferSignatureCompleteness(descriptor.settings, descriptor.inputs, descriptor.outputs)
         )
       }),
       diagnostics: [
@@ -1375,7 +1521,8 @@ function resolveDescriptor(
           {
             packageRoot: descriptorLocation.packageRoot,
             modulePath: descriptorLocation.modulePath,
-            goPackagePath: descriptorLocation.goPackagePath
+            goPackagePath: descriptorLocation.goPackagePath,
+            packageVersion: descriptorLocation.packageVersion
           }
         )
       ]
@@ -1591,6 +1738,8 @@ function findPackageRoot(ref: string, options?: ContribLookupOptions) {
     }
   }
 
+  candidates.push(...buildModuleCacheCandidates(normalizedRef));
+
   for (const root of buildSearchRoots(options)) {
     candidates.push({
       packageRoot: path.join(root, "vendor", normalizedRef),
@@ -1637,18 +1786,20 @@ function parseDescriptorFile(
   source: ContribResolutionEvidence["source"] = "descriptor",
   packageRoot?: string,
   modulePath?: string,
-  goPackagePath?: string
+  goPackagePath?: string,
+  packageVersion?: string
 ): ContribDescriptor {
   const raw = JSON.parse(readFileSync(descriptorPath, "utf8")) as Record<string, unknown>;
   const fieldSet = (value: unknown) => normalizeDescriptorFields(value);
   const descriptorType = normalizeDescriptorType(raw.type) ?? forcedType ?? inferContribType(ref);
+  const resolvedVersion = typeof raw.version === "string" ? raw.version : version ?? packageVersion;
 
   return ContribDescriptorSchema.parse({
     ref,
     alias,
     type: descriptorType,
     name: typeof raw.name === "string" ? raw.name : alias ?? inferNameFromRef(ref),
-    version: typeof raw.version === "string" ? raw.version : version,
+    version: resolvedVersion,
     title: typeof raw.title === "string" ? raw.title : undefined,
     settings: fieldSet(raw.settings),
     inputs: fieldSet(raw.input ?? raw.inputs),
@@ -1656,7 +1807,22 @@ function parseDescriptorFile(
     examples: normalizeStringArray(raw.examples),
     compatibilityNotes: normalizeStringArray(raw.compatibilityNotes),
     source,
-    evidence: createDescriptorEvidence(source, ref, alias, version, descriptorPath, [], packageRoot, modulePath, goPackagePath)
+    evidence: createDescriptorEvidence(
+      source,
+      ref,
+      alias,
+      resolvedVersion,
+      descriptorPath,
+      [],
+      packageRoot,
+      modulePath,
+      goPackagePath,
+      undefined,
+      true,
+      true,
+      typeof raw.version === "string" ? "descriptor" : version ? "import" : packageVersion ? "package" : "unknown",
+      inferSignatureCompleteness(fieldSet(raw.settings), fieldSet(raw.input ?? raw.inputs), fieldSet(raw.output ?? raw.outputs))
+    )
   });
 }
 
@@ -1701,7 +1867,11 @@ function createDescriptorEvidence(
   packageRoot?: string,
   modulePath?: string,
   goPackagePath?: string,
-  confidence?: ContribResolutionEvidence["confidence"]
+  confidence?: ContribResolutionEvidence["confidence"],
+  packageDescriptorFound = false,
+  packageMetadataFound = false,
+  versionSource: ContribResolutionEvidence["versionSource"] = "unknown",
+  signatureCompleteness: ContribResolutionEvidence["signatureCompleteness"] = "minimal"
 ): ContribResolutionEvidence {
   return ContribResolutionEvidenceSchema.parse({
     source,
@@ -1713,6 +1883,10 @@ function createDescriptorEvidence(
     importAlias,
     version,
     confidence: confidence ?? deriveEvidenceConfidence(source),
+    packageDescriptorFound,
+    packageMetadataFound,
+    versionSource,
+    signatureCompleteness,
     diagnostics
   });
 }
@@ -1771,6 +1945,17 @@ function buildDescriptorCandidates(ref: string, options?: ContribLookupOptions):
     });
   }
 
+  for (const candidate of buildModuleCacheCandidates(normalizedRef)) {
+    pushCandidate({
+      descriptorPath: path.join(candidate.packageRoot, "descriptor.json"),
+      packageRoot: candidate.packageRoot,
+      modulePath: candidate.modulePath,
+      goPackagePath: candidate.goPackagePath,
+      packageVersion: candidate.packageVersion,
+      source: "package_descriptor"
+    });
+  }
+
   for (const root of buildSearchRoots(options)) {
     pushCandidate({
       descriptorPath: path.join(root, "vendor", normalizedRef, "descriptor.json"),
@@ -1819,6 +2004,97 @@ function collectGoModules(options?: ContribLookupOptions): GoModuleInfo[] {
     }
   }
   return Array.from(modules.values());
+}
+
+function collectGoModuleCacheRoots() {
+  const roots = new Set<string>();
+  const addRoot = (root?: string) => {
+    if (!root) {
+      return;
+    }
+    const resolved = path.resolve(root);
+    if (existsSync(resolved)) {
+      roots.add(resolved);
+    }
+  };
+
+  addRoot(process.env.GOMODCACHE);
+
+  for (const root of process.env.GOPATH?.split(path.delimiter).map((entry) => entry.trim()).filter(Boolean) ?? []) {
+    addRoot(path.join(root, "pkg", "mod"));
+  }
+
+  if (process.env.USERPROFILE) {
+    addRoot(path.join(process.env.USERPROFILE, "go", "pkg", "mod"));
+  }
+  if (process.env.HOME) {
+    addRoot(path.join(process.env.HOME, "go", "pkg", "mod"));
+  }
+
+  return Array.from(roots);
+}
+
+function escapeModuleCacheSegment(segment: string) {
+  return segment.replace(/[A-Z]/g, (value) => `!${value.toLowerCase()}`);
+}
+
+function buildModuleCacheCandidates(normalizedRef: string): PackageCandidate[] {
+  const segments = normalizedRef.split("/").filter(Boolean);
+  if (segments.length < 2) {
+    return [];
+  }
+
+  const candidates: PackageCandidate[] = [];
+  const seen = new Set<string>();
+
+  for (const moduleCacheRoot of collectGoModuleCacheRoots()) {
+    for (let index = segments.length; index >= 2; index -= 1) {
+      const moduleSegments = segments.slice(0, index);
+      const relativeSegments = segments.slice(index);
+      const modulePath = moduleSegments.join("/");
+      const parentDir = path.join(moduleCacheRoot, ...moduleSegments.slice(0, -1).map(escapeModuleCacheSegment));
+      const moduleLeaf = escapeModuleCacheSegment(moduleSegments.at(-1) ?? "");
+      if (!moduleLeaf || !existsSync(parentDir)) {
+        continue;
+      }
+
+      let entries: Array<{ isDirectory(): boolean; name: string }> = [];
+      try {
+        entries = readdirSync(parentDir, { withFileTypes: true }).map((entry) => ({
+          isDirectory: () => entry.isDirectory(),
+          name: String(entry.name)
+        }));
+      } catch {
+        continue;
+      }
+
+      const matchingEntries = entries
+        .filter((entry) => entry.isDirectory() && entry.name.startsWith(`${moduleLeaf}@`))
+        .sort((left, right) => right.name.localeCompare(left.name));
+
+      for (const entry of matchingEntries) {
+        const packageVersion = entry.name.slice(moduleLeaf.length + 1);
+        const packageRoot = path.join(parentDir, entry.name, ...relativeSegments.map(escapeModuleCacheSegment));
+        const descriptorPath = path.join(packageRoot, "descriptor.json");
+        if (!existsSync(descriptorPath) && !directoryLooksLikePackageRoot(packageRoot)) {
+          continue;
+        }
+        if (seen.has(packageRoot)) {
+          continue;
+        }
+        seen.add(packageRoot);
+        candidates.push({
+          packageRoot,
+          modulePath,
+          goPackagePath: normalizedRef,
+          packageVersion,
+          source: "package_source"
+        });
+      }
+    }
+  }
+
+  return candidates;
 }
 
 function findNearestGoModule(startDir: string): GoModuleInfo | undefined {
@@ -1897,6 +2173,94 @@ function withCatalogRef(descriptor: ContribDescriptor, ref: string): ContribDesc
   });
 }
 
+function collectMappingPaths(nodeId: string, fields: MappingPreviewField[]): MappingPath[] {
+  return fields
+    .filter((field) => field.path.includes("."))
+    .map((field) => ({
+      nodeId,
+      mappingKey: field.path.split(".").at(-1) ?? field.path,
+      sourceExpression: field.expression,
+      targetPath: field.path
+    }));
+}
+
+function buildResolvedValueMap(fields: MappingPreviewField[]) {
+  return Object.fromEntries(
+    fields
+      .filter((field) => field.path.includes("."))
+      .map((field) => [field.path, field.resolved])
+  );
+}
+
+function evaluateScopeDiagnostics(flow: FlogoFlow, task: FlogoTask, fields: MappingPreviewField[]) {
+  const diagnostics: Diagnostic[] = [];
+  const taskIndex = flow.data.tasks.findIndex((entry) => entry.id === task.id);
+  const priorTasks = new Set(flow.data.tasks.slice(0, taskIndex).map((entry) => entry.id));
+
+  for (const field of fields) {
+    for (const reference of field.references) {
+      if (reference.startsWith("$trigger")) {
+        diagnostics.push(
+          createDiagnostic(
+            "flogo.mapping.invalid_trigger_scope",
+            `Reference "${reference}" is not directly available inside flow task mappings`,
+            "warning",
+            field.path
+          )
+        );
+        continue;
+      }
+
+      if (reference.startsWith("$activity[")) {
+        const match = /^\$activity\[([^\]]+)\]/.exec(reference);
+        const activityId = match?.[1];
+        if (activityId && !priorTasks.has(activityId)) {
+          diagnostics.push(
+            createDiagnostic(
+              "flogo.mapping.invalid_activity_scope",
+              `Reference "${reference}" points to an activity that is not available before task "${task.id}"`,
+              "error",
+              field.path
+            )
+          );
+        }
+      }
+    }
+  }
+
+  return dedupeDiagnostics(diagnostics);
+}
+
+function diffResolvedValues(expected: Record<string, unknown>, actual: Record<string, unknown>) {
+  const differences: MappingDifference[] = [];
+  for (const [pathKey, expectedValue] of Object.entries(expected)) {
+    if (!(pathKey in actual)) {
+      differences.push({
+        path: pathKey,
+        expected: expectedValue,
+        actual: undefined,
+        message: `Expected value for "${pathKey}" was not resolved`
+      });
+      continue;
+    }
+
+    if (!isEqualValue(expectedValue, actual[pathKey])) {
+      differences.push({
+        path: pathKey,
+        expected: expectedValue,
+        actual: actual[pathKey],
+        message: `Resolved value for "${pathKey}" does not match the expected output`
+      });
+    }
+  }
+
+  return differences;
+}
+
+function isEqualValue(left: unknown, right: unknown) {
+  return stableStringify(left) === stableStringify(right);
+}
+
 function dedupeDiagnostics(diagnostics: Diagnostic[]) {
   const seen = new Set<string>();
   const result: Diagnostic[] = [];
@@ -1936,6 +2300,10 @@ function inferPropertyType(app: FlogoApp, propertyName: string) {
   return "string";
 }
 
+function looksSensitiveConfig(name: string) {
+  return /(secret|token|password|key|credential|clientsecret|apikey)/i.test(name);
+}
+
 function buildDeploymentNotes(
   propertyRefs: Set<string>,
   envRefs: Set<string>,
@@ -1956,6 +2324,86 @@ function buildDeploymentNotes(
     notes.push("Unused declared properties should be removed or wired into mappings to keep configuration intentional.");
   }
   return notes;
+}
+
+function buildProfileSpecificNotes(
+  deploymentProfile: DeploymentProfile,
+  propertyRefs: Set<string>,
+  envRefs: Set<string>
+) {
+  const notes: string[] = [];
+  switch (deploymentProfile) {
+    case "rest_service":
+      if (envRefs.size > 0) {
+        notes.push("REST services should prefer environment variables for external endpoints, secrets, and operational timeouts.");
+      }
+      if (propertyRefs.size > 0) {
+        notes.push("REST services should keep reusable flow defaults in app properties when they are not deployment-secret values.");
+      }
+      break;
+    case "timer_job":
+      notes.push("Timer jobs should keep schedule-local defaults in properties and use environment variables for external integrations.");
+      break;
+    case "cli_tool":
+      notes.push("CLI tools should prefer environment variables for runtime invocation values and properties for baked-in defaults.");
+      break;
+    case "channel_worker":
+      notes.push("Channel workers should keep internal reusable defaults in properties unless the value is deployment-specific.");
+      break;
+    case "serverless":
+      notes.push("Serverless profiles should bias toward environment variables for operational configuration.");
+      break;
+    case "edge_binary":
+      notes.push("Edge binaries should bias toward app properties for embedded and offline-safe defaults.");
+      break;
+  }
+  return notes;
+}
+
+function summarizeSignatureCoverage(entries: ContributionInventoryEntry[]) {
+  if (entries.length === 0) {
+    return "fallback_only" as const;
+  }
+  if (entries.every((entry) => entry.signatureCompleteness === "complete")) {
+    return "full" as const;
+  }
+  if (entries.some((entry) => entry.signatureCompleteness !== "minimal")) {
+    return "partial" as const;
+  }
+  return "fallback_only" as const;
+}
+
+function buildCompositionLimitations(
+  entries: ContributionInventoryEntry[],
+  diagnostics: Diagnostic[],
+  request: CompositionCompareRequest
+) {
+  const limitations: string[] = [];
+  if (entries.some((entry) => entry.source === "registry" || entry.source === "inferred")) {
+    limitations.push("Some contribution signatures are derived from registry or inferred fallback metadata rather than package-backed evidence.");
+  }
+  if (entries.some((entry) => entry.signatureCompleteness !== "complete")) {
+    limitations.push("Some contribution signatures are only partially known, so comparison coverage is not complete.");
+  }
+  if (request.target === "resource") {
+    limitations.push("Resource-scoped comparison does not validate wider trigger or import topology.");
+  }
+  if (diagnostics.length > 0) {
+    limitations.push("Comparison produced diagnostics that may reduce confidence in parity conclusions.");
+  }
+  return limitations;
+}
+
+function inferSignatureCompleteness(
+  settings: Array<{ name: string }>,
+  inputs: Array<{ name: string }>,
+  outputs: Array<{ name: string }>
+) {
+  const declaredFieldCount = settings.length + inputs.length + outputs.length;
+  if (declaredFieldCount > 0) {
+    return "complete" as const;
+  }
+  return "minimal" as const;
 }
 
 function buildCanonicalProjection(app: FlogoApp, request: CompositionCompareRequest) {
@@ -2575,6 +3023,137 @@ function collectResolverKinds(value: unknown, propertyRefs: Set<string>, envRefs
       collectResolverKinds(nestedValue, propertyRefs, envRefs);
     }
   }
+}
+
+function suggestTaskCoercions(
+  app: FlogoApp,
+  task: FlogoTask,
+  sampleInput: MappingPreviewContext
+) {
+  const diagnostics: Diagnostic[] = [];
+  const expectedFieldTypes = buildExpectedFieldTypes(app, task);
+  const fields = [
+    ...collectMappingFields("input", task.input, sampleInput),
+    ...collectMappingFields("settings", task.settings, sampleInput),
+    ...collectMappingFields("output", task.output, sampleInput)
+  ];
+
+  for (const field of fields) {
+    const expectedType = expectedFieldTypes.get(field.path);
+    if (!expectedType || field.resolved === undefined) {
+      continue;
+    }
+
+    const actualType = inferResolvedValueType(field.resolved);
+    if (!actualType || actualType === expectedType) {
+      continue;
+    }
+
+    diagnostics.push(
+      createDiagnostic(
+        "flogo.mapping.coercion.expected_type",
+        `Field "${field.path}" expects ${expectedType} based on contribution metadata but resolves to ${actualType}. Consider using toType(...) or toString(...).`,
+        "warning",
+        field.path,
+        {
+          expression: field.expression,
+          expectedType,
+          actualType,
+          resolved: field.resolved
+        }
+      )
+    );
+  }
+
+  const sections = [
+    ["input", task.input] as const,
+    ["settings", task.settings] as const,
+    ["output", task.output] as const
+  ];
+
+  for (const [section, value] of sections) {
+    collectCoercionDiagnostics(value, `${task.id}.${section}`, diagnostics, sampleInput);
+  }
+
+  return dedupeDiagnostics(diagnostics);
+}
+
+function buildExpectedFieldTypes(app: FlogoApp, task: FlogoTask) {
+  const expectedTypes = new Map<string, string>();
+  if (!task.activityRef) {
+    return expectedTypes;
+  }
+
+  const descriptor = inspectContribDescriptor(app, task.activityRef)?.descriptor;
+  if (!descriptor) {
+    return expectedTypes;
+  }
+
+  for (const field of descriptor.inputs) {
+    const expectedType = normalizeExpectedFieldType(field.type);
+    if (expectedType) {
+      expectedTypes.set(`input.${field.name}`, expectedType);
+    }
+  }
+  for (const field of descriptor.settings) {
+    const expectedType = normalizeExpectedFieldType(field.type);
+    if (expectedType) {
+      expectedTypes.set(`settings.${field.name}`, expectedType);
+    }
+  }
+  for (const field of descriptor.outputs) {
+    const expectedType = normalizeExpectedFieldType(field.type);
+    if (expectedType) {
+      expectedTypes.set(`output.${field.name}`, expectedType);
+    }
+  }
+
+  return expectedTypes;
+}
+
+function normalizeExpectedFieldType(value?: string) {
+  if (!value) {
+    return undefined;
+  }
+
+  switch (value.toLowerCase()) {
+    case "integer":
+    case "int":
+    case "long":
+    case "float":
+    case "double":
+    case "number":
+      return "number";
+    case "bool":
+    case "boolean":
+      return "boolean";
+    case "array":
+      return "array";
+    case "object":
+    case "json":
+    case "map":
+      return "object";
+    case "string":
+      return "string";
+    default:
+      return undefined;
+  }
+}
+
+function inferResolvedValueType(value: unknown) {
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  if (typeof value === "object") {
+    return "object";
+  }
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "string") {
+    return typeof value;
+  }
+  return undefined;
 }
 
 function collectCoercionDiagnostics(

@@ -41,6 +41,8 @@ export const ArtifactTypeSchema = z.enum([
   "contrib_catalog",
   "contrib_evidence",
   "mapping_preview",
+  "mapping_test",
+  "property_plan",
   "governance_report",
   "composition_compare",
   "flow_contract",
@@ -335,6 +337,10 @@ export const ContribResolutionEvidenceSchema = z.object({
   importAlias: z.string().optional(),
   version: z.string().optional(),
   confidence: EvidenceConfidenceSchema.default("low"),
+  packageDescriptorFound: z.boolean().default(false),
+  packageMetadataFound: z.boolean().default(false),
+  versionSource: z.enum(["descriptor", "package", "import", "unknown"]).optional(),
+  signatureCompleteness: z.enum(["complete", "partial", "minimal"]).default("minimal"),
   diagnostics: z.array(DiagnosticSchema).default([])
 });
 export type ContribResolutionEvidence = z.infer<typeof ContribResolutionEvidenceSchema>;
@@ -383,6 +389,10 @@ export const ContributionInventoryEntrySchema = z.object({
   goPackagePath: z.string().optional(),
   confidence: EvidenceConfidenceSchema.default("low"),
   discoveryReason: z.string().optional(),
+  packageDescriptorFound: z.boolean().default(false),
+  packageMetadataFound: z.boolean().default(false),
+  versionSource: z.enum(["descriptor", "package", "import", "unknown"]).optional(),
+  signatureCompleteness: z.enum(["complete", "partial", "minimal"]).default("minimal"),
   settings: z.array(ContribFieldSchema).default([]),
   inputs: z.array(ContribFieldSchema).default([]),
   outputs: z.array(ContribFieldSchema).default([]),
@@ -444,6 +454,14 @@ export const MappingPreviewFieldSchema = z.object({
 });
 export type MappingPreviewField = z.infer<typeof MappingPreviewFieldSchema>;
 
+export const MappingPathSchema = z.object({
+  nodeId: z.string(),
+  mappingKey: z.string(),
+  sourceExpression: z.string().optional(),
+  targetPath: z.string()
+});
+export type MappingPath = z.infer<typeof MappingPathSchema>;
+
 export const MappingPreviewRequestSchema = z.object({
   nodeId: z.string(),
   sampleInput: MappingPreviewContextSchema.default({})
@@ -454,6 +472,10 @@ export const MappingPreviewResultSchema = z.object({
   nodeId: z.string(),
   flowId: z.string().optional(),
   fields: z.array(MappingPreviewFieldSchema).default([]),
+  paths: z.array(MappingPathSchema).default([]),
+  resolvedValues: z.record(z.string(), z.unknown()).default({}),
+  scopeDiagnostics: z.array(DiagnosticSchema).default([]),
+  coercionDiagnostics: z.array(DiagnosticSchema).default([]),
   suggestedCoercions: z.array(DiagnosticSchema).default([]),
   diagnostics: z.array(DiagnosticSchema).default([])
 });
@@ -479,16 +501,30 @@ export const EnvRecommendationSchema = z.object({
 });
 export type EnvRecommendation = z.infer<typeof EnvRecommendationSchema>;
 
+export const DeploymentProfileSchema = z.enum([
+  "rest_service",
+  "timer_job",
+  "cli_tool",
+  "channel_worker",
+  "serverless",
+  "edge_binary"
+]);
+export type DeploymentProfile = z.infer<typeof DeploymentProfileSchema>;
+
 export const PropertyPlanSchema = z.object({
   declaredProperties: z.array(z.string()).default([]),
   propertyRefs: z.array(z.string()).default([]),
   envRefs: z.array(z.string()).default([]),
   undefinedPropertyRefs: z.array(z.string()).default([]),
   unusedProperties: z.array(z.string()).default([]),
+  deploymentProfile: DeploymentProfileSchema.default("rest_service"),
   recommendations: z.array(PropertyPlanRecommendationSchema).default([]),
   recommendedProperties: z.array(PropertyDefinitionRecommendationSchema).default([]),
   recommendedEnv: z.array(EnvRecommendationSchema).default([]),
+  recommendedSecretEnv: z.array(EnvRecommendationSchema).default([]),
+  recommendedPlainEnv: z.array(EnvRecommendationSchema).default([]),
   deploymentNotes: z.array(z.string()).default([]),
+  profileSpecificNotes: z.array(z.string()).default([]),
   diagnostics: z.array(DiagnosticSchema).default([])
 });
 export type PropertyPlan = z.infer<typeof PropertyPlanSchema>;
@@ -499,6 +535,44 @@ export const MappingPreviewResponseSchema = z.object({
   artifact: ArtifactRefSchema.optional()
 });
 export type MappingPreviewResponse = z.infer<typeof MappingPreviewResponseSchema>;
+
+export const PropertyPlanResponseSchema = z.object({
+  propertyPlan: PropertyPlanSchema,
+  artifact: ArtifactRefSchema.optional()
+});
+export type PropertyPlanResponse = z.infer<typeof PropertyPlanResponseSchema>;
+
+export const MappingTestSpecSchema = z.object({
+  nodeId: z.string(),
+  sampleInput: MappingPreviewContextSchema.default({}),
+  expectedOutput: z.record(z.string(), z.unknown()).default({}),
+  strict: z.boolean().default(true)
+});
+export type MappingTestSpec = z.infer<typeof MappingTestSpecSchema>;
+
+export const MappingDifferenceSchema = z.object({
+  path: z.string(),
+  expected: z.unknown().optional(),
+  actual: z.unknown().optional(),
+  message: z.string()
+});
+export type MappingDifference = z.infer<typeof MappingDifferenceSchema>;
+
+export const MappingTestResultSchema = z.object({
+  pass: z.boolean(),
+  nodeId: z.string(),
+  actualOutput: z.record(z.string(), z.unknown()).default({}),
+  differences: z.array(MappingDifferenceSchema).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([]),
+  artifact: ArtifactRefSchema.optional()
+});
+export type MappingTestResult = z.infer<typeof MappingTestResultSchema>;
+
+export const MappingTestResponseSchema = z.object({
+  result: MappingTestResultSchema,
+  propertyPlan: PropertyPlanSchema.optional()
+});
+export type MappingTestResponse = z.infer<typeof MappingTestResponseSchema>;
 
 export const AliasIssueKindSchema = z.enum([
   "duplicate_alias",
@@ -549,6 +623,9 @@ export const GovernanceReportSchema = z.object({
   aliasIssues: z.array(AliasIssueSchema).default([]),
   orphanedRefs: z.array(OrphanedRefSchema).default([]),
   versionFindings: z.array(VersionFindingSchema).default([]),
+  unusedImports: z.array(z.string()).default([]),
+  missingImports: z.array(z.string()).default([]),
+  aliasRefMismatches: z.array(z.string()).default([]),
   inventorySummary: z
     .object({
       entryCount: z.number().int().nonnegative(),
@@ -559,8 +636,11 @@ export const GovernanceReportSchema = z.object({
   unresolvedPackages: z.array(z.string()).default([]),
   fallbackContribs: z.array(z.string()).default([]),
   weakEvidenceContribs: z.array(z.string()).default([]),
+  weakSignatureContribs: z.array(z.string()).default([]),
   packageBackedContribs: z.array(z.string()).default([]),
   descriptorOnlyContribs: z.array(z.string()).default([]),
+  duplicateAliases: z.array(z.string()).default([]),
+  conflictingVersions: z.array(z.string()).default([]),
   diagnostics: z.array(DiagnosticSchema).default([])
 });
 export type GovernanceReport = z.infer<typeof GovernanceReportSchema>;
@@ -594,6 +674,8 @@ export const CompositionCompareResultSchema = z.object({
   programmaticHash: z.string(),
   comparisonBasis: z.enum(["normalized_only", "inventory_backed"]).default("normalized_only"),
   signatureEvidenceLevel: z.enum(["fallback_only", "descriptor_backed", "package_backed"]).default("fallback_only"),
+  signatureCoverage: z.enum(["full", "partial", "fallback_only"]).default("fallback_only"),
+  comparisonLimitations: z.array(z.string()).default([]),
   inventoryRefsUsed: z.array(z.string()).default([]),
   differences: z.array(CompositionDifferenceSchema).default([]),
   diagnostics: z.array(DiagnosticSchema).default([]),
@@ -617,6 +699,8 @@ export const RunnerStepTypeSchema = z.enum([
   "inspect_descriptor",
   "inspect_contrib_evidence",
   "preview_mapping",
+  "test_mapping",
+  "plan_properties",
   "validate_governance",
   "compare_composition"
 ]);
@@ -631,6 +715,8 @@ export const RunnerJobKindSchema = z.enum([
   "catalog",
   "contrib_evidence",
   "mapping_preview",
+  "mapping_test",
+  "property_plan",
   "governance",
   "composition_compare"
 ]);
@@ -642,6 +728,8 @@ export const AnalysisKindSchema = z.enum([
   "descriptor",
   "contrib_evidence",
   "mapping_preview",
+  "mapping_test",
+  "property_plan",
   "governance",
   "composition_compare"
 ]);

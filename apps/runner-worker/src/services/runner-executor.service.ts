@@ -12,9 +12,11 @@ import {
   type ContribCatalog,
   type ContribDescriptor,
   type ContribDescriptorResponse,
+  type MappingTestResponse,
   type Diagnostic,
   type GovernanceReport,
   type MappingPreviewResult,
+  type PropertyPlanResponse,
   type RunnerJobResult,
   type RunnerJobSpec,
   type RunnerJobState,
@@ -68,7 +70,11 @@ function createCommand(spec: RunnerJobSpec): string[] {
     case "inspect_contrib_evidence":
       return createHelperCommand("evidence", "inspect", "--app", spec.appPath, "--ref", spec.targetRef ?? "");
     case "preview_mapping":
-      return ["echo", `mapping-preview:${spec.appPath}`];
+      return createHelperCommand("preview", "mapping", "--app", spec.appPath, "--node", spec.targetNodeId ?? "");
+    case "test_mapping":
+      return createHelperCommand("mapping", "test", "--app", spec.appPath, "--node", spec.targetNodeId ?? "");
+    case "plan_properties":
+      return createHelperCommand("properties", "plan", "--app", spec.appPath, "--profile", String(spec.analysisPayload?.profile ?? "rest_service"));
     case "validate_governance":
       return createHelperCommand("governance", "validate", "--app", spec.appPath);
     case "compare_composition":
@@ -123,6 +129,8 @@ function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
     stepType === "inspect_descriptor" ||
     stepType === "inspect_contrib_evidence" ||
     stepType === "preview_mapping" ||
+    stepType === "test_mapping" ||
+    stepType === "plan_properties" ||
     stepType === "validate_governance" ||
     stepType === "compare_composition"
   );
@@ -144,7 +152,7 @@ function createAnalysisArtifact(
 }
 
 async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
-  if (spec.stepType !== "preview_mapping") {
+  if (spec.stepType !== "preview_mapping" && spec.stepType !== "test_mapping") {
     return {
       command: createCommand(spec)
     };
@@ -152,7 +160,34 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
 
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "flogo-mapping-preview-"));
   const inputPath = path.join(tempDir, "sample-input.json");
-  await fs.writeFile(inputPath, JSON.stringify(spec.analysisPayload ?? {}, null, 2), "utf8");
+  const samplePayload =
+    spec.stepType === "test_mapping"
+      ? (spec.analysisPayload?.sampleInput as Record<string, unknown> | undefined) ?? {}
+      : spec.analysisPayload ?? {};
+  await fs.writeFile(inputPath, JSON.stringify(samplePayload, null, 2), "utf8");
+
+  if (spec.stepType === "test_mapping") {
+    const expectedPath = path.join(tempDir, "expected-output.json");
+    await fs.writeFile(expectedPath, JSON.stringify((spec.analysisPayload?.expectedOutput as Record<string, unknown> | undefined) ?? {}, null, 2), "utf8");
+    return {
+      command: createHelperCommand(
+        "mapping",
+        "test",
+        "--app",
+        spec.appPath,
+        "--node",
+        spec.targetNodeId ?? "",
+        "--input",
+        inputPath,
+        "--expected",
+        expectedPath,
+        ...(spec.analysisPayload?.strict === false ? ["--strict", "false"] : [])
+      ),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
 
   return {
     command: createHelperCommand("preview", "mapping", "--app", spec.appPath, "--node", spec.targetNodeId ?? "", "--input", inputPath),
@@ -189,6 +224,27 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
       return [
         createAnalysisArtifact(spec, "mapping_preview", `mapping-preview-${spec.targetNodeId ?? "node"}`, {
           preview,
+          diagnostics
+        })
+      ];
+    }
+
+    if (spec.stepType === "test_mapping") {
+      const response = JSON.parse(stdout) as MappingTestResponse;
+      return [
+        createAnalysisArtifact(spec, "mapping_test", `mapping-test-${spec.targetNodeId ?? "node"}`, {
+          result: response.result,
+          propertyPlan: response.propertyPlan,
+          diagnostics
+        })
+      ];
+    }
+
+    if (spec.stepType === "plan_properties") {
+      const response = JSON.parse(stdout) as PropertyPlanResponse;
+      return [
+        createAnalysisArtifact(spec, "property_plan", "property-plan", {
+          propertyPlan: response.propertyPlan,
           diagnostics
         })
       ];

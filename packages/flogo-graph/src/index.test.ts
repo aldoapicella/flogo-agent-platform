@@ -13,6 +13,7 @@ import {
   inspectContribEvidence,
   inspectContribDescriptor,
   previewMapping,
+  runMappingTest,
   suggestCoercions,
   summarizeAppDiff,
   validateFlogoApp,
@@ -224,6 +225,8 @@ describe("flogo graph", () => {
     expect(preview.fields.find((field) => field.path === "input.message")?.resolved).toBe("abc-123");
     expect(preview.fields.find((field) => field.path === "input.retryCount")?.resolved).toBe(3);
     expect(preview.fields.find((field) => field.path === "input.origin")?.resolved).toBe("value:us-east");
+    expect(preview.paths.some((entry) => entry.targetPath === "input.message")).toBe(true);
+    expect(preview.resolvedValues["input.message"]).toBe("abc-123");
   });
 
   it("suggests coercions for numeric-looking mapping fields", () => {
@@ -237,6 +240,23 @@ describe("flogo graph", () => {
     });
 
     expect(diagnostics.some((diagnostic) => diagnostic.code === "flogo.mapping.coercion.numeric")).toBe(true);
+  });
+
+  it("emits descriptor-aware coercion diagnostics when resolved values do not match activity field types", () => {
+    const app = structuredClone(validApp);
+    app.resources[0].data.tasks[0].input = {
+      message: "$property.retryCount"
+    };
+
+    const preview = previewMapping(app, "log_1", {
+      flow: {},
+      activity: {},
+      env: {},
+      property: { retryCount: 3 },
+      trigger: {}
+    });
+
+    expect(preview.coercionDiagnostics.some((diagnostic) => diagnostic.code === "flogo.mapping.coercion.expected_type")).toBe(true);
   });
 
   it("reports unresolved mapping references in previews", () => {
@@ -263,12 +283,14 @@ describe("flogo graph", () => {
       region: "$env.REGION"
     };
 
-    const plan = analyzePropertyUsage(app);
+    const plan = analyzePropertyUsage(app, "rest_service");
 
     expect(plan.propertyRefs).toContain("retryCount");
     expect(plan.envRefs).toContain("REGION");
     expect(plan.declaredProperties).toContain("retryCount");
     expect(plan.recommendedEnv.some((entry) => entry.name === "REGION")).toBe(true);
+    expect(plan.recommendedPlainEnv.some((entry) => entry.name === "REGION")).toBe(true);
+    expect(plan.profileSpecificNotes.length).toBeGreaterThan(0);
   });
 
   it("reports undefined and unused properties in the property plan", () => {
@@ -277,11 +299,47 @@ describe("flogo graph", () => {
       missingValue: "$property.apiBaseUrl"
     };
 
-    const plan = analyzePropertyUsage(app);
+    const plan = analyzePropertyUsage(app, "rest_service");
 
     expect(plan.undefinedPropertyRefs).toContain("apiBaseUrl");
     expect(plan.unusedProperties).toContain("retryCount");
     expect(plan.recommendedProperties.some((entry) => entry.name === "apiBaseUrl")).toBe(true);
+  });
+
+  it("separates secret environment recommendations by deployment profile", () => {
+    const app = structuredClone(validApp);
+    app.resources[0].data.tasks[0].input = {
+      apiKey: "$env.API_KEY"
+    };
+
+    const plan = analyzePropertyUsage(app, "serverless");
+
+    expect(plan.recommendedSecretEnv.some((entry) => entry.name === "API_KEY")).toBe(true);
+    expect(plan.deploymentProfile).toBe("serverless");
+  });
+
+  it("runs a deterministic mapping test", () => {
+    const app = structuredClone(validApp);
+    app.resources[0].data.tasks[0].input = {
+      message: "$flow.customerId"
+    };
+
+    const result = runMappingTest(
+      app,
+      "log_1",
+      {
+        flow: { customerId: "abc-123" },
+        activity: {},
+        env: {},
+        property: {},
+        trigger: {}
+      },
+      { "input.message": "abc-123" },
+      true
+    );
+
+    expect(result.pass).toBe(true);
+    expect(result.actualOutput["input.message"]).toBe("abc-123");
   });
 
   it("prefers descriptor metadata from descriptor.json when available", async () => {
@@ -380,6 +438,63 @@ describe("flogo graph", () => {
     expect(customTimer?.goPackagePath).toBe("github.com/project-flogo/contrib/trigger/customtimer");
   });
 
+  it("resolves contribution inventory from the Go module cache and captures discovered versions", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "flogo-module-cache-"));
+    tempPaths.push(tempDir);
+    const previousGoModCache = process.env.GOMODCACHE;
+    process.env.GOMODCACHE = tempDir;
+
+    try {
+      const packageDir = path.join(
+        tempDir,
+        "github.com",
+        "project-flogo",
+        "contrib@v1.2.3",
+        "activity",
+        "cachelog"
+      );
+      await fs.mkdir(packageDir, { recursive: true });
+      await fs.writeFile(
+        path.join(packageDir, "descriptor.json"),
+        JSON.stringify(
+          {
+            name: "cachelog",
+            type: "activity",
+            title: "Cache Log",
+            input: [{ name: "message", type: "string", required: true }]
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      const app = {
+        ...structuredClone(validApp),
+        imports: [
+          {
+            alias: "cachelog",
+            ref: "github.com/project-flogo/contrib/activity/cachelog"
+          }
+        ]
+      };
+
+      const inventory = buildContributionInventory(app);
+      const cacheLog = inventory.entries.find((entry) => entry.alias === "cachelog");
+
+      expect(cacheLog?.source).toBe("package_descriptor");
+      expect(cacheLog?.version).toBe("v1.2.3");
+      expect(cacheLog?.versionSource).toBe("package");
+      expect(cacheLog?.packageRoot).toContain(path.join("contrib@v1.2.3", "activity", "cachelog"));
+    } finally {
+      if (previousGoModCache === undefined) {
+        delete process.env.GOMODCACHE;
+      } else {
+        process.env.GOMODCACHE = previousGoModCache;
+      }
+    }
+  });
+
   it("inspects contribution evidence with confidence metadata", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "flogo-contrib-evidence-"));
     tempPaths.push(tempDir);
@@ -439,6 +554,8 @@ describe("flogo graph", () => {
     expect(governance.inventorySummary?.entryCount).toBeGreaterThan(0);
     expect(governance.fallbackContribs).toContain("github.com/project-flogo/contrib/activity/log");
     expect(governance.weakEvidenceContribs).toContain("github.com/project-flogo/contrib/activity/log");
+    expect(Array.isArray(governance.unusedImports)).toBe(true);
+    expect(Array.isArray(governance.duplicateAliases)).toBe(true);
   });
 
   it("compares canonical and programmatic composition for app and resource targets", () => {
@@ -461,6 +578,7 @@ describe("flogo graph", () => {
     expect(appComparison.differences).toEqual([]);
     expect(appComparison.comparisonBasis).toBe("inventory_backed");
     expect(appComparison.signatureEvidenceLevel).toBe("fallback_only");
+    expect(appComparison.signatureCoverage).toBe("partial");
     expect(appComparison.inventoryRefsUsed).toContain("github.com/project-flogo/contrib/trigger/rest");
     expect(resourceComparison.ok).toBe(true);
     expect(resourceComparison.differences).toEqual([]);

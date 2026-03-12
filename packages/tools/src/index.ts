@@ -1,4 +1,11 @@
-import type { CompositionCompareRequest, FlogoApp, MappingPreviewContext, TaskRequest, ToolResponse } from "@flogo-agent/contracts";
+import type {
+  CompositionCompareRequest,
+  DeploymentProfile,
+  FlogoApp,
+  MappingPreviewContext,
+  TaskRequest,
+  ToolResponse
+} from "@flogo-agent/contracts";
 
 import { ArtifactTools } from "./artifact-tools.js";
 import { FlogoCoreTools } from "./flogo-core-tools.js";
@@ -99,8 +106,18 @@ export class FlogoTools {
     return this.mapping.suggestCoercions(document, sampleInput);
   }
 
-  planProperties(document: string | FlogoApp | unknown): ToolResponse {
-    return this.mapping.planProperties(document);
+  planProperties(document: string | FlogoApp | unknown, profile: DeploymentProfile = "rest_service"): ToolResponse {
+    return this.mapping.planProperties(document, profile);
+  }
+
+  testMapping(
+    document: string | FlogoApp | unknown,
+    nodeId: string,
+    sampleInput: MappingPreviewContext = createEmptyMappingContext(),
+    expectedOutput: Record<string, unknown> = {},
+    strict = true
+  ): ToolResponse {
+    return this.mapping.testMapping(document, nodeId, sampleInput, expectedOutput, strict);
   }
 
   installContrib(contribRef: string): ToolResponse {

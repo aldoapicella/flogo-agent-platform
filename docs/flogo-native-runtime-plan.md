@@ -171,37 +171,42 @@ Focus:
 
 Current status:
 
-- partially implemented
+- implemented
 
 Implemented in repo:
 
 - contribution inventory contracts, graph logic, public endpoint, runner step, and Blob/Azurite-backed persisted artifact,
 - module-aware package discovery for contribution inventory using `go.mod` workspaces, vendored package trees, descriptor search roots, and package-source fallback,
+- Go module cache-aware package discovery for contribution inventory and descriptor resolution, including discovered package version evidence,
 - contribution catalog generation in `packages/flogo-graph`,
 - descriptor introspection contracts,
 - public descriptor inspection endpoint,
 - governance validation contracts and public endpoint,
 - composition comparison contracts and public endpoint,
 - typed mapping preview contracts,
-- coercion suggestion heuristics,
+- descriptor-aware and heuristic coercion suggestions,
 - richer property and environment planning,
+- deployment-profile-aware property planning exposed through a direct property-plan API,
+- deterministic mapping-resolution tests exposed through a direct mapping-test API,
 - direct app-analysis APIs for graph, inventory, catalog, artifact listing, and mapping preview,
 - direct app-analysis APIs for governance and composition comparison,
 - direct app-analysis API for descriptor inspection,
 - direct app-analysis API for contribution evidence inspection,
+- direct app-analysis APIs for property planning and mapping tests,
 - app-scoped analysis artifact persistence using Prisma-backed hidden analysis tasks,
-- Blob/Azurite-backed JSON payload storage for inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, and mapping-preview artifacts,
+- Blob/Azurite-backed JSON payload storage for inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test artifacts,
 - structured contribution-evidence fields in inventory, catalog, descriptor, governance, and composition-comparison results,
-- Go helper skeleton with real command paths for inventory, catalog, descriptor inspection, contribution evidence inspection, governance validation, composition comparison, and mapping preview,
-- runner-worker support for `inventory_contribs`, `catalog_contribs`, `inspect_descriptor`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, and `preview_mapping`,
-- planner support for analysis-only task modes including inventory, contribution evidence, governance, and composition comparison.
+- Go helper skeleton with real command paths for inventory, catalog, descriptor inspection, contribution evidence inspection, governance validation, composition comparison, mapping preview, mapping test, and property planning,
+- runner-worker support for `inventory_contribs`, `catalog_contribs`, `inspect_descriptor`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, `preview_mapping`, `test_mapping`, and `plan_properties`,
+- planner support for analysis-only task modes including inventory, contribution evidence, governance, composition comparison, mapping preview, mapping test, and property planning.
 
-Still missing in Phase 1:
+Phase 1 outcome:
 
-- real `project-flogo/core` package introspection instead of the current normalized helper registry/fallback approach,
-- deeper descriptor/package evidence beyond the current module-aware workspace/package discovery, evidence confidence, and registry fallback,
-- fuller programmatic app composition beyond the current comparison probe,
-- deeper alias/orphan/version governance tied to real package metadata.
+- the Core-aware foundation is now implemented as an evidence-backed static analysis layer,
+- contribution inventory and catalog use workspace, vendored, and module-cache package discovery before registry or inferred fallback,
+- governance is inventory-backed and categorizes alias, orphan, version, and evidence-quality findings,
+- mapping preview, mapping tests, coercion suggestions, and property planning are implemented as static-analysis capabilities,
+- runtime-backed mapping evaluation remains a Phase 3 concern, not a missing Phase 1 requirement.
 
 ## Phase 2: Flow-aware design
 
@@ -260,26 +265,32 @@ The current codebase already supports a narrow but real Phase 1 slice.
   - `GET /v1/projects/:projectId/apps/:appId/catalog`
   - `GET /v1/projects/:projectId/apps/:appId/descriptors?ref=...`
   - `GET /v1/projects/:projectId/apps/:appId/contribs/evidence?ref=...`
-  - `GET /v1/projects/:projectId/apps/:appId/governance`
-  - `GET /v1/projects/:projectId/apps/:appId/artifacts`
-  - `POST /v1/projects/:projectId/apps/:appId/composition/compare`
-  - `POST /v1/projects/:projectId/apps/:appId/mappings/preview`
+- `GET /v1/projects/:projectId/apps/:appId/governance`
+- `GET /v1/projects/:projectId/apps/:appId/artifacts`
+- `GET /v1/projects/:projectId/apps/:appId/properties/plan`
+- `POST /v1/projects/:projectId/apps/:appId/composition/compare`
+- `POST /v1/projects/:projectId/apps/:appId/mappings/preview`
+- `POST /v1/projects/:projectId/apps/:appId/mappings/test`
 - Analysis-only planner modes:
   - `inputs.mode = "inventory"`
   - `inputs.mode = "catalog"`
-  - `inputs.mode = "contrib_evidence"`
-  - `inputs.mode = "governance"`
-  - `inputs.mode = "composition_compare"`
-  - `inputs.mode = "mapping_preview"`
+- `inputs.mode = "contrib_evidence"`
+- `inputs.mode = "governance"`
+- `inputs.mode = "composition_compare"`
+- `inputs.mode = "mapping_preview"`
+- `inputs.mode = "mapping_test"`
+- `inputs.mode = "property_plan"`
 - Runner job kinds and execution steps for inventory, catalog, contribution evidence, governance, composition comparison, and mapping preview
 - Go helper commands:
   - `inventory contribs`
   - `catalog contribs`
   - `inspect descriptor`
-  - `evidence inspect`
-  - `governance validate`
-  - `compose compare`
-  - `preview mapping`
+- `evidence inspect`
+- `governance validate`
+- `compose compare`
+- `preview mapping`
+- `mapping test`
+- `properties plan`
 
 ### Not implemented yet
 
@@ -298,14 +309,14 @@ Use this section as the working tracker for future implementation slices.
 
 | Area | Scope | Status | Code reference | Next step |
 | --- | --- | --- | --- | --- |
-| Shared contracts | Inventory, descriptor, contribution-evidence, governance, composition, and mapping-preview contracts | Partial | `packages/contracts/src/index.ts` | Extend for flow contracts and replay when Phase 2 starts |
-| Graph engine | Contribution inventory, catalog, evidence inspection, alias validation, governance validation, composition comparison, mapping preview, coercion suggestions, property planning | Partial | `packages/flogo-graph/src/index.ts` | Deepen real Core package introspection and add flow contract inference later |
+| Shared contracts | Inventory, descriptor, contribution-evidence, governance, composition, mapping-preview, mapping-test, and property-plan contracts | Partial | `packages/contracts/src/index.ts` | Extend for flow contracts and replay when Phase 2 starts |
+| Graph engine | Contribution inventory, catalog, evidence inspection, alias validation, governance validation, composition comparison, mapping preview, mapping tests, coercion suggestions, property planning | Partial | `packages/flogo-graph/src/index.ts` | Deepen real Core package introspection and add flow contract inference later |
 | Tool layer | Flogo core/mapping tools split | Partial | `packages/tools/src/*.ts` | Add flow/runtime/contrib tool modules |
 | Planner | Analysis-only modes and Flogo-aware step selection | Partial | `packages/agent/src/index.ts` | Add flow/runtime/contrib planners |
-| Control-plane APIs | Graph, inventory, catalog, descriptor inspection, contribution evidence inspection, governance, composition comparison, mapping preview, app artifact listing | Partial | `apps/control-plane/src/modules/flogo-apps/*` | Add flow contract and replay APIs later |
+| Control-plane APIs | Graph, inventory, catalog, descriptor inspection, contribution evidence inspection, governance, composition comparison, mapping preview, mapping test, property plan, app artifact listing | Partial | `apps/control-plane/src/modules/flogo-apps/*` | Add flow contract and replay APIs later |
 | Persistence | Prisma-backed task/event/artifact state plus hidden app-analysis records and Blob-backed analysis payloads | Partial | `apps/control-plane/src/modules/agent/task-store.service.ts`, `apps/control-plane/src/modules/flogo-apps/app-analysis-storage.service.ts` | Extend Blob-backed storage beyond app-analysis artifacts |
-| Runner-worker | Inventory, catalog, descriptor, contribution evidence, governance, composition comparison, and preview execution support | Partial | `apps/runner-worker/src/services/*` | Add runtime trace and contrib job kinds |
-| Go helper | Inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview | Partial | `go-runtime/flogo-helper/main.go` | Integrate deeper Core/Flow-native logic |
+| Runner-worker | Inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, and property-plan execution support | Partial | `apps/runner-worker/src/services/*` | Add runtime trace and contrib job kinds |
+| Go helper | Inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, and property planning | Partial | `go-runtime/flogo-helper/main.go` | Integrate deeper Core/Flow-native logic |
 | Web console | Basic task UI only | Planned | `apps/web-console` | Add catalog, mapping preview, and later replay views |
 | Eval coverage | Existing create/update/debug/review baseline | Partial | `packages/evals` | Add catalog/mapping and later replay/contrib cases |
 
@@ -322,14 +333,15 @@ When implementing a Flogo-native feature:
 
 ## Recommended Next Slice
 
-The next implementation slice after the current baseline should continue Phase 1 instead of jumping to replay or contrib scaffolding.
+The next implementation slice after the current baseline should begin Phase 2 instead of spending more time on Phase 1 hardening.
 
 Recommended next items:
 
-1. Replace normalized helper catalog fallback with deeper Core-aware contribution introspection where feasible.
-2. Deepen the current evidence layer from filesystem/package heuristics toward richer `project-flogo/core` package metadata.
-3. Deepen the current programmatic app composition comparison probe into stronger Core-aware evidence.
-4. Expand alias/orphan/version governance using stronger contrib evidence.
+1. Add flow contract inference so reusable flow I/O becomes explicit.
+2. Add trigger polymorphism built on top of inferred flow contracts.
+3. Add subflow extraction and inlining.
+4. Add iterator/retry/doWhile synthesis once flow contracts and rebinding exist.
+5. Keep the current mapping preview and mapping test surface static-analysis-backed until runtime/replay work begins in Phase 3.
 
 ## Source References
 

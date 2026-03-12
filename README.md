@@ -39,7 +39,8 @@ The current repo supports:
 - runner-worker support for local process execution and Container Apps Job metadata/start-poll adapters,
 - Flogo graph parsing, structural/semantic/mapping validation, contribution cataloging, governance validation, composition comparison, mapping preview, coercion suggestions, and property analysis,
 - direct app-analysis APIs for graph, inventory, catalog, descriptor inspection, contribution evidence inspection, governance reporting, composition comparison, mapping preview, and app-scoped analysis artifacts,
-- a Go helper binary for contribution inventory, contribution catalog, descriptor inspection, contribution evidence inspection, governance validation, composition comparison, and mapping preview commands.
+- profile-aware property planning and deterministic mapping tests,
+- a Go helper binary for contribution inventory, contribution catalog, descriptor inspection, contribution evidence inspection, governance validation, composition comparison, mapping preview, mapping test, and property planning commands.
 
 ## Flogo-native roadmap
 
@@ -141,7 +142,9 @@ The control-plane exposes `/v1` routes, including:
 - `GET /v1/projects/:projectId/apps/:appId/contribs/evidence?ref=...`
 - `GET /v1/projects/:projectId/apps/:appId/artifacts`
 - `GET /v1/projects/:projectId/apps/:appId/governance`
+- `GET /v1/projects/:projectId/apps/:appId/properties/plan`
 - `POST /v1/projects/:projectId/apps/:appId/mappings/preview`
+- `POST /v1/projects/:projectId/apps/:appId/mappings/test`
 - `POST /v1/projects/:projectId/apps/:appId/composition/compare`
 - `GET /v1/health`
 
@@ -180,6 +183,7 @@ Current notable gaps:
 
 - Catalog, descriptor, governance, composition-compare, and mapping-preview app-analysis artifacts are Blob/Azurite-backed; broader runtime artifacts still have mixed local or logical URI behavior.
 - Contribution inventory now exists as the evidence layer for catalog/governance/composition analysis and includes module-aware workspace/package discovery plus contribution-evidence confidence, but it still stops short of full `project-flogo/core` package introspection.
-- Go helper behavior is real for inventory/catalog/descriptor/contribution-evidence/governance/composition comparison/mapping preview, but not yet for flow contracts, replay, or contribution scaffolding.
+- Contribution inventory, catalog, governance, composition comparison, mapping preview, mapping tests, coercion suggestions, and property planning now cover the intended Phase 1 static-analysis surface; the next major capability gap is Phase 2 flow-design work.
+- Go helper behavior is real for inventory/catalog/descriptor/contribution-evidence/governance/composition comparison/mapping preview/mapping test/property planning, but not yet for flow contracts, replay, or contribution scaffolding.
 - Flow-aware, runtime-aware, and extension-aware capabilities are still planned phases.
 - `next build` and Vitest can hit environment-specific `spawn EPERM` failures in restricted shells even when workspace typecheck is clean.

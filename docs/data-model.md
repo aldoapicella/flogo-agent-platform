@@ -53,6 +53,8 @@ Important current `inputs` conventions:
 - `mode = "catalog"` for analysis-only contribution catalog work
 - `mode = "contrib_evidence"` for analysis-only contribution evidence inspection
 - `mode = "mapping_preview"` for analysis-only mapping preview work
+- `mode = "mapping_test"` for analysis-only mapping-resolution tests
+- `mode = "property_plan"` for analysis-only property/environment planning
 - `mode = "governance"` for analysis-only alias/orphan/version validation
 - `mode = "composition_compare"` for analysis-only JSON vs programmatic comparison
 
@@ -145,6 +147,8 @@ Current artifact kinds:
 - `governance_report`
 - `composition_compare`
 - `mapping_preview`
+- `mapping_test`
+- `property_plan`
 - `flow_contract`
 - `run_trace`
 - `replay_report`
@@ -192,11 +196,33 @@ These describe:
 
 - target node,
 - field-level classification,
+- mapping paths,
+- resolved value maps,
+- scope diagnostics,
+- coercion diagnostics,
 - references used,
 - resolved preview values,
 - diagnostics,
 - coercion suggestions,
 - richer property/environment planning output,
+- response artifact references.
+
+### Mapping test contracts
+
+Important schemas:
+
+- `MappingTestSpec`
+- `MappingTestResult`
+- `MappingTestResponse`
+
+These describe:
+
+- target node,
+- sample input,
+- expected output,
+- strict vs non-strict comparison,
+- deterministic expected-vs-actual diff output,
+- diagnostics,
 - response artifact references.
 
 ### Governance contracts
@@ -239,7 +265,9 @@ These describe:
 
 ### Property planning contracts
 
-`MappingPreviewResponse.propertyPlan` now includes:
+Property planning is exposed both through `MappingPreviewResponse.propertyPlan` and the dedicated `PropertyPlanResponse`.
+
+Current property-plan output includes:
 
 - `declaredProperties`
 - `propertyRefs`
@@ -248,6 +276,10 @@ These describe:
 - `unusedProperties`
 - `recommendedProperties`
 - `recommendedEnv`
+- `recommendedSecretEnv`
+- `recommendedPlainEnv`
+- `deploymentProfile`
+- `profileSpecificNotes`
 - `deploymentNotes`
 - `diagnostics`
 
@@ -392,10 +424,12 @@ Current graph-level logic includes:
 - governance validation for aliases, orphaned refs, and version drift,
 - programmatic-composition comparison probes,
 - typed mapping preview classification,
+- deterministic mapping-resolution tests,
 - unresolved-reference diagnostics,
 - coercion suggestion heuristics,
 - descriptor-source-aware contribution introspection,
-- richer app property and environment planning.
+- richer app property and environment planning,
+- deployment-profile-aware property planning.
 
 ## Prisma persistence schema
 
@@ -459,6 +493,8 @@ This allows:
 - app-level governance artifact history,
 - app-level composition-comparison artifact history,
 - app-level mapping preview artifact history,
+- app-level property-plan artifact history,
+- app-level mapping-test artifact history,
 - artifact lookup by resolved `FlogoApp`,
 
 without adding a second artifact storage model yet.
@@ -468,7 +504,7 @@ without adding a second artifact storage model yet.
 Current runtime behavior is mixed:
 
 - persisted metadata is stored in PostgreSQL,
-- catalog, descriptor, and mapping-preview payloads are stored as Blob/Azurite-backed JSON objects,
+- inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test payloads are stored as Blob/Azurite-backed JSON objects,
 - many broader task artifacts still use logical or local URIs.
 
 This matters for operators:

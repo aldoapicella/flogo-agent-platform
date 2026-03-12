@@ -145,6 +145,10 @@ export class RunnerJobService {
         );
       case "mapping_preview":
         return process.env.RUNNER_MAPPING_PREVIEW_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
+      case "mapping_test":
+        return process.env.RUNNER_MAPPING_TEST_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
+      case "property_plan":
+        return process.env.RUNNER_PROPERTY_PLAN_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
       case "governance":
         return process.env.RUNNER_GOVERNANCE_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
       case "composition_compare":

@@ -30,6 +30,12 @@ export function resolveWorkflowRunnerSteps(start: OrchestratorStartRequest): Run
   if (mode === "mapping_preview") {
     return ["preview_mapping"];
   }
+  if (mode === "mapping_test") {
+    return ["test_mapping"];
+  }
+  if (mode === "property_plan") {
+    return ["plan_properties"];
+  }
   if (mode === "governance") {
     return ["validate_governance"];
   }
@@ -62,64 +68,133 @@ export function toTaskStatus(runtimeStatus: string, approvalStatus?: string): Ta
 }
 
 export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: RunnerStepType): RunnerJobSpec {
-  const jobKind =
-    stepType === "generate_smoke" || stepType === "run_smoke"
-      ? "smoke_test"
-      : stepType === "inventory_contribs"
-        ? "inventory"
-        : stepType === "catalog_contribs"
-        ? "catalog"
-        : stepType === "inspect_contrib_evidence"
-          ? "contrib_evidence"
-        : stepType === "preview_mapping"
-          ? "mapping_preview"
-          : stepType === "validate_governance"
-            ? "governance"
-            : stepType === "compare_composition"
-              ? "composition_compare"
-          : stepType === "build" || stepType === "run"
-        ? "build"
-        : "eval";
+  let jobKind: RunnerJobSpec["jobKind"] = "eval";
+  switch (stepType) {
+    case "generate_smoke":
+    case "run_smoke":
+      jobKind = "smoke_test";
+      break;
+    case "inventory_contribs":
+      jobKind = "inventory";
+      break;
+    case "catalog_contribs":
+      jobKind = "catalog";
+      break;
+    case "inspect_contrib_evidence":
+      jobKind = "contrib_evidence";
+      break;
+    case "preview_mapping":
+      jobKind = "mapping_preview";
+      break;
+    case "test_mapping":
+      jobKind = "mapping_test";
+      break;
+    case "plan_properties":
+      jobKind = "property_plan";
+      break;
+    case "validate_governance":
+      jobKind = "governance";
+      break;
+    case "compare_composition":
+      jobKind = "composition_compare";
+      break;
+    case "build":
+    case "run":
+      jobKind = "build";
+      break;
+    default:
+      jobKind = "eval";
+      break;
+  }
   const sampleInput = start.request.inputs["sampleInput"];
-  const analysisPayload =
-    stepType === "preview_mapping"
-      ? sampleInput && typeof sampleInput === "object" && !Array.isArray(sampleInput)
-        ? (sampleInput as Record<string, unknown>)
-        : undefined
-      : stepType === "compare_composition"
-        ? ({
-            target:
-              typeof start.request.inputs["target"] === "string"
-                ? (start.request.inputs["target"] as string)
-                : "app",
-            resourceId:
-              typeof start.request.inputs["resourceId"] === "string"
-                ? (start.request.inputs["resourceId"] as string)
-                : undefined
-          } satisfies Record<string, unknown>)
-        : stepType === "validate_governance"
-          ? ({ mode: "governance" } satisfies Record<string, unknown>)
-          : stepType === "inspect_contrib_evidence"
-            ? ({ mode: "contrib_evidence" } satisfies Record<string, unknown>)
+  let analysisPayload: Record<string, unknown> | undefined;
+  switch (stepType) {
+    case "preview_mapping":
+      analysisPayload =
+        sampleInput && typeof sampleInput === "object" && !Array.isArray(sampleInput)
+          ? (sampleInput as Record<string, unknown>)
           : undefined;
+      break;
+    case "test_mapping":
+      analysisPayload = {
+        sampleInput:
+          sampleInput && typeof sampleInput === "object" && !Array.isArray(sampleInput)
+            ? (sampleInput as Record<string, unknown>)
+            : {},
+        expectedOutput:
+          start.request.inputs["expectedOutput"] &&
+          typeof start.request.inputs["expectedOutput"] === "object" &&
+          !Array.isArray(start.request.inputs["expectedOutput"])
+            ? (start.request.inputs["expectedOutput"] as Record<string, unknown>)
+            : {},
+        strict: start.request.inputs["strict"] !== false
+      };
+      break;
+    case "plan_properties":
+      analysisPayload = {
+        profile:
+          typeof start.request.inputs["profile"] === "string"
+            ? (start.request.inputs["profile"] as string)
+            : "rest_service"
+      };
+      break;
+    case "compare_composition":
+      analysisPayload = {
+        target:
+          typeof start.request.inputs["target"] === "string"
+            ? (start.request.inputs["target"] as string)
+            : "app",
+        resourceId:
+          typeof start.request.inputs["resourceId"] === "string"
+            ? (start.request.inputs["resourceId"] as string)
+            : undefined
+      };
+      break;
+    case "validate_governance":
+      analysisPayload = { mode: "governance" };
+      break;
+    case "inspect_contrib_evidence":
+      analysisPayload = { mode: "contrib_evidence" };
+      break;
+    default:
+      analysisPayload = undefined;
+      break;
+  }
   const targetNodeId = typeof start.request.inputs["nodeId"] === "string" ? (start.request.inputs["nodeId"] as string) : undefined;
   const targetRef = typeof start.request.inputs["ref"] === "string" ? (start.request.inputs["ref"] as string) : undefined;
-  const analysisKind =
-    stepType === "inventory_contribs"
-      ? "inventory"
-      : stepType === "catalog_contribs"
-      ? "catalog"
-      : stepType === "inspect_descriptor"
-        ? "descriptor"
-        : stepType === "inspect_contrib_evidence"
-          ? "contrib_evidence"
-        : stepType === "preview_mapping"
-          ? "mapping_preview"
-          : stepType === "validate_governance"
-            ? "governance"
-            : stepType === "compare_composition"
-              ? "composition_compare"
-              : undefined;
+  let analysisKind: RunnerJobSpec["analysisKind"];
+  switch (stepType) {
+    case "inventory_contribs":
+      analysisKind = "inventory";
+      break;
+    case "catalog_contribs":
+      analysisKind = "catalog";
+      break;
+    case "inspect_descriptor":
+      analysisKind = "descriptor";
+      break;
+    case "inspect_contrib_evidence":
+      analysisKind = "contrib_evidence";
+      break;
+    case "preview_mapping":
+      analysisKind = "mapping_preview";
+      break;
+    case "test_mapping":
+      analysisKind = "mapping_test";
+      break;
+    case "plan_properties":
+      analysisKind = "property_plan";
+      break;
+    case "validate_governance":
+      analysisKind = "governance";
+      break;
+    case "compare_composition":
+      analysisKind = "composition_compare";
+      break;
+    default:
+      analysisKind = undefined;
+      break;
+  }
 
   return {
     taskId: start.taskId,
