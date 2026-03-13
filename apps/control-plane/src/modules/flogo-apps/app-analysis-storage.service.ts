@@ -34,6 +34,27 @@ export class AppAnalysisStorageService {
       | "contrib_inventory"
       | "contrib_catalog"
       | "contrib_evidence"
+      | "flow_contract"
+      | "trigger_binding_plan"
+      | "trigger_binding_result"
+      | "subflow_extraction_plan"
+      | "subflow_extraction_result"
+      | "subflow_inlining_plan"
+      | "subflow_inlining_result"
+      | "iterator_plan"
+      | "iterator_result"
+      | "retry_policy_plan"
+      | "retry_policy_result"
+      | "dowhile_plan"
+      | "dowhile_result"
+      | "error_path_plan"
+      | "error_path_result"
+      | "run_trace_plan"
+      | "run_trace"
+      | "replay_plan"
+      | "replay_report"
+      | "run_comparison_plan"
+      | "run_comparison"
       | "mapping_preview"
       | "mapping_test"
       | "property_plan"
@@ -73,6 +94,31 @@ export class AppAnalysisStorageService {
       blobPath,
       contentType: "application/json"
     };
+  }
+
+  async loadJsonArtifact(blobPath: string): Promise<Record<string, unknown>> {
+    if (!this.config) {
+      throw new Error("App analysis storage is not configured");
+    }
+
+    await this.ensureContainer();
+
+    const url = this.buildBlobUrl(blobPath);
+    const headers = this.createBaseHeaders("0");
+    headers.set("Authorization", this.buildAuthorizationHeader("GET", url, headers));
+
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers
+    });
+
+    if (!response.ok) {
+      const message = await response.text();
+      this.logger.error(`Failed to load app-analysis artifact ${blobPath}: ${message}`);
+      throw new Error(`Failed to load app-analysis artifact ${blobPath}: ${response.status}`);
+    }
+
+    return (await response.json()) as Record<string, unknown>;
   }
 
   private resolveConfig(): BlobStorageConfig | undefined {

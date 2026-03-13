@@ -18,6 +18,7 @@ import {
 
 import { TaskEventsService } from "../events/task-events.service.js";
 import { ToolsetService } from "../tools/toolset.service.js";
+import { FlogoAppsService } from "../flogo-apps/flogo-apps.service.js";
 import { OrchestratorClientService } from "./orchestrator-client.service.js";
 import { type StoredTask, TaskStoreService } from "./task-store.service.js";
 
@@ -29,7 +30,8 @@ export class OrchestrationService {
     private readonly toolsetService: ToolsetService,
     private readonly orchestratorClient: OrchestratorClientService,
     private readonly eventsService: TaskEventsService,
-    private readonly taskStore: TaskStoreService
+    private readonly taskStore: TaskStoreService,
+    private readonly flogoAppsService: FlogoAppsService
   ) {
     this.orchestrator = new OrchestratorAgent({
       modelClient: new StaticModelClient(),
@@ -38,7 +40,19 @@ export class OrchestrationService {
   }
 
   async submitTask(value: unknown): Promise<StoredTask> {
-    const request = TaskRequestSchema.parse(value);
+    const parsedRequest = TaskRequestSchema.parse(value);
+    const request =
+      (parsedRequest.inputs["mode"] === "run_comparison" || parsedRequest.inputs["mode"] === "run_comparison_plan") &&
+      parsedRequest.appId
+        ? {
+            ...parsedRequest,
+            inputs: await this.flogoAppsService.prepareRunComparisonTaskInputs(
+              parsedRequest.projectId,
+              parsedRequest.appId,
+              parsedRequest.inputs
+            )
+          }
+        : parsedRequest;
     const plan = await this.orchestrator.planTask(request);
     const id = request.taskId ?? randomUUID();
     const steps: TaskStep[] = plan.steps.map((step, index) => ({

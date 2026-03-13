@@ -97,8 +97,15 @@ Do not introduce a new always-on Go service unless there is a strong architectur
 
 ### Current Flogo-native baseline
 
-The repo already supports a Phase 1 slice. Before adding new capability, understand what exists:
+The repo has a completed Phase 1 foundation and has started Phase 2. Before adding new capability, understand what exists:
 
+- flow contract inference
+- trigger binding / trigger polymorphism
+- subflow extraction / inlining
+- iterator synthesis
+- retry-on-error synthesis
+- doWhile synthesis
+- error-path templates
 - contribution cataloging
 - descriptor inspection
 - governance validation
@@ -109,8 +116,10 @@ The repo already supports a Phase 1 slice. Before adding new capability, underst
 - profile-aware property/environment planning
 - Blob/Azurite-backed app-analysis artifacts
 - analysis-only orchestration modes
+- direct trigger-binding mutation and validate-only planning
+- direct advanced control-flow mutation and validate-only planning
 
-Treat the Phase 1 Core/mapping foundation as implemented. New Flogo-native work should generally target Phase 2 or later unless the task is explicitly about hardening existing Phase 1 behavior.
+Treat the Phase 1 Core/mapping foundation as implemented, the main Phase 2 design-time flow-pattern surface as implemented, and Phase 3 runtime trace capture, replay, and run comparison as implemented. New Flogo-native work should generally target runtime-backed debugging and contribution authoring unless the task is explicitly about hardening an existing capability.
 
 Do not accidentally regress these while implementing later phases.
 
@@ -150,6 +159,16 @@ Avoid breaking existing task routes or replacing top-level task types unless abs
 ### Preserve analysis-only task behavior
 
 Analysis-only modes should stop after analysis artifact publication. They should not schedule patch/build/smoke work unless the task is actually mutating behavior.
+
+### Advanced control-flow note
+
+The repo now supports direct synthesis for:
+
+- iterators
+- retry-on-error
+- doWhile
+
+Keep those aligned with the official Flogo iterator/control-flow semantics. If a requested loop spans multiple activity calls, prefer subflow extraction first rather than forcing a multi-task iterator into one direct mutation step.
 
 ## Validation and Testing
 

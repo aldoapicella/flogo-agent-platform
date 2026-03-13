@@ -48,6 +48,20 @@ Important analysis-only modes:
 - `inputs.mode = "inventory"`
 - `inputs.mode = "catalog"`
 - `inputs.mode = "contrib_evidence"`
+- `inputs.mode = "flow_contracts"`
+- `inputs.mode = "trigger_binding_plan"`
+- `inputs.mode = "subflow_extraction_plan"`
+- `inputs.mode = "subflow_inlining_plan"`
+- `inputs.mode = "iterator_plan"`
+- `inputs.mode = "retry_policy_plan"`
+- `inputs.mode = "dowhile_plan"`
+- `inputs.mode = "error_path_plan"`
+- `inputs.mode = "run_trace_plan"`
+- `inputs.mode = "run_trace"`
+- `inputs.mode = "replay_plan"`
+- `inputs.mode = "replay"`
+- `inputs.mode = "run_comparison_plan"`
+- `inputs.mode = "run_comparison"`
 - `inputs.mode = "mapping_preview"`
 - `inputs.mode = "mapping_test"`
 - `inputs.mode = "property_plan"`
@@ -233,6 +247,397 @@ Current implementation notes:
 
 - catalog entries include descriptor source information such as `descriptor`, `registry`, or `inferred`,
 - the response artifact is backed by Blob/Azurite JSON storage and Prisma metadata.
+
+### `GET /v1/projects/:projectId/apps/:appId/flows/contracts`
+
+Returns inferred flow contracts for the app, plus a persisted artifact reference.
+
+Optional query:
+
+- `flowId`
+
+Response shape:
+
+- `FlowContractsResponse`
+
+Key fields:
+
+- `contracts.appName`
+- `contracts.contracts[]`
+- `artifact`
+
+Current implementation notes:
+
+- inference is metadata-first and uses `resources[].data.metadata.input/output` as the primary source of truth,
+- handler `action.ref` usage and handler input/output mappings are used to enrich usage and fill missing contract hints,
+- the response artifact is backed by Blob/Azurite JSON storage and Prisma metadata,
+- analysis-only tasks can request the same capability with `inputs.mode = "flow_contracts"` without scheduling patch/build/smoke steps.
+
+### `POST /v1/projects/:projectId/apps/:appId/flows/trace`
+
+Captures a runtime trace for one flow using helper-backed execution, or validates trace feasibility without execution.
+
+Request shape:
+
+- `RunTraceRequest`
+
+Important fields:
+
+- `flowId`
+- `sampleInput`
+- `capture`
+- `validateOnly`
+
+Response shape:
+
+- `RunTraceResponse`
+
+Important behavior:
+
+- `validateOnly = true` persists a `run_trace_plan` artifact and does not execute the flow
+- `validateOnly = false` executes the flow through the helper path and persists a `run_trace` artifact
+- unknown flows return `404`
+- missing required inputs return `422`
+- analysis-only tasks can request `inputs.mode = "run_trace_plan"`
+- execution-oriented non-mutating tasks can request `inputs.mode = "run_trace"`
+
+Current implementation notes:
+
+- trace capture is task-level rather than engine-internal event spam,
+- the helper returns structured step snapshots, summary status, and diagnostics only through JSON stdout,
+- current runtime trace is additive runtime evidence and does not replace static mapping preview or mapping tests.
+
+### `POST /v1/projects/:projectId/apps/:appId/flows/replay`
+
+Re-executes one flow using either an explicit base input or the stored input from a prior `run_trace` artifact, plus optional overrides.
+
+Request shape:
+
+- `ReplayRequest`
+
+Important fields:
+
+- `flowId`
+- `traceArtifactId?`
+- `baseInput?`
+- `overrides?`
+- `capture?`
+- `validateOnly`
+
+Response shape:
+
+- `ReplayResponse`
+
+Important behavior:
+
+- exactly one of `traceArtifactId` or `baseInput` must be provided
+- override merging uses deep object merge with replace semantics for arrays and scalar/null overrides
+- `validateOnly = true` persists a `replay_plan` artifact and does not execute the flow
+- `validateOnly = false` executes replay through the helper path and persists a `replay_report` artifact
+- unknown flows return `404`
+- missing or unreadable `run_trace` artifacts return `404`
+- replay input that cannot satisfy the inferred flow contract returns `422`
+- analysis-only tasks can request `inputs.mode = "replay_plan"`
+- execution-oriented non-mutating tasks can request `inputs.mode = "replay"`
+
+Current implementation notes:
+
+- replay reuses the helper-backed runtime trace path internally after computing the effective input,
+- replay from `traceArtifactId` loads the stored `run_trace` payload and uses `trace.summary.input` as the base input,
+- successful replay returns structured replay metadata plus a nested trace payload,
+- failed task execution still returns a structured replay response when the helper can serialize the failure.
+
+### `POST /v1/projects/:projectId/apps/:appId/flows/compare-runs`
+
+Compares two previously captured runtime executions using stored `run_trace` and `replay_report` artifacts.
+
+Request shape:
+
+- `RunComparisonRequest`
+
+Important fields:
+
+- `leftArtifactId`
+- `rightArtifactId`
+- `compare?`
+- `validateOnly`
+
+Response shape:
+
+- `RunComparisonResponse`
+
+Important behavior:
+
+- both artifacts must exist and belong to the resolved app context
+- comparable artifact kinds are limited to `run_trace` and `replay_report`
+- step pairing is by `taskId`, not array index
+- `validateOnly = true` persists a `run_comparison_plan` artifact and does not compute the full persisted diff payload
+- `validateOnly = false` computes and persists a `run_comparison` artifact
+- analysis-only tasks can request `inputs.mode = "run_comparison_plan"`
+- non-mutating comparison tasks can request `inputs.mode = "run_comparison"`
+
+Current implementation notes:
+
+- replay artifacts are normalized through their nested runtime trace before comparison,
+- cross-flow comparison is allowed and returns a warning diagnostic instead of a hard failure,
+- array values are compared as whole values in this slice,
+- comparison artifacts capture summary-level diffs, task-level diffs, and diagnostic changes.
+
+### `POST /v1/projects/:projectId/apps/:appId/triggers/bind`
+
+Plans or applies a trigger binding for an existing flow.
+
+Request shape:
+
+- `TriggerBindingRequest`
+
+Important fields:
+
+- `flowId`
+- `profile`
+- `validateOnly`
+- `replaceExisting`
+
+Supported trigger profiles in the current slice:
+
+- `rest`
+- `timer`
+- `cli`
+- `channel`
+
+Response shape:
+
+- `TriggerBindingResponse`
+
+Important behavior:
+
+- `validateOnly = true` persists a `trigger_binding_plan` artifact and does not mutate `flogo.json`
+- `validateOnly = false` applies the binding directly to the resolved app file and persists a `trigger_binding_result` artifact
+- duplicate matching bindings return `409` unless `replaceExisting = true`
+- unsupported contract/profile pairings return `422`
+- analysis-only tasks can request the planning path with `inputs.mode = "trigger_binding_plan"` without scheduling patch/build/smoke steps
+
+Current implementation notes:
+
+- REST bindings auto-map common request and reply fields based on the flow contract
+- Timer bindings are limited to flows with zero required inputs in this slice
+- CLI bindings auto-map `args` and `flags`
+- Channel bindings auto-map `data`
+
+### `POST /v1/projects/:projectId/apps/:appId/flows/extract-subflow`
+
+Plans or applies extraction of an explicit contiguous linear task sequence into a new subflow.
+
+Request shape:
+
+- `SubflowExtractionRequest`
+
+Important fields:
+
+- `flowId`
+- `taskIds`
+- `newFlowId?`
+- `newFlowName?`
+- `validateOnly`
+- `replaceExisting`
+
+Response shape:
+
+- `SubflowExtractionResponse`
+
+Important behavior:
+
+- `validateOnly = true` persists a `subflow_extraction_plan` artifact and does not mutate `flogo.json`
+- `validateOnly = false` applies the extraction directly to the resolved app file and persists a `subflow_extraction_result` artifact
+- duplicate generated target flow IDs return `409` unless `replaceExisting = true`
+- invalid selections or unsupported linked/branching flow shapes return `422`
+
+Current implementation notes:
+
+- this slice supports only explicit contiguous linear task selections,
+- extraction derives subflow inputs from parent-flow values consumed inside the selected region,
+- extraction derives subflow outputs from values produced in the selected region and consumed later,
+- the parent flow is rewritten by replacing the selected region with one synthetic subflow invocation task.
+
+### `POST /v1/projects/:projectId/apps/:appId/flows/inline-subflow`
+
+Plans or applies inlining of a same-app subflow invocation back into its parent flow.
+
+Request shape:
+
+- `SubflowInliningRequest`
+
+Important fields:
+
+- `parentFlowId`
+- `invocationTaskId`
+- `validateOnly`
+- `removeExtractedFlowIfUnused`
+
+Response shape:
+
+- `SubflowInliningResponse`
+
+Important behavior:
+
+- `validateOnly = true` persists a `subflow_inlining_plan` artifact and does not mutate `flogo.json`
+- `validateOnly = false` applies the inlining directly to the resolved app file and persists a `subflow_inlining_result` artifact
+- unknown invocation tasks return `404`
+- unsupported linked/branching flow shapes return `422`
+
+Current implementation notes:
+
+- this slice supports only invocation tasks that point to same-app flow resources,
+- generated inlined task IDs are prefixed deterministically with the invocation task ID,
+- `removeExtractedFlowIfUnused = true` removes the extracted flow only when no remaining references exist.
+
+### `POST /v1/projects/:projectId/apps/:appId/flows/add-iterator`
+
+Plans or applies iterator synthesis for one existing activity-backed or subflow invocation task.
+
+Request shape:
+
+- `IteratorSynthesisRequest`
+
+Important fields:
+
+- `flowId`
+- `taskId`
+- `iterateExpr`
+- `accumulate?`
+- `validateOnly`
+- `replaceExisting`
+
+Response shape:
+
+- `IteratorSynthesisResponse`
+
+Important behavior:
+
+- `validateOnly = true` persists an `iterator_plan` artifact and does not mutate `flogo.json`
+- `validateOnly = false` applies iterator synthesis directly to the resolved app file and persists an `iterator_result` artifact
+- conflicting existing iterator state returns `409` unless `replaceExisting = true`
+- missing flow/task returns `404`
+- incompatible task shapes or invalid iterate expressions return `422`
+
+Current implementation notes:
+
+- iterator synthesis supports plain activity-backed tasks and same-app subflow invocation tasks,
+- the synthesized task uses `type = "iterator"` and writes `settings.iterate`,
+- `accumulate` is included only when provided,
+- this slice does not synthesize one iterator across multiple tasks; multi-task iteration should use subflow extraction first.
+
+### `POST /v1/projects/:projectId/apps/:appId/flows/add-retry-policy`
+
+Plans or applies retry-on-error synthesis for one existing activity-backed, iterator, doWhile, or subflow invocation task.
+
+Request shape:
+
+- `RetryPolicyRequest`
+
+Important fields:
+
+- `flowId`
+- `taskId`
+- `count`
+- `intervalMs`
+- `validateOnly`
+- `replaceExisting`
+
+Response shape:
+
+- `RetryPolicyResponse`
+
+Important behavior:
+
+- `validateOnly = true` persists a `retry_policy_plan` artifact and does not mutate `flogo.json`
+- `validateOnly = false` applies retry-policy synthesis directly to the resolved app file and persists a `retry_policy_result` artifact
+- conflicting existing retry policy returns `409` unless `replaceExisting = true`
+- missing flow/task returns `404`
+- invalid retry configuration or incompatible task shapes return `422`
+
+Current implementation notes:
+
+- retry synthesis writes `settings.retryOnError = { count, interval }`,
+- retry can coexist with iterator and doWhile in this slice,
+- the current slice supports simple retry only; advanced backoff strategies are out of scope.
+
+### `POST /v1/projects/:projectId/apps/:appId/flows/add-dowhile`
+
+Plans or applies doWhile synthesis for one existing activity-backed or subflow invocation task.
+
+Request shape:
+
+- `DoWhileSynthesisRequest`
+
+Important fields:
+
+- `flowId`
+- `taskId`
+- `condition`
+- `delayMs?`
+- `accumulate?`
+- `validateOnly`
+- `replaceExisting`
+
+Response shape:
+
+- `DoWhileSynthesisResponse`
+
+Important behavior:
+
+- `validateOnly = true` persists a `dowhile_plan` artifact and does not mutate `flogo.json`
+- `validateOnly = false` applies doWhile synthesis directly to the resolved app file and persists a `dowhile_result` artifact
+- conflicting existing doWhile state returns `409` unless `replaceExisting = true`
+- missing flow/task returns `404`
+- invalid conditions or incompatible task shapes return `422`
+
+Current implementation notes:
+
+- doWhile synthesis supports plain activity-backed tasks and same-app subflow invocation tasks,
+- the synthesized task uses `type = "doWhile"` and writes `settings.condition`,
+- `delay` and `accumulate` are included only when provided,
+- iterator and doWhile are mutually exclusive in this slice.
+
+### `POST /v1/projects/:projectId/apps/:appId/flows/add-error-path`
+
+Plans or applies a generated failure branch for one existing task in one flow.
+
+Request shape:
+
+- `ErrorPathTemplateRequest`
+
+Important fields:
+
+- `flowId`
+- `taskId`
+- `template`
+  - `log_and_continue`
+  - `log_and_stop`
+- `validateOnly`
+- `replaceExisting`
+- `logMessage?`
+- `generatedTaskPrefix?`
+
+Response shape:
+
+- `ErrorPathTemplateResponse`
+
+Important behavior:
+
+- `validateOnly = true` persists an `error_path_plan` artifact and does not mutate `flogo.json`
+- `validateOnly = false` applies the generated error path directly to the resolved app file and persists an `error_path_result` artifact
+- conflicting previously generated error paths return `409` unless `replaceExisting = true`
+- missing flow/task returns `404`
+- unsupported branching flows, incompatible task shapes, or invalid template/shape combinations return `422`
+
+Current implementation notes:
+
+- the current slice supports only `log_and_continue` and `log_and_stop`,
+- the graph rewrite materializes typed linear links when the target flow has no links,
+- success and failure branches use canonical expression links based on `$activity[taskId].error`,
+- generated failure tasks use `#log` and reuse or add the log import as needed,
+- this slice supports only empty-link or simple linear-link flows and rejects arbitrary existing branching graphs.
 
 ### `GET /v1/projects/:projectId/apps/:appId/descriptors?ref=...`
 
@@ -540,7 +945,7 @@ Request shape:
 Workflow behavior:
 
 - mutating workflows use build/run/smoke-oriented runner steps,
-- analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, or `preview_mapping`.
+- analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, `preview_mapping`, `infer_flow_contracts`, `extract_subflow`, `inline_subflow`, `add_iterator`, `add_retry_policy`, `add_dowhile`, or `add_error_path`.
 - analysis-only workflows also support `test_mapping` and `plan_properties`.
 
 ## Runner-worker API
@@ -637,6 +1042,10 @@ The most important ones are:
 - `MappingTestSpec`
 - `MappingTestResult`
 - `MappingTestResponse`
+- `SubflowExtractionRequest`
+- `SubflowExtractionResponse`
+- `SubflowInliningRequest`
+- `SubflowInliningResponse`
 - `ValidationReport`
 - `RunnerJobSpec`
 - `RunnerJobResult`

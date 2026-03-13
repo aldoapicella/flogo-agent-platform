@@ -18,6 +18,42 @@ const defaultWorkflowRunnerSteps: RunnerStepType[] = ["build", "run", "generate_
 
 export function resolveWorkflowRunnerSteps(start: OrchestratorStartRequest): RunnerStepType[] {
   const mode = start.request.inputs["mode"];
+  if (mode === "flow_contracts") {
+    return ["infer_flow_contracts"];
+  }
+  if (mode === "trigger_binding_plan") {
+    return ["bind_trigger"];
+  }
+  if (mode === "subflow_extraction_plan") {
+    return ["extract_subflow"];
+  }
+  if (mode === "subflow_inlining_plan") {
+    return ["inline_subflow"];
+  }
+  if (mode === "iterator_plan") {
+    return ["add_iterator"];
+  }
+  if (mode === "retry_policy_plan") {
+    return ["add_retry_policy"];
+  }
+  if (mode === "dowhile_plan") {
+    return ["add_dowhile"];
+  }
+  if (mode === "error_path_plan") {
+    return ["add_error_path"];
+  }
+  if (mode === "run_trace_plan" || mode === "run_trace") {
+    return ["capture_run_trace"];
+  }
+  if (mode === "replay_plan" || mode === "replay") {
+    return ["replay_flow"];
+  }
+  if (mode === "run_comparison_plan" || mode === "run_comparison") {
+    return ["compare_runs"];
+  }
+  if (mode === "run_comparison_plan" || mode === "run_comparison") {
+    return ["compare_runs"];
+  }
   if (mode === "inventory") {
     return ["inventory_contribs"];
   }
@@ -74,6 +110,42 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
     case "run_smoke":
       jobKind = "smoke_test";
       break;
+    case "infer_flow_contracts":
+      jobKind = "flow_contracts";
+      break;
+    case "bind_trigger":
+      jobKind = "trigger_binding";
+      break;
+    case "extract_subflow":
+      jobKind = "subflow_extraction";
+      break;
+    case "inline_subflow":
+      jobKind = "subflow_inlining";
+      break;
+    case "add_iterator":
+      jobKind = "iterator_synthesis";
+      break;
+    case "add_retry_policy":
+      jobKind = "retry_policy_synthesis";
+      break;
+    case "add_dowhile":
+      jobKind = "dowhile_synthesis";
+      break;
+    case "add_error_path":
+      jobKind = "error_path_synthesis";
+      break;
+    case "capture_run_trace":
+      jobKind = "run_trace_capture";
+      break;
+    case "replay_flow":
+      jobKind = "flow_replay";
+      break;
+    case "compare_runs":
+      jobKind = "run_comparison";
+      break;
+    case "compare_runs":
+      jobKind = "run_comparison";
+      break;
     case "inventory_contribs":
       jobKind = "inventory";
       break;
@@ -109,6 +181,270 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
   const sampleInput = start.request.inputs["sampleInput"];
   let analysisPayload: Record<string, unknown> | undefined;
   switch (stepType) {
+    case "infer_flow_contracts":
+      analysisPayload = {
+        flowId:
+          typeof start.request.inputs["flowId"] === "string"
+            ? (start.request.inputs["flowId"] as string)
+            : undefined
+      };
+      break;
+    case "bind_trigger":
+      analysisPayload = {
+        flowId:
+          typeof start.request.inputs["flowId"] === "string"
+            ? (start.request.inputs["flowId"] as string)
+            : undefined,
+        profile:
+          start.request.inputs["profile"] && typeof start.request.inputs["profile"] === "object" && !Array.isArray(start.request.inputs["profile"])
+            ? (start.request.inputs["profile"] as Record<string, unknown>)
+            : undefined,
+        validateOnly: start.request.inputs["validateOnly"] !== false,
+        replaceExisting: start.request.inputs["replaceExisting"] === true,
+        handlerName:
+          typeof start.request.inputs["handlerName"] === "string"
+            ? (start.request.inputs["handlerName"] as string)
+            : undefined,
+        triggerId:
+          typeof start.request.inputs["triggerId"] === "string"
+            ? (start.request.inputs["triggerId"] as string)
+            : undefined,
+        triggerName:
+          typeof start.request.inputs["triggerName"] === "string"
+            ? (start.request.inputs["triggerName"] as string)
+            : undefined
+      };
+      break;
+    case "extract_subflow":
+      analysisPayload = {
+        flowId:
+          typeof start.request.inputs["flowId"] === "string"
+            ? (start.request.inputs["flowId"] as string)
+            : undefined,
+        taskIds: Array.isArray(start.request.inputs["taskIds"])
+          ? (start.request.inputs["taskIds"] as unknown[]).filter((value): value is string => typeof value === "string")
+          : [],
+        newFlowId:
+          typeof start.request.inputs["newFlowId"] === "string"
+            ? (start.request.inputs["newFlowId"] as string)
+            : undefined,
+        newFlowName:
+          typeof start.request.inputs["newFlowName"] === "string"
+            ? (start.request.inputs["newFlowName"] as string)
+            : undefined,
+        validateOnly: start.request.inputs["validateOnly"] !== false,
+        replaceExisting: start.request.inputs["replaceExisting"] === true
+      };
+      break;
+    case "inline_subflow":
+      analysisPayload = {
+        parentFlowId:
+          typeof start.request.inputs["parentFlowId"] === "string"
+            ? (start.request.inputs["parentFlowId"] as string)
+            : undefined,
+        invocationTaskId:
+          typeof start.request.inputs["invocationTaskId"] === "string"
+            ? (start.request.inputs["invocationTaskId"] as string)
+            : undefined,
+        validateOnly: start.request.inputs["validateOnly"] !== false,
+        removeExtractedFlowIfUnused: start.request.inputs["removeExtractedFlowIfUnused"] === true
+      };
+      break;
+    case "add_iterator":
+      analysisPayload = {
+        flowId:
+          typeof start.request.inputs["flowId"] === "string"
+            ? (start.request.inputs["flowId"] as string)
+            : undefined,
+        taskId:
+          typeof start.request.inputs["taskId"] === "string"
+            ? (start.request.inputs["taskId"] as string)
+            : undefined,
+        iterateExpr:
+          typeof start.request.inputs["iterateExpr"] === "string"
+            ? (start.request.inputs["iterateExpr"] as string)
+            : undefined,
+        accumulate:
+          typeof start.request.inputs["accumulate"] === "boolean"
+            ? (start.request.inputs["accumulate"] as boolean)
+            : undefined,
+        validateOnly: start.request.inputs["validateOnly"] !== false,
+        replaceExisting: start.request.inputs["replaceExisting"] === true
+      };
+      break;
+    case "add_retry_policy":
+      analysisPayload = {
+        flowId:
+          typeof start.request.inputs["flowId"] === "string"
+            ? (start.request.inputs["flowId"] as string)
+            : undefined,
+        taskId:
+          typeof start.request.inputs["taskId"] === "string"
+            ? (start.request.inputs["taskId"] as string)
+            : undefined,
+        count:
+          typeof start.request.inputs["count"] === "number"
+            ? (start.request.inputs["count"] as number)
+            : undefined,
+        intervalMs:
+          typeof start.request.inputs["intervalMs"] === "number"
+            ? (start.request.inputs["intervalMs"] as number)
+            : undefined,
+        validateOnly: start.request.inputs["validateOnly"] !== false,
+        replaceExisting: start.request.inputs["replaceExisting"] === true
+      };
+      break;
+    case "add_dowhile":
+      analysisPayload = {
+        flowId:
+          typeof start.request.inputs["flowId"] === "string"
+            ? (start.request.inputs["flowId"] as string)
+            : undefined,
+        taskId:
+          typeof start.request.inputs["taskId"] === "string"
+            ? (start.request.inputs["taskId"] as string)
+            : undefined,
+        condition:
+          typeof start.request.inputs["condition"] === "string"
+            ? (start.request.inputs["condition"] as string)
+            : undefined,
+        delayMs:
+          typeof start.request.inputs["delayMs"] === "number"
+            ? (start.request.inputs["delayMs"] as number)
+            : undefined,
+        accumulate:
+          typeof start.request.inputs["accumulate"] === "boolean"
+            ? (start.request.inputs["accumulate"] as boolean)
+            : undefined,
+        validateOnly: start.request.inputs["validateOnly"] !== false,
+        replaceExisting: start.request.inputs["replaceExisting"] === true
+      };
+      break;
+    case "add_error_path":
+      analysisPayload = {
+        flowId:
+          typeof start.request.inputs["flowId"] === "string"
+            ? (start.request.inputs["flowId"] as string)
+            : undefined,
+        taskId:
+          typeof start.request.inputs["taskId"] === "string"
+            ? (start.request.inputs["taskId"] as string)
+            : undefined,
+        template:
+          typeof start.request.inputs["template"] === "string"
+            ? (start.request.inputs["template"] as string)
+            : undefined,
+        validateOnly: start.request.inputs["validateOnly"] !== false,
+        replaceExisting: start.request.inputs["replaceExisting"] === true,
+        logMessage:
+          typeof start.request.inputs["logMessage"] === "string"
+            ? (start.request.inputs["logMessage"] as string)
+            : undefined,
+        generatedTaskPrefix:
+          typeof start.request.inputs["generatedTaskPrefix"] === "string"
+            ? (start.request.inputs["generatedTaskPrefix"] as string)
+            : undefined
+      };
+      break;
+    case "capture_run_trace":
+      analysisPayload = {
+        flowId:
+          typeof start.request.inputs["flowId"] === "string"
+            ? (start.request.inputs["flowId"] as string)
+            : undefined,
+        sampleInput:
+          start.request.inputs["sampleInput"] && typeof start.request.inputs["sampleInput"] === "object" && !Array.isArray(start.request.inputs["sampleInput"])
+            ? (start.request.inputs["sampleInput"] as Record<string, unknown>)
+            : {},
+        capture:
+          start.request.inputs["capture"] && typeof start.request.inputs["capture"] === "object" && !Array.isArray(start.request.inputs["capture"])
+            ? (start.request.inputs["capture"] as Record<string, unknown>)
+            : undefined,
+        validateOnly: start.request.inputs["mode"] === "run_trace_plan" || start.request.inputs["validateOnly"] === true
+      };
+      break;
+    case "replay_flow":
+      analysisPayload = {
+        flowId:
+          typeof start.request.inputs["flowId"] === "string"
+            ? (start.request.inputs["flowId"] as string)
+            : undefined,
+        traceArtifactId:
+          typeof start.request.inputs["traceArtifactId"] === "string"
+            ? (start.request.inputs["traceArtifactId"] as string)
+            : undefined,
+        baseInput:
+          start.request.inputs["baseInput"] && typeof start.request.inputs["baseInput"] === "object" && !Array.isArray(start.request.inputs["baseInput"])
+            ? (start.request.inputs["baseInput"] as Record<string, unknown>)
+            : undefined,
+        overrides:
+          start.request.inputs["overrides"] && typeof start.request.inputs["overrides"] === "object" && !Array.isArray(start.request.inputs["overrides"])
+            ? (start.request.inputs["overrides"] as Record<string, unknown>)
+            : undefined,
+        capture:
+          start.request.inputs["capture"] && typeof start.request.inputs["capture"] === "object" && !Array.isArray(start.request.inputs["capture"])
+            ? (start.request.inputs["capture"] as Record<string, unknown>)
+            : undefined,
+        validateOnly: start.request.inputs["mode"] === "replay_plan" || start.request.inputs["validateOnly"] === true
+      };
+      break;
+    case "compare_runs":
+      analysisPayload = {
+        leftArtifactId:
+          typeof start.request.inputs["leftArtifactId"] === "string"
+            ? (start.request.inputs["leftArtifactId"] as string)
+            : undefined,
+        rightArtifactId:
+          typeof start.request.inputs["rightArtifactId"] === "string"
+            ? (start.request.inputs["rightArtifactId"] as string)
+            : undefined,
+        leftArtifact:
+          start.request.inputs["leftArtifact"] && typeof start.request.inputs["leftArtifact"] === "object" && !Array.isArray(start.request.inputs["leftArtifact"])
+            ? (start.request.inputs["leftArtifact"] as Record<string, unknown>)
+            : undefined,
+        rightArtifact:
+          start.request.inputs["rightArtifact"] && typeof start.request.inputs["rightArtifact"] === "object" && !Array.isArray(start.request.inputs["rightArtifact"])
+            ? (start.request.inputs["rightArtifact"] as Record<string, unknown>)
+            : undefined,
+        compare:
+          start.request.inputs["compare"] && typeof start.request.inputs["compare"] === "object" && !Array.isArray(start.request.inputs["compare"])
+            ? (start.request.inputs["compare"] as Record<string, unknown>)
+            : undefined,
+        validateOnly: start.request.inputs["mode"] === "run_comparison_plan" || start.request.inputs["validateOnly"] === true
+      };
+      break;
+    case "compare_runs":
+      analysisPayload = {
+        leftArtifactId:
+          typeof start.request.inputs["leftArtifactId"] === "string"
+            ? (start.request.inputs["leftArtifactId"] as string)
+            : undefined,
+        rightArtifactId:
+          typeof start.request.inputs["rightArtifactId"] === "string"
+            ? (start.request.inputs["rightArtifactId"] as string)
+            : undefined,
+        leftArtifact:
+          start.request.inputs["leftArtifact"] &&
+          typeof start.request.inputs["leftArtifact"] === "object" &&
+          !Array.isArray(start.request.inputs["leftArtifact"])
+            ? (start.request.inputs["leftArtifact"] as Record<string, unknown>)
+            : undefined,
+        rightArtifact:
+          start.request.inputs["rightArtifact"] &&
+          typeof start.request.inputs["rightArtifact"] === "object" &&
+          !Array.isArray(start.request.inputs["rightArtifact"])
+            ? (start.request.inputs["rightArtifact"] as Record<string, unknown>)
+            : undefined,
+        compare:
+          start.request.inputs["compare"] &&
+          typeof start.request.inputs["compare"] === "object" &&
+          !Array.isArray(start.request.inputs["compare"])
+            ? (start.request.inputs["compare"] as Record<string, unknown>)
+            : undefined,
+        validateOnly:
+          start.request.inputs["mode"] === "run_comparison_plan" || start.request.inputs["validateOnly"] === true
+      };
+      break;
     case "preview_mapping":
       analysisPayload =
         sampleInput && typeof sampleInput === "object" && !Array.isArray(sampleInput)
@@ -164,6 +500,30 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
   const targetRef = typeof start.request.inputs["ref"] === "string" ? (start.request.inputs["ref"] as string) : undefined;
   let analysisKind: RunnerJobSpec["analysisKind"];
   switch (stepType) {
+    case "infer_flow_contracts":
+      analysisKind = "flow_contracts";
+      break;
+    case "bind_trigger":
+      analysisKind = "trigger_binding_plan";
+      break;
+    case "extract_subflow":
+      analysisKind = "subflow_extraction_plan";
+      break;
+    case "inline_subflow":
+      analysisKind = "subflow_inlining_plan";
+      break;
+    case "add_iterator":
+      analysisKind = "iterator_plan";
+      break;
+    case "add_retry_policy":
+      analysisKind = "retry_policy_plan";
+      break;
+    case "add_dowhile":
+      analysisKind = "dowhile_plan";
+      break;
+    case "add_error_path":
+      analysisKind = "error_path_plan";
+      break;
     case "inventory_contribs":
       analysisKind = "inventory";
       break;

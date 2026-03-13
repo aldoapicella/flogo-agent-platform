@@ -6,6 +6,7 @@ import { FlogoAppsService } from "./flogo-apps.service.js";
 
 @Module({
   controllers: [FlogoAppsController],
-  providers: [AppAnalysisStorageService, FlogoAppsService]
+  providers: [AppAnalysisStorageService, FlogoAppsService],
+  exports: [AppAnalysisStorageService, FlogoAppsService]
 })
 export class FlogoAppsModule {}

@@ -26,10 +26,79 @@ import {
   type DeploymentProfile,
   FlogoAppGraphSchema,
   FlogoAppSchema,
+  FlogoFlowSchema,
+  FlogoLinkSchema,
+  FlogoTaskSchema,
+  FlogoTriggerSchema,
   type FlogoApp,
   type FlogoAppGraph,
   type FlogoFlow,
+  type FlogoLink,
   type FlogoTask,
+  FlowContractSchema,
+  FlowContractsSchema,
+  RunTraceRequestSchema,
+  RunTraceResponseSchema,
+  ReplayRequestSchema,
+  ReplayResponseSchema,
+  RunComparisonArtifactRefSchema,
+  RunComparisonRequestSchema,
+  RunComparisonResponseSchema,
+  RunComparisonResultSchema,
+  type ComparableRunArtifactKind,
+  type RunComparisonArtifactRef,
+  type RunComparisonRequest,
+  type RunComparisonResponse,
+  type RunComparisonResult,
+  type FlowContract,
+  type FlowContracts,
+  type ReplayRequest,
+  type ReplayResponse,
+  type RunTrace,
+  type RunTraceRequest,
+  type RunTraceResponse,
+  IteratorSynthesisPlanSchema,
+  IteratorSynthesisRequestSchema,
+  IteratorSynthesisResponseSchema,
+  type IteratorSynthesisPlan,
+  type IteratorSynthesisRequest,
+  type IteratorSynthesisResponse,
+  RetryPolicyPlanSchema,
+  RetryPolicyRequestSchema,
+  RetryPolicyResponseSchema,
+  type RetryPolicyPlan,
+  type RetryPolicyRequest,
+  type RetryPolicyResponse,
+  DoWhileSynthesisPlanSchema,
+  DoWhileSynthesisRequestSchema,
+  DoWhileSynthesisResponseSchema,
+  type DoWhileSynthesisPlan,
+  type DoWhileSynthesisRequest,
+  type DoWhileSynthesisResponse,
+  ErrorPathTemplatePlanSchema,
+  ErrorPathTemplateRequestSchema,
+  ErrorPathTemplateResponseSchema,
+  type ErrorPathTemplatePlan,
+  type ErrorPathTemplateRequest,
+  type ErrorPathTemplateResponse,
+  SubflowExtractionPlanSchema,
+  SubflowExtractionRequestSchema,
+  SubflowExtractionResponseSchema,
+  type SubflowExtractionPlan,
+  type SubflowExtractionRequest,
+  type SubflowExtractionResponse,
+  SubflowInliningPlanSchema,
+  SubflowInliningRequestSchema,
+  SubflowInliningResponseSchema,
+  type SubflowInliningPlan,
+  type SubflowInliningRequest,
+  type SubflowInliningResponse,
+  TriggerBindingPlanSchema,
+  TriggerBindingRequestSchema,
+  TriggerBindingResponseSchema,
+  type TriggerBindingPlan,
+  type TriggerBindingRequest,
+  type TriggerBindingResponse,
   GovernanceReportSchema,
   type GovernanceReport,
   MappingKindSchema,
@@ -108,6 +177,172 @@ type GoModuleInfo = {
   root: string;
   modulePath: string;
 };
+
+type TriggerBindingOperation = {
+  app: FlogoApp;
+  nextApp: FlogoApp;
+  plan: TriggerBindingPlan;
+  validation: ValidationReport;
+  patchSummary: string;
+};
+
+type SubflowOperation = {
+  app: FlogoApp;
+  nextApp: FlogoApp;
+  validation: ValidationReport;
+  patchSummary: string;
+};
+
+type SubflowExtractionOperation = SubflowOperation & {
+  plan: SubflowExtractionPlan;
+};
+
+type SubflowInliningOperation = SubflowOperation & {
+  plan: SubflowInliningPlan;
+};
+
+type ControlFlowOperation = SubflowOperation;
+
+type IteratorSynthesisOperation = ControlFlowOperation & {
+  plan: IteratorSynthesisPlan;
+};
+
+type RetryPolicyOperation = ControlFlowOperation & {
+  plan: RetryPolicyPlan;
+};
+
+type DoWhileSynthesisOperation = ControlFlowOperation & {
+  plan: DoWhileSynthesisPlan;
+};
+
+type ErrorPathTemplateOperation = ControlFlowOperation & {
+  plan: ErrorPathTemplatePlan;
+};
+
+export class TriggerBindingError extends Error {
+  constructor(
+    message: string,
+    readonly status: 404 | 409 | 422,
+    readonly diagnostics: Diagnostic[] = []
+  ) {
+    super(message);
+    this.name = "TriggerBindingError";
+  }
+}
+
+export class SubflowOperationError extends Error {
+  constructor(
+    message: string,
+    readonly status: 404 | 409 | 422,
+    readonly diagnostics: Diagnostic[] = []
+  ) {
+    super(message);
+    this.name = "SubflowOperationError";
+  }
+}
+
+export class ControlFlowSynthesisError extends Error {
+  constructor(
+    message: string,
+    readonly status: 404 | 409 | 422,
+    readonly diagnostics: Diagnostic[] = []
+  ) {
+    super(message);
+    this.name = "ControlFlowSynthesisError";
+  }
+}
+
+export class ErrorPathTemplateError extends Error {
+  constructor(
+    message: string,
+    readonly status: 404 | 409 | 422,
+    readonly diagnostics: Diagnostic[] = []
+  ) {
+    super(message);
+    this.name = "ErrorPathTemplateError";
+  }
+}
+
+export class RunTraceError extends Error {
+  constructor(
+    message: string,
+    readonly status: 404 | 422,
+    readonly diagnostics: Diagnostic[] = []
+  ) {
+    super(message);
+    this.name = "RunTraceError";
+  }
+}
+
+export class ReplayError extends Error {
+  constructor(
+    message: string,
+    readonly status: 404 | 422,
+    readonly diagnostics: Diagnostic[] = []
+  ) {
+    super(message);
+    this.name = "ReplayError";
+  }
+}
+
+export class RunComparisonError extends Error {
+  constructor(
+    message: string,
+    readonly status: 404 | 422,
+    readonly diagnostics: Diagnostic[] = []
+  ) {
+    super(message);
+    this.name = "RunComparisonError";
+  }
+}
+
+type ComparableRunStep = {
+  taskId: string;
+  status: "completed" | "failed" | "skipped";
+  input?: Record<string, unknown>;
+  output?: Record<string, unknown>;
+  flowState?: Record<string, unknown>;
+  activityState?: Record<string, unknown>;
+  diagnostics: Diagnostic[];
+};
+
+type ComparableRun = {
+  artifactId: string;
+  kind: ComparableRunArtifactKind;
+  flowId: string;
+  summaryStatus: "completed" | "failed";
+  input: Record<string, unknown>;
+  output?: Record<string, unknown>;
+  error?: string;
+  stepCount: number;
+  diagnostics: Diagnostic[];
+  steps: ComparableRunStep[];
+  replayMetadata?: {
+    inputSource: "trace_artifact" | "explicit_input";
+    baseInput: Record<string, unknown>;
+    effectiveInput: Record<string, unknown>;
+    overridesApplied: boolean;
+  };
+};
+
+const triggerImportRegistry = {
+  rest: {
+    alias: "rest",
+    ref: "github.com/project-flogo/contrib/trigger/rest"
+  },
+  timer: {
+    alias: "timer",
+    ref: "github.com/project-flogo/contrib/trigger/timer"
+  },
+  cli: {
+    alias: "cli",
+    ref: "github.com/project-flogo/trigger/cli"
+  },
+  channel: {
+    alias: "channel",
+    ref: "github.com/project-flogo/contrib/trigger/channel"
+  }
+} as const;
 
 const knownDescriptorRegistry = new Map<string, Omit<ContribDescriptor, "ref" | "alias" | "evidence">>([
   [
@@ -369,13 +604,27 @@ export function validateMappings(document: string | FlogoApp | unknown): Validat
     const seenTasks = new Set<string>();
 
     for (const task of resource.data.tasks) {
-      const references = new Set<string>();
-      collectActivityReferences(task.input, references);
-      collectActivityReferences(task.settings, references);
-      collectActivityReferences(task.output, references);
+      const preExecutionReferences = new Set<string>();
+      collectActivityReferences(task.input, preExecutionReferences);
+      collectActivityReferences(task.settings, preExecutionReferences);
 
-      for (const reference of references) {
+      for (const reference of preExecutionReferences) {
         if (!seenTasks.has(reference)) {
+          diagnostics.push(
+            createDiagnostic(
+              "flogo.mapping.invalid_activity_scope",
+              `Task "${task.id}" references activity "${reference}" before it exists in flow order`,
+              "error",
+              `resources.${resource.id}.tasks.${task.id}`
+            )
+          );
+        }
+      }
+
+      const outputReferences = new Set<string>();
+      collectActivityReferences(task.output, outputReferences);
+      for (const reference of outputReferences) {
+        if (!seenTasks.has(reference) && reference !== task.id) {
           diagnostics.push(
             createDiagnostic(
               "flogo.mapping.invalid_activity_scope",
@@ -567,6 +816,770 @@ export function introspectContrib(
   return inspectContribDescriptor(document, refOrAlias, options)?.descriptor;
 }
 
+export function inferFlowContracts(document: string | FlogoApp | unknown): FlowContracts {
+  const app = parseFlogoAppDocument(document);
+  const diagnostics: Diagnostic[] = [];
+  const contracts = app.resources
+    .map((flow) => inferFlowContractForApp(app, flow, diagnostics))
+    .sort((left, right) => left.flowId.localeCompare(right.flowId));
+
+  return FlowContractsSchema.parse({
+    appName: app.name,
+    contracts,
+    diagnostics: dedupeDiagnostics(diagnostics)
+  });
+}
+
+export function inferFlowContract(document: string | FlogoApp | unknown, flowId: string): FlowContract | undefined {
+  const app = parseFlogoAppDocument(document);
+  const flow = app.resources.find((entry) => entry.id === flowId);
+  if (!flow) {
+    return undefined;
+  }
+
+  return inferFlowContractForApp(app, flow, []);
+}
+
+export function planRunTrace(
+  document: string | FlogoApp | unknown,
+  requestInput: RunTraceRequest | unknown
+): RunTraceResponse {
+  const app = parseFlogoAppDocument(document);
+  const request = RunTraceRequestSchema.parse(requestInput);
+  const flow = app.resources.find((resource) => resource.id === request.flowId);
+  if (!flow) {
+    throw new RunTraceError(`Unknown flow ${request.flowId}`, 404, [
+      createDiagnostic("flogo.run_trace.unknown_flow", `Unable to locate flow "${request.flowId}"`, "error", request.flowId)
+    ]);
+  }
+
+  const contract = inferFlowContractForApp(app, flow, []);
+  const diagnostics: Diagnostic[] = [];
+  const requiredInputs = contract.inputs.filter((input) => input.required).map((input) => input.name);
+  for (const input of requiredInputs) {
+    if (!(input in request.sampleInput)) {
+      diagnostics.push(
+        createDiagnostic(
+          "flogo.run_trace.missing_required_input",
+          `Flow "${request.flowId}" requires input "${input}" for trace execution`,
+          "error",
+          `sampleInput.${input}`
+        )
+      );
+    }
+  }
+
+  const validation = ValidationReportSchema.parse({
+    ok: diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    stages: [
+      stageResult("runtime", diagnostics.length > 0 ? diagnostics : [
+        createDiagnostic(
+          "flogo.run_trace.ready",
+          `Flow "${request.flowId}" can be traced with the provided sample input`,
+          "info",
+          request.flowId
+        )
+      ])
+    ],
+    summary:
+      diagnostics.length === 0
+        ? `Run trace plan is valid for flow ${request.flowId}.`
+        : `Run trace plan is invalid for flow ${request.flowId}.`,
+    artifacts: []
+  });
+
+  if (!validation.ok) {
+    throw new RunTraceError(`Run trace request is invalid for flow ${request.flowId}`, 422, diagnostics);
+  }
+
+  return RunTraceResponseSchema.parse({
+    validation
+  });
+}
+
+function deepMergeReplayInput(base: unknown, overrides: unknown): unknown {
+  if (Array.isArray(overrides)) {
+    return overrides.map((item) => deepMergeReplayInput(undefined, item));
+  }
+
+  if (overrides !== null && typeof overrides === "object") {
+    const baseRecord =
+      base !== null && typeof base === "object" && !Array.isArray(base) ? (base as Record<string, unknown>) : {};
+    const result: Record<string, unknown> = { ...baseRecord };
+    for (const [key, value] of Object.entries(overrides as Record<string, unknown>)) {
+      result[key] = deepMergeReplayInput(baseRecord[key], value);
+    }
+    return result;
+  }
+
+  return overrides === undefined ? base : overrides;
+}
+
+export function mergeReplayInput(
+  baseInput: Record<string, unknown>,
+  overrides: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  return deepMergeReplayInput(baseInput, overrides ?? {}) as Record<string, unknown>;
+}
+
+export function planReplay(
+  document: string | FlogoApp | unknown,
+  requestInput: ReplayRequest | unknown
+): ReplayResponse {
+  const app = parseFlogoAppDocument(document);
+  const request = ReplayRequestSchema.parse(requestInput);
+  const flow = app.resources.find((resource) => resource.id === request.flowId);
+  if (!flow) {
+    throw new ReplayError(`Unknown flow ${request.flowId}`, 404, [
+      createDiagnostic("flogo.replay.unknown_flow", `Unable to locate flow "${request.flowId}"`, "error", request.flowId)
+    ]);
+  }
+
+  const baseInput = request.baseInput ?? {};
+  const effectiveInput = mergeReplayInput(baseInput, request.overrides);
+  const contract = inferFlowContractForApp(app, flow, []);
+  const diagnostics: Diagnostic[] = [];
+  const requiredInputs = contract.inputs.filter((input) => input.required).map((input) => input.name);
+  for (const input of requiredInputs) {
+    if (!(input in effectiveInput)) {
+      diagnostics.push(
+        createDiagnostic(
+          "flogo.replay.missing_required_input",
+          `Flow "${request.flowId}" requires input "${input}" for replay execution`,
+          "error",
+          `effectiveInput.${input}`
+        )
+      );
+    }
+  }
+
+  const validation = ValidationReportSchema.parse({
+    ok: diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    stages: [
+      stageResult("runtime", diagnostics.length > 0
+        ? diagnostics
+        : [
+            createDiagnostic(
+              "flogo.replay.ready",
+              `Flow "${request.flowId}" can be replayed with the effective input`,
+              "info",
+              request.flowId
+            )
+          ])
+    ],
+    summary:
+      diagnostics.length === 0
+        ? `Replay plan is valid for flow ${request.flowId}.`
+        : `Replay plan is invalid for flow ${request.flowId}.`,
+    artifacts: []
+  });
+
+  if (!validation.ok) {
+    throw new ReplayError(`Replay request is invalid for flow ${request.flowId}`, 422, diagnostics);
+  }
+
+  return ReplayResponseSchema.parse({
+    result: {
+      summary: {
+        flowId: request.flowId,
+        status: "completed",
+        inputSource: request.traceArtifactId ? "trace_artifact" : "explicit_input",
+        baseInput,
+        effectiveInput,
+        overridesApplied: Object.keys(request.overrides ?? {}).length > 0,
+        diagnostics
+      },
+      validation
+    }
+  });
+}
+
+function parseComparableRunPayload(
+  artifactId: string,
+  kind: ComparableRunArtifactKind,
+  payload: unknown
+): ComparableRun {
+  if (kind !== "run_trace" && kind !== "replay_report") {
+    throw new RunComparisonError(`Artifact ${artifactId} is not a comparable runtime artifact`, 422, [
+      createDiagnostic(
+        "flogo.run_comparison.invalid_artifact_kind",
+        `Artifact "${artifactId}" has kind "${String(kind)}" and is not a comparable runtime trace or replay artifact.`,
+        "error",
+        artifactId
+      )
+    ]);
+  }
+
+  if (kind === "run_trace") {
+    const parsed = RunTraceResponseSchema.parse(payload);
+    if (!parsed.trace) {
+      throw new RunComparisonError(`Artifact ${artifactId} does not contain a runtime trace`, 422, [
+        createDiagnostic(
+          "flogo.run_comparison.artifact_payload_invalid",
+          `Artifact "${artifactId}" does not contain a trace payload.`,
+          "error",
+          artifactId
+        )
+      ]);
+    }
+
+    return {
+      artifactId,
+      kind,
+      flowId: parsed.trace.flowId,
+      summaryStatus: parsed.trace.summary.status,
+      input: parsed.trace.summary.input,
+      output: parsed.trace.summary.output,
+      error: parsed.trace.summary.error,
+      stepCount: parsed.trace.summary.stepCount,
+      diagnostics: dedupeDiagnostics([
+        ...parsed.trace.summary.diagnostics,
+        ...parsed.trace.diagnostics
+      ]),
+      steps: parsed.trace.steps.map((step) => ({
+        taskId: step.taskId,
+        status: step.status,
+        input: step.input,
+        output: step.output,
+        flowState: step.flowState,
+        activityState: step.activityState,
+        diagnostics: step.diagnostics
+      }))
+    };
+  }
+
+  const parsed = ReplayResponseSchema.parse(payload);
+  const nestedTrace = parsed.result.trace;
+  const flowId = nestedTrace?.flowId ?? parsed.result.summary.flowId;
+  const summaryStatus = nestedTrace?.summary.status ?? parsed.result.summary.status;
+  const input = nestedTrace?.summary.input ?? parsed.result.summary.effectiveInput;
+  const output = nestedTrace?.summary.output;
+  const error = nestedTrace?.summary.error;
+  const stepCount = nestedTrace?.summary.stepCount ?? 0;
+  const diagnostics = dedupeDiagnostics([
+    ...parsed.result.summary.diagnostics,
+    ...(nestedTrace?.summary.diagnostics ?? []),
+    ...(nestedTrace?.diagnostics ?? [])
+  ]);
+  const steps =
+    nestedTrace?.steps.map((step) => ({
+      taskId: step.taskId,
+      status: step.status,
+      input: step.input,
+      output: step.output,
+      flowState: step.flowState,
+      activityState: step.activityState,
+      diagnostics: step.diagnostics
+    })) ?? [];
+
+  return {
+    artifactId,
+    kind,
+    flowId,
+    summaryStatus,
+    input,
+    output,
+    error,
+    stepCount,
+    diagnostics,
+    steps,
+    replayMetadata: {
+      inputSource: parsed.result.summary.inputSource,
+      baseInput: parsed.result.summary.baseInput,
+      effectiveInput: parsed.result.summary.effectiveInput,
+      overridesApplied: parsed.result.summary.overridesApplied
+    }
+  };
+}
+
+function normalizeRunComparisonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeRunComparisonValue(item));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entryValue]) => [key, normalizeRunComparisonValue(entryValue)])
+    );
+  }
+
+  return value;
+}
+
+function areRunComparisonValuesEqual(left: unknown, right: unknown) {
+  return JSON.stringify(normalizeRunComparisonValue(left)) === JSON.stringify(normalizeRunComparisonValue(right));
+}
+
+function createValueDiff(left: unknown, right: unknown) {
+  if (left === undefined && right === undefined) {
+    return { kind: "same" as const };
+  }
+  if (left === undefined) {
+    return { kind: "added" as const, right };
+  }
+  if (right === undefined) {
+    return { kind: "removed" as const, left };
+  }
+  if (areRunComparisonValuesEqual(left, right)) {
+    return { kind: "same" as const, left, right };
+  }
+  return { kind: "changed" as const, left, right };
+}
+
+function createDiagnosticDiff(
+  code: string,
+  message: string,
+  left: unknown,
+  right: unknown,
+  severity: Diagnostic["severity"] = "info"
+) {
+  return createDiagnostic(code, message, severity, undefined, { left, right });
+}
+
+function buildSummaryDiagnosticDiffs(left: ComparableRun, right: ComparableRun, includeDiagnostics: boolean) {
+  const diagnostics: Diagnostic[] = [];
+  if (!includeDiagnostics) {
+    return diagnostics;
+  }
+
+  if (!areRunComparisonValuesEqual(left.diagnostics, right.diagnostics)) {
+    diagnostics.push(
+      createDiagnosticDiff(
+        "flogo.run_comparison.summary_diagnostics_changed",
+        "Runtime diagnostics differ between the compared runs.",
+        left.diagnostics,
+        right.diagnostics
+      )
+    );
+  }
+
+  if (
+    left.replayMetadata &&
+    right.replayMetadata &&
+    left.replayMetadata.inputSource !== right.replayMetadata.inputSource
+  ) {
+    diagnostics.push(
+      createDiagnosticDiff(
+        "flogo.run_comparison.replay_input_source_changed",
+        "Replay input sources differ between the compared runs.",
+        left.replayMetadata.inputSource,
+        right.replayMetadata.inputSource
+      )
+    );
+  }
+
+  if (
+    left.replayMetadata &&
+    right.replayMetadata &&
+    left.replayMetadata.overridesApplied !== right.replayMetadata.overridesApplied
+  ) {
+    diagnostics.push(
+      createDiagnosticDiff(
+        "flogo.run_comparison.replay_overrides_changed",
+        "Replay override usage differs between the compared runs.",
+        left.replayMetadata.overridesApplied,
+        right.replayMetadata.overridesApplied
+      )
+    );
+  }
+
+  return diagnostics;
+}
+
+function compareRunSteps(
+  left: ComparableRun,
+  right: ComparableRun,
+  options: RunComparisonRequest["compare"]
+) {
+  const leftSteps = new Map(left.steps.map((step) => [step.taskId, step] as const));
+  const rightSteps = new Map(right.steps.map((step) => [step.taskId, step] as const));
+  const taskIds = Array.from(new Set([...leftSteps.keys(), ...rightSteps.keys()])).sort((a, b) => a.localeCompare(b));
+
+  return taskIds.map((taskId) => {
+    const leftStep = leftSteps.get(taskId);
+    const rightStep = rightSteps.get(taskId);
+    const changeKind = !leftStep
+      ? "added"
+      : !rightStep
+        ? "removed"
+        : areRunComparisonValuesEqual(leftStep, rightStep)
+          ? "same"
+          : "changed";
+    const diagnosticDiffs: Diagnostic[] = [];
+
+    if (options.includeDiagnostics && leftStep && rightStep && !areRunComparisonValuesEqual(leftStep.diagnostics, rightStep.diagnostics)) {
+      diagnosticDiffs.push(
+        createDiagnosticDiff(
+          "flogo.run_comparison.step_diagnostics_changed",
+          `Diagnostics differ for task "${taskId}".`,
+          leftStep.diagnostics,
+          rightStep.diagnostics
+        )
+      );
+    }
+
+    return {
+      taskId,
+      leftStatus: leftStep?.status,
+      rightStatus: rightStep?.status,
+      inputDiff: options.includeStepInputs ? createValueDiff(leftStep?.input, rightStep?.input) : undefined,
+      outputDiff: options.includeStepOutputs ? createValueDiff(leftStep?.output, rightStep?.output) : undefined,
+      flowStateDiff: options.includeFlowState ? createValueDiff(leftStep?.flowState, rightStep?.flowState) : undefined,
+      activityStateDiff: options.includeActivityState ? createValueDiff(leftStep?.activityState, rightStep?.activityState) : undefined,
+      diagnosticDiffs,
+      changeKind
+    };
+  });
+}
+
+export function planRunComparison(
+  requestInput: RunComparisonRequest | unknown,
+  leftArtifact: { artifactId: string; kind: ComparableRunArtifactKind; payload: unknown },
+  rightArtifact: { artifactId: string; kind: ComparableRunArtifactKind; payload: unknown }
+): RunComparisonResponse {
+  RunComparisonRequestSchema.parse(requestInput);
+  const left = parseComparableRunPayload(leftArtifact.artifactId, leftArtifact.kind, leftArtifact.payload);
+  const right = parseComparableRunPayload(rightArtifact.artifactId, rightArtifact.kind, rightArtifact.payload);
+  const diagnostics: Diagnostic[] = [];
+
+  if (left.flowId !== right.flowId) {
+    diagnostics.push(
+      createDiagnostic(
+        "flogo.run_comparison.flow_mismatch",
+        `Comparing runs from different flows ("${left.flowId}" vs "${right.flowId}").`,
+        "warning"
+      )
+    );
+  }
+
+  diagnostics.push(
+    createDiagnostic("flogo.run_comparison.ready", "Run comparison inputs are valid and ready to compare.", "info")
+  );
+
+  const validation = ValidationReportSchema.parse({
+    ok: diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    stages: [stageResult("runtime", diagnostics)],
+    summary: "Run comparison inputs are valid.",
+    artifacts: []
+  });
+
+  return RunComparisonResponseSchema.parse({ validation });
+}
+
+export function compareRuns(
+  requestInput: RunComparisonRequest | unknown,
+  leftArtifact: { artifactId: string; kind: ComparableRunArtifactKind; payload: unknown },
+  rightArtifact: { artifactId: string; kind: ComparableRunArtifactKind; payload: unknown }
+): RunComparisonResponse {
+  const request = RunComparisonRequestSchema.parse(requestInput);
+  const left = parseComparableRunPayload(leftArtifact.artifactId, leftArtifact.kind, leftArtifact.payload);
+  const right = parseComparableRunPayload(rightArtifact.artifactId, rightArtifact.kind, rightArtifact.payload);
+
+  const diagnostics: Diagnostic[] = [];
+  if (left.flowId !== right.flowId) {
+    diagnostics.push(
+      createDiagnostic(
+        "flogo.run_comparison.flow_mismatch",
+        `Comparing runs from different flows ("${left.flowId}" vs "${right.flowId}").`,
+        "warning"
+      )
+    );
+  }
+
+  const summaryDiagnostics = buildSummaryDiagnosticDiffs(left, right, request.compare.includeDiagnostics);
+  const result = RunComparisonResultSchema.parse({
+    left: RunComparisonArtifactRefSchema.parse({
+      artifactId: left.artifactId,
+      kind: left.kind,
+      summaryStatus: left.summaryStatus,
+      flowId: left.flowId
+    } satisfies RunComparisonArtifactRef),
+    right: RunComparisonArtifactRefSchema.parse({
+      artifactId: right.artifactId,
+      kind: right.kind,
+      summaryStatus: right.summaryStatus,
+      flowId: right.flowId
+    } satisfies RunComparisonArtifactRef),
+    summary: {
+      statusChanged: left.summaryStatus !== right.summaryStatus,
+      inputDiff: createValueDiff(left.input, right.input),
+      outputDiff: createValueDiff(left.output, right.output),
+      errorDiff: createValueDiff(left.error, right.error),
+      stepCountDiff: createValueDiff(left.stepCount, right.stepCount),
+      diagnosticDiffs: summaryDiagnostics
+    },
+    steps: compareRunSteps(left, right, request.compare),
+    diagnostics
+  });
+
+  return RunComparisonResponseSchema.parse({ result });
+}
+
+export function planTriggerBinding(
+  document: string | FlogoApp | unknown,
+  requestInput: TriggerBindingRequest | unknown
+): TriggerBindingResponse {
+  const operation = buildTriggerBindingOperation(document, requestInput);
+  return TriggerBindingResponseSchema.parse({
+    result: {
+      applied: false,
+      plan: operation.plan,
+      patchSummary: operation.patchSummary,
+      validation: operation.validation,
+      app: operation.nextApp
+    }
+  });
+}
+
+export function applyTriggerBinding(
+  document: string | FlogoApp | unknown,
+  requestInput: TriggerBindingRequest | unknown
+): TriggerBindingResponse {
+  const operation = buildTriggerBindingOperation(document, requestInput);
+  return TriggerBindingResponseSchema.parse({
+    result: {
+      applied: true,
+      plan: operation.plan,
+      patchSummary: operation.patchSummary,
+      validation: operation.validation,
+      app: operation.nextApp
+    }
+  });
+}
+
+export function planSubflowExtraction(
+  document: string | FlogoApp | unknown,
+  requestInput: SubflowExtractionRequest | unknown
+): SubflowExtractionResponse {
+  const operation = buildSubflowExtractionOperation(document, requestInput);
+  return SubflowExtractionResponseSchema.parse({
+    result: {
+      applied: false,
+      plan: operation.plan,
+      patchSummary: operation.patchSummary,
+      validation: operation.validation,
+      app: operation.nextApp
+    }
+  });
+}
+
+export function applySubflowExtraction(
+  document: string | FlogoApp | unknown,
+  requestInput: SubflowExtractionRequest | unknown
+): SubflowExtractionResponse {
+  const operation = buildSubflowExtractionOperation(document, requestInput);
+  return SubflowExtractionResponseSchema.parse({
+    result: {
+      applied: true,
+      plan: operation.plan,
+      patchSummary: operation.patchSummary,
+      validation: operation.validation,
+      app: operation.nextApp
+    }
+  });
+}
+
+export function planSubflowInlining(
+  document: string | FlogoApp | unknown,
+  requestInput: SubflowInliningRequest | unknown
+): SubflowInliningResponse {
+  const operation = buildSubflowInliningOperation(document, requestInput);
+  return SubflowInliningResponseSchema.parse({
+    result: {
+      applied: false,
+      plan: operation.plan,
+      patchSummary: operation.patchSummary,
+      validation: operation.validation,
+      app: operation.nextApp
+    }
+  });
+}
+
+export function applySubflowInlining(
+  document: string | FlogoApp | unknown,
+  requestInput: SubflowInliningRequest | unknown
+): SubflowInliningResponse {
+  const operation = buildSubflowInliningOperation(document, requestInput);
+  return SubflowInliningResponseSchema.parse({
+    result: {
+      applied: true,
+      plan: operation.plan,
+      patchSummary: operation.patchSummary,
+      validation: operation.validation,
+      app: operation.nextApp
+    }
+  });
+}
+
+export function planIteratorSynthesis(
+  document: string | FlogoApp | unknown,
+  requestInput: IteratorSynthesisRequest | unknown
+): IteratorSynthesisResponse {
+  const operation = buildIteratorSynthesisOperation(document, requestInput);
+  return IteratorSynthesisResponseSchema.parse({
+    result: {
+      applied: false,
+      plan: operation.plan,
+      patchSummary: operation.patchSummary,
+      validation: operation.validation,
+      app: operation.nextApp
+    }
+  });
+}
+
+export function applyIteratorSynthesis(
+  document: string | FlogoApp | unknown,
+  requestInput: IteratorSynthesisRequest | unknown
+): IteratorSynthesisResponse {
+  const operation = buildIteratorSynthesisOperation(document, requestInput);
+  return IteratorSynthesisResponseSchema.parse({
+    result: {
+      applied: true,
+      plan: operation.plan,
+      patchSummary: operation.patchSummary,
+      validation: operation.validation,
+      app: operation.nextApp
+    }
+  });
+}
+
+export function planRetryPolicy(
+  document: string | FlogoApp | unknown,
+  requestInput: RetryPolicyRequest | unknown
+): RetryPolicyResponse {
+  const operation = buildRetryPolicyOperation(document, requestInput);
+  return RetryPolicyResponseSchema.parse({
+    result: {
+      applied: false,
+      plan: operation.plan,
+      patchSummary: operation.patchSummary,
+      validation: operation.validation,
+      app: operation.nextApp
+    }
+  });
+}
+
+export function applyRetryPolicy(
+  document: string | FlogoApp | unknown,
+  requestInput: RetryPolicyRequest | unknown
+): RetryPolicyResponse {
+  const operation = buildRetryPolicyOperation(document, requestInput);
+  return RetryPolicyResponseSchema.parse({
+    result: {
+      applied: true,
+      plan: operation.plan,
+      patchSummary: operation.patchSummary,
+      validation: operation.validation,
+      app: operation.nextApp
+    }
+  });
+}
+
+export function planDoWhileSynthesis(
+  document: string | FlogoApp | unknown,
+  requestInput: DoWhileSynthesisRequest | unknown
+): DoWhileSynthesisResponse {
+  const operation = buildDoWhileSynthesisOperation(document, requestInput);
+  return DoWhileSynthesisResponseSchema.parse({
+    result: {
+      applied: false,
+      plan: operation.plan,
+      patchSummary: operation.patchSummary,
+      validation: operation.validation,
+      app: operation.nextApp
+    }
+  });
+}
+
+export function applyDoWhileSynthesis(
+  document: string | FlogoApp | unknown,
+  requestInput: DoWhileSynthesisRequest | unknown
+): DoWhileSynthesisResponse {
+  const operation = buildDoWhileSynthesisOperation(document, requestInput);
+  return DoWhileSynthesisResponseSchema.parse({
+    result: {
+      applied: true,
+      plan: operation.plan,
+      patchSummary: operation.patchSummary,
+      validation: operation.validation,
+      app: operation.nextApp
+    }
+  });
+}
+
+export function planErrorPathTemplate(
+  document: string | FlogoApp | unknown,
+  requestInput: ErrorPathTemplateRequest | unknown
+): ErrorPathTemplateResponse {
+  const operation = buildErrorPathTemplateOperation(document, requestInput);
+  return ErrorPathTemplateResponseSchema.parse({
+    result: {
+      applied: false,
+      plan: operation.plan,
+      patchSummary: operation.patchSummary,
+      validation: operation.validation,
+      app: operation.nextApp
+    }
+  });
+}
+
+export function applyErrorPathTemplate(
+  document: string | FlogoApp | unknown,
+  requestInput: ErrorPathTemplateRequest | unknown
+): ErrorPathTemplateResponse {
+  const operation = buildErrorPathTemplateOperation(document, requestInput);
+  return ErrorPathTemplateResponseSchema.parse({
+    result: {
+      applied: true,
+      plan: operation.plan,
+      patchSummary: operation.patchSummary,
+      validation: operation.validation,
+      app: operation.nextApp
+    }
+  });
+}
+
+export function serializeFlogoAppDocument(
+  document: string | FlogoApp | unknown,
+  originalDocument?: string | unknown
+): string {
+  const app = parseFlogoAppDocument(document);
+  const original =
+    typeof originalDocument === "string"
+      ? JSON.parse(originalDocument) as Record<string, unknown>
+      : originalDocument && typeof originalDocument === "object" && !Array.isArray(originalDocument)
+        ? (originalDocument as Record<string, unknown>)
+        : undefined;
+
+  const resourcesAsObject = original?.resources && typeof original.resources === "object" && !Array.isArray(original.resources);
+  const serialized: Record<string, unknown> = {
+    ...app,
+    resources: resourcesAsObject
+      ? Object.fromEntries(
+          app.resources.map((resource) => [
+            resource.id,
+            {
+              type: resource.type ?? "flow",
+              data: resource.data
+            }
+          ])
+        )
+      : app.resources.map((resource) => ({
+          id: resource.id,
+          type: resource.type ?? "flow",
+          data: resource.data
+        }))
+  };
+
+  if (!app.channels.length) {
+    delete serialized.channels;
+  }
+
+  return `${JSON.stringify(serialized, null, 2)}\n`;
+}
+
 export function classifyMappingValue(value: unknown) {
   if (Array.isArray(value)) {
     return MappingKindSchema.parse("array");
@@ -737,6 +1750,1744 @@ export function analyzePropertyUsage(
     profileSpecificNotes: buildProfileSpecificNotes(deploymentProfile, propertyRefs, envRefs),
     diagnostics
   });
+}
+
+function buildTriggerBindingOperation(
+  document: string | FlogoApp | unknown,
+  requestInput: TriggerBindingRequest | unknown
+): TriggerBindingOperation {
+  const request = TriggerBindingRequestSchema.parse(requestInput);
+  const app = parseFlogoAppDocument(document);
+  const flowContract = inferFlowContract(app, request.flowId);
+  if (!flowContract) {
+    throw new TriggerBindingError(
+      `Flow "${request.flowId}" was not found`,
+      404,
+      [createDiagnostic("flogo.trigger_binding.unknown_flow", `Flow "${request.flowId}" was not found`, "error", request.flowId)]
+    );
+  }
+
+  const { triggerAlias, triggerImportRef } = resolveTriggerImport(app, request.profile.kind);
+  const triggerRef = `#${triggerAlias}`;
+  const flowRef = `#flow:${request.flowId}`;
+  const triggerId = request.triggerId?.trim() || buildTriggerId(request.flowId, request.profile);
+  const handlerName = request.handlerName?.trim() || buildHandlerName(request.flowId, request.profile);
+  const existingBinding = findExistingBinding(app, flowRef, request.profile, triggerImportRef);
+  if (existingBinding && !request.replaceExisting) {
+    throw new TriggerBindingError(
+      `A ${request.profile.kind} binding for flow "${request.flowId}" already exists`,
+      409,
+      [
+        createDiagnostic(
+          "flogo.trigger_binding.duplicate",
+          `A ${request.profile.kind} trigger binding for flow "${request.flowId}" already exists`,
+          "error",
+          `triggers.${existingBinding.trigger.id}`
+        )
+      ]
+    );
+  }
+
+  const generatedMappings = generateTriggerMappings(flowContract, request.profile);
+  const errors = generatedMappings.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
+  if (errors.length > 0) {
+    throw new TriggerBindingError(
+      errors[0]?.message ?? `Unable to bind ${request.profile.kind} trigger`,
+      422,
+      errors
+    );
+  }
+
+  const warnings = generatedMappings.diagnostics.filter((diagnostic) => diagnostic.severity !== "error");
+  const trigger = createTriggerDefinition(triggerId, triggerRef, handlerName, request.flowId, request.profile, generatedMappings);
+  const plan = TriggerBindingPlanSchema.parse({
+    flowId: request.flowId,
+    profile: request.profile,
+    triggerRef,
+    triggerId,
+    handlerName,
+    generatedMappings: {
+      input: generatedMappings.input,
+      output: generatedMappings.output
+    },
+    trigger,
+    diagnostics: [],
+    warnings
+  });
+
+  const nextApp = applyTriggerBindingPlan(app, triggerAlias, triggerImportRef, trigger, existingBinding);
+  const validation = validateFlogoApp(nextApp);
+  if (!validation.ok) {
+    throw new TriggerBindingError(
+      `Generated ${request.profile.kind} trigger binding is not valid`,
+      422,
+      validation.stages.flatMap((stage) => stage.diagnostics)
+    );
+  }
+
+  return {
+    app,
+    nextApp,
+    plan,
+    validation,
+    patchSummary: summarizeAppDiff(app, nextApp)
+  };
+}
+
+function buildSubflowExtractionOperation(
+  document: string | FlogoApp | unknown,
+  requestInput: SubflowExtractionRequest | unknown
+): SubflowExtractionOperation {
+  const request = SubflowExtractionRequestSchema.parse(requestInput);
+  const app = parseFlogoAppDocument(document);
+  const parentFlow = app.resources.find((resource) => resource.id === request.flowId);
+  if (!parentFlow) {
+    throw new SubflowOperationError(
+      `Flow "${request.flowId}" was not found`,
+      404,
+      [createDiagnostic("flogo.subflow.unknown_flow", `Flow "${request.flowId}" was not found`, "error", request.flowId)]
+    );
+  }
+
+  if ((parentFlow.data.links ?? []).length > 0) {
+    throw new SubflowOperationError(
+      `Flow "${request.flowId}" uses links/branching that this slice cannot rewrite`,
+      422,
+      [
+        createDiagnostic(
+          "flogo.subflow.branching_not_supported",
+          `Flow "${request.flowId}" uses links or branching that subflow extraction does not yet support`,
+          "error",
+          `resources.${request.flowId}.links`
+        )
+      ]
+    );
+  }
+
+  const selection = resolveSelectedTaskRegion(parentFlow, request.taskIds);
+  const newFlowId = request.newFlowId?.trim() || buildExtractedFlowId(parentFlow.id, selection.selectedTaskIds);
+  if (newFlowId === parentFlow.id) {
+    throw new SubflowOperationError(
+      `Extracted subflow id "${newFlowId}" conflicts with the parent flow`,
+      422,
+      [
+        createDiagnostic(
+          "flogo.subflow.duplicate_target_flow",
+          `Extracted subflow id "${newFlowId}" conflicts with the parent flow id`,
+          "error",
+          `resources.${parentFlow.id}`
+        )
+      ]
+    );
+  }
+
+  const existingTargetFlow = app.resources.find((resource) => resource.id === newFlowId);
+  if (existingTargetFlow && !request.replaceExisting) {
+    throw new SubflowOperationError(
+      `Flow "${newFlowId}" already exists`,
+      409,
+      [
+        createDiagnostic(
+          "flogo.subflow.duplicate_target_flow",
+          `Flow "${newFlowId}" already exists and replaceExisting is false`,
+          "error",
+          `resources.${newFlowId}`
+        )
+      ]
+    );
+  }
+
+  const parentContract = inferFlowContract(app, parentFlow.id);
+  const inputNames = inferSubflowInputs(parentFlow, selection.startIndex, selection.endIndex);
+  const outputNames = inferSubflowOutputs(app, parentFlow, selection.startIndex, selection.endIndex);
+  const diagnostics: Diagnostic[] = [];
+  if (inputNames.length === 0 && outputNames.length === 0) {
+    diagnostics.push(
+      createDiagnostic(
+        "flogo.subflow.no_external_contract",
+        `Selected tasks do not expose clear external inputs or outputs; extraction will create a self-contained subflow`,
+        "warning",
+        `resources.${parentFlow.id}`
+      )
+    );
+  }
+
+  const newFlowName = request.newFlowName?.trim() || buildExtractedFlowName(parentFlow, selection.selectedTasks);
+  const invocationTaskId = createUniqueTaskId(
+    parentFlow,
+    `subflow_${slugify(newFlowId).replace(/-/g, "_")}`,
+    selection.selectedTaskIds
+  );
+  const invocation = FlogoTaskSchema.parse({
+    id: invocationTaskId,
+    name: newFlowName,
+    activityRef: "#flow",
+    settings: {
+      flowURI: `res://flow:${newFlowId}`
+    },
+    input: Object.fromEntries(inputNames.map((name) => [name, `$flow.${name}`])),
+    output: Object.fromEntries(outputNames.map((name) => [name, `$activity[${invocationTaskId}].${name}`]))
+  });
+
+  const extractedFlow = FlogoFlowSchema.parse({
+    id: newFlowId,
+    type: "flow",
+    data: {
+      name: newFlowName,
+      metadata: {
+        input: inputNames.map((name) => buildFlowMetadataField(parentContract?.inputs, name)),
+        output: outputNames.map((name) => buildFlowMetadataField(parentContract?.outputs, name))
+      },
+      tasks: selection.selectedTasks,
+      links: []
+    }
+  });
+
+  const nextApp = applySubflowExtractionPlan(app, parentFlow.id, extractedFlow, invocation, selection, Boolean(existingTargetFlow));
+  const newFlowContract = inferFlowContract(nextApp, newFlowId);
+  if (!newFlowContract) {
+    throw new SubflowOperationError(
+      `Unable to infer the extracted subflow contract for "${newFlowId}"`,
+      422,
+      [
+        createDiagnostic(
+          "flogo.subflow.contract_inference_failed",
+          `Unable to infer the extracted subflow contract for "${newFlowId}"`,
+          "error",
+          `resources.${newFlowId}`
+        )
+      ]
+    );
+  }
+
+  const plan = SubflowExtractionPlanSchema.parse({
+    parentFlowId: parentFlow.id,
+    newFlowId,
+    newFlowName,
+    selectedTaskIds: selection.selectedTaskIds,
+    newFlowContract,
+    invocation: {
+      parentFlowId: parentFlow.id,
+      taskId: invocation.id,
+      activityRef: invocation.activityRef,
+      input: invocation.input ?? {},
+      output: invocation.output ?? {},
+      settings: invocation.settings ?? {}
+    },
+    diagnostics: [],
+    warnings: diagnostics
+  });
+
+  const validation = validateFlogoApp(nextApp);
+  if (!validation.ok) {
+    throw new SubflowOperationError(
+      `Generated subflow extraction for flow "${parentFlow.id}" is not valid`,
+      422,
+      validation.stages.flatMap((stage) => stage.diagnostics)
+    );
+  }
+
+  return {
+    app,
+    nextApp,
+    plan,
+    validation,
+    patchSummary: summarizeAppDiff(app, nextApp)
+  };
+}
+
+function buildSubflowInliningOperation(
+  document: string | FlogoApp | unknown,
+  requestInput: SubflowInliningRequest | unknown
+): SubflowInliningOperation {
+  const request = SubflowInliningRequestSchema.parse(requestInput);
+  const app = parseFlogoAppDocument(document);
+  const parentFlow = app.resources.find((resource) => resource.id === request.parentFlowId);
+  if (!parentFlow) {
+    throw new SubflowOperationError(
+      `Flow "${request.parentFlowId}" was not found`,
+      404,
+      [createDiagnostic("flogo.subflow.unknown_flow", `Flow "${request.parentFlowId}" was not found`, "error", request.parentFlowId)]
+    );
+  }
+
+  if ((parentFlow.data.links ?? []).length > 0) {
+    throw new SubflowOperationError(
+      `Flow "${request.parentFlowId}" uses links/branching that this slice cannot rewrite`,
+      422,
+      [
+        createDiagnostic(
+          "flogo.subflow.inline_not_supported",
+          `Flow "${request.parentFlowId}" uses links or branching that subflow inlining does not yet support`,
+          "error",
+          `resources.${request.parentFlowId}.links`
+        )
+      ]
+    );
+  }
+
+  const invocationIndex = parentFlow.data.tasks.findIndex((task) => task.id === request.invocationTaskId);
+  if (invocationIndex === -1) {
+    throw new SubflowOperationError(
+      `Invocation task "${request.invocationTaskId}" was not found`,
+      404,
+      [
+        createDiagnostic(
+          "flogo.subflow.unknown_invocation",
+          `Invocation task "${request.invocationTaskId}" was not found`,
+          "error",
+          `resources.${parentFlow.id}.tasks.${request.invocationTaskId}`
+        )
+      ]
+    );
+  }
+
+  const invocationTask = parentFlow.data.tasks[invocationIndex];
+  const targetFlowRef = normalizeFlowActionRef(invocationTask.activityRef, invocationTask.settings.flowURI);
+  if (!targetFlowRef?.startsWith("#flow:")) {
+    throw new SubflowOperationError(
+      `Task "${request.invocationTaskId}" is not a flow invocation`,
+      422,
+      [
+        createDiagnostic(
+          "flogo.subflow.inline_not_supported",
+          `Task "${request.invocationTaskId}" does not point to a subflow resource`,
+          "error",
+          `resources.${parentFlow.id}.tasks.${request.invocationTaskId}`
+        )
+      ]
+    );
+  }
+
+  const inlinedFlowId = targetFlowRef.replace("#flow:", "");
+  const inlinedFlow = app.resources.find((resource) => resource.id === inlinedFlowId);
+  if (!inlinedFlow) {
+    throw new SubflowOperationError(
+      `Subflow "${inlinedFlowId}" was not found`,
+      404,
+      [
+        createDiagnostic(
+          "flogo.subflow.unknown_flow",
+          `Subflow "${inlinedFlowId}" was not found`,
+          "error",
+          `resources.${inlinedFlowId}`
+        )
+      ]
+    );
+  }
+
+  if ((inlinedFlow.data.links ?? []).length > 0) {
+    throw new SubflowOperationError(
+      `Subflow "${inlinedFlowId}" uses links/branching that this slice cannot inline`,
+      422,
+      [
+        createDiagnostic(
+          "flogo.subflow.inline_not_supported",
+          `Subflow "${inlinedFlowId}" uses links or branching that subflow inlining does not yet support`,
+          "error",
+          `resources.${inlinedFlowId}.links`
+        )
+      ]
+    );
+  }
+
+  const generatedTasks = inlinedFlow.data.tasks.map((task) =>
+    FlogoTaskSchema.parse({
+      ...task,
+      id: createUniqueTaskId(parentFlow, `${request.invocationTaskId}__${task.id}`, [request.invocationTaskId, ...inlinedFlow.data.tasks.map((entry) => entry.id)])
+    })
+  );
+  const nextApp = applySubflowInliningPlan(app, parentFlow.id, invocationIndex, generatedTasks, inlinedFlowId, request.removeExtractedFlowIfUnused);
+  const warnings: Diagnostic[] = [];
+  if (request.removeExtractedFlowIfUnused && app.resources.some((resource) => resource.id === inlinedFlowId) && nextApp.resources.some((resource) => resource.id === inlinedFlowId)) {
+    warnings.push(
+      createDiagnostic(
+        "flogo.subflow.unused_extracted_flow",
+        `Flow "${inlinedFlowId}" is still referenced elsewhere and was not removed`,
+        "warning",
+        `resources.${inlinedFlowId}`
+      )
+    );
+  }
+
+  const plan = SubflowInliningPlanSchema.parse({
+    parentFlowId: parentFlow.id,
+    invocationTaskId: request.invocationTaskId,
+    inlinedFlowId,
+    generatedTaskIds: generatedTasks.map((task) => task.id),
+    diagnostics: [],
+    warnings
+  });
+  const validation = validateFlogoApp(nextApp);
+  if (!validation.ok) {
+    throw new SubflowOperationError(
+      `Generated subflow inlining for flow "${parentFlow.id}" is not valid`,
+      422,
+      validation.stages.flatMap((stage) => stage.diagnostics)
+    );
+  }
+
+  return {
+    app,
+    nextApp,
+    plan,
+    validation,
+    patchSummary: summarizeAppDiff(app, nextApp)
+  };
+}
+
+function buildIteratorSynthesisOperation(
+  document: string | FlogoApp | unknown,
+  requestInput: IteratorSynthesisRequest | unknown
+): IteratorSynthesisOperation {
+  const request = IteratorSynthesisRequestSchema.parse(requestInput);
+  const app = parseFlogoAppDocument(document);
+  const target = resolveControlFlowTarget(app, request.flowId, request.taskId, "iterator");
+  const iterateExpr = request.iterateExpr.trim();
+  if (!iterateExpr) {
+    throw new ControlFlowSynthesisError(
+      "Iterator synthesis requires a non-empty iterate expression",
+      422,
+      [
+        createDiagnostic(
+          "flogo.iterator.invalid_iterate_expr",
+          "Iterator synthesis requires a non-empty iterate expression",
+          "error",
+          `resources.${request.flowId}.tasks.${request.taskId}.settings.iterate`
+        )
+      ]
+    );
+  }
+
+  const taskType = normalizeTaskType(target.task.type);
+  if (!target.task.activityRef?.trim()) {
+    throw new ControlFlowSynthesisError(
+      `Task "${request.taskId}" cannot be converted to an iterator because it has no activityRef`,
+      422,
+      [
+        createDiagnostic(
+          "flogo.iterator.missing_activity_ref",
+          `Task "${request.taskId}" cannot be converted to an iterator because it has no activityRef`,
+          "error",
+          `resources.${request.flowId}.tasks.${request.taskId}.activityRef`
+        )
+      ]
+    );
+  }
+  if (taskType === "doWhile") {
+    throw new ControlFlowSynthesisError(
+      `Task "${request.taskId}" is already a doWhile task and cannot also be an iterator in this slice`,
+      422,
+      [
+        createDiagnostic(
+          "flogo.iterator.incompatible_task_type",
+          `Task "${request.taskId}" is already a doWhile task and cannot also be an iterator in this slice`,
+          "error",
+          `resources.${request.flowId}.tasks.${request.taskId}.type`
+        )
+      ]
+    );
+  }
+  if (taskType === "iterator" && !request.replaceExisting) {
+    throw new ControlFlowSynthesisError(
+      `Task "${request.taskId}" already has iterator settings`,
+      409,
+      [
+        createDiagnostic(
+          "flogo.iterator.already_exists",
+          `Task "${request.taskId}" already has iterator settings`,
+          "error",
+          `resources.${request.flowId}.tasks.${request.taskId}.type`
+        )
+      ]
+    );
+  }
+
+  const updatedSettings: Record<string, unknown> = {
+    ...(target.task.settings ?? {}),
+    iterate: iterateExpr
+  };
+  if (request.accumulate !== undefined) {
+    updatedSettings.accumulate = request.accumulate;
+  }
+
+  const nextTask = FlogoTaskSchema.parse({
+    ...target.task,
+    type: "iterator",
+    settings: updatedSettings
+  });
+  const nextApp = replaceTaskInFlow(app, request.flowId, target.taskIndex, nextTask);
+  const validation = validateFlogoApp(nextApp);
+  if (!validation.ok) {
+    throw new ControlFlowSynthesisError(
+      `Generated iterator task for "${request.taskId}" is not valid`,
+      422,
+      validation.stages.flatMap((stage) => stage.diagnostics)
+    );
+  }
+
+  const plan = IteratorSynthesisPlanSchema.parse({
+    flowId: request.flowId,
+    taskId: request.taskId,
+    nextTaskType: "iterator",
+    updatedSettings,
+    diagnostics: [],
+    warnings: []
+  });
+
+  return {
+    app,
+    nextApp,
+    plan,
+    validation,
+    patchSummary: `Converted task "${request.taskId}" in flow "${request.flowId}" to iterator`
+  };
+}
+
+function buildRetryPolicyOperation(
+  document: string | FlogoApp | unknown,
+  requestInput: RetryPolicyRequest | unknown
+): RetryPolicyOperation {
+  const request = RetryPolicyRequestSchema.parse(requestInput);
+  const app = parseFlogoAppDocument(document);
+  const target = resolveControlFlowTarget(app, request.flowId, request.taskId, "retry");
+
+  if (!target.task.activityRef?.trim()) {
+    throw new ControlFlowSynthesisError(
+      `Task "${request.taskId}" cannot accept retryOnError because it has no activityRef`,
+      422,
+      [
+        createDiagnostic(
+          "flogo.retry.missing_activity_ref",
+          `Task "${request.taskId}" cannot accept retryOnError because it has no activityRef`,
+          "error",
+          `resources.${request.flowId}.tasks.${request.taskId}.activityRef`
+        )
+      ]
+    );
+  }
+
+  if (target.task.settings?.retryOnError && !request.replaceExisting) {
+    throw new ControlFlowSynthesisError(
+      `Task "${request.taskId}" already has retryOnError settings`,
+      409,
+      [
+        createDiagnostic(
+          "flogo.retry.already_exists",
+          `Task "${request.taskId}" already has retryOnError settings`,
+          "error",
+          `resources.${request.flowId}.tasks.${request.taskId}.settings.retryOnError`
+        )
+      ]
+    );
+  }
+
+  const retryOnError = {
+    count: request.count,
+    interval: request.intervalMs
+  };
+  const updatedSettings: Record<string, unknown> = {
+    ...(target.task.settings ?? {}),
+    retryOnError
+  };
+
+  const nextTask = FlogoTaskSchema.parse({
+    ...target.task,
+    settings: updatedSettings
+  });
+  const nextApp = replaceTaskInFlow(app, request.flowId, target.taskIndex, nextTask);
+  const validation = validateFlogoApp(nextApp);
+  if (!validation.ok) {
+    throw new ControlFlowSynthesisError(
+      `Generated retryOnError settings for "${request.taskId}" are not valid`,
+      422,
+      validation.stages.flatMap((stage) => stage.diagnostics)
+    );
+  }
+
+  const plan = RetryPolicyPlanSchema.parse({
+    flowId: request.flowId,
+    taskId: request.taskId,
+    retryOnError,
+    diagnostics: [],
+    warnings: []
+  });
+
+  return {
+    app,
+    nextApp,
+    plan,
+    validation,
+    patchSummary: `Added retryOnError to task "${request.taskId}" in flow "${request.flowId}"`
+  };
+}
+
+function buildDoWhileSynthesisOperation(
+  document: string | FlogoApp | unknown,
+  requestInput: DoWhileSynthesisRequest | unknown
+): DoWhileSynthesisOperation {
+  const request = DoWhileSynthesisRequestSchema.parse(requestInput);
+  const app = parseFlogoAppDocument(document);
+  const target = resolveControlFlowTarget(app, request.flowId, request.taskId, "doWhile");
+  const condition = request.condition.trim();
+  if (!condition) {
+    throw new ControlFlowSynthesisError(
+      "DoWhile synthesis requires a non-empty condition",
+      422,
+      [
+        createDiagnostic(
+          "flogo.dowhile.invalid_condition",
+          "DoWhile synthesis requires a non-empty condition",
+          "error",
+          `resources.${request.flowId}.tasks.${request.taskId}.settings.condition`
+        )
+      ]
+    );
+  }
+
+  const taskType = normalizeTaskType(target.task.type);
+  if (!target.task.activityRef?.trim()) {
+    throw new ControlFlowSynthesisError(
+      `Task "${request.taskId}" cannot be converted to doWhile because it has no activityRef`,
+      422,
+      [
+        createDiagnostic(
+          "flogo.dowhile.missing_activity_ref",
+          `Task "${request.taskId}" cannot be converted to doWhile because it has no activityRef`,
+          "error",
+          `resources.${request.flowId}.tasks.${request.taskId}.activityRef`
+        )
+      ]
+    );
+  }
+  if (taskType === "iterator") {
+    throw new ControlFlowSynthesisError(
+      `Task "${request.taskId}" is already an iterator task and cannot also be a doWhile task in this slice`,
+      422,
+      [
+        createDiagnostic(
+          "flogo.dowhile.incompatible_task_type",
+          `Task "${request.taskId}" is already an iterator task and cannot also be a doWhile task in this slice`,
+          "error",
+          `resources.${request.flowId}.tasks.${request.taskId}.type`
+        )
+      ]
+    );
+  }
+  if (taskType === "doWhile" && !request.replaceExisting) {
+    throw new ControlFlowSynthesisError(
+      `Task "${request.taskId}" already has doWhile settings`,
+      409,
+      [
+        createDiagnostic(
+          "flogo.dowhile.already_exists",
+          `Task "${request.taskId}" already has doWhile settings`,
+          "error",
+          `resources.${request.flowId}.tasks.${request.taskId}.type`
+        )
+      ]
+    );
+  }
+
+  const updatedSettings: Record<string, unknown> = {
+    ...(target.task.settings ?? {}),
+    condition
+  };
+  if (request.delayMs !== undefined) {
+    updatedSettings.delay = request.delayMs;
+  }
+  if (request.accumulate !== undefined) {
+    updatedSettings.accumulate = request.accumulate;
+  }
+
+  const nextTask = FlogoTaskSchema.parse({
+    ...target.task,
+    type: "doWhile",
+    settings: updatedSettings
+  });
+  const nextApp = replaceTaskInFlow(app, request.flowId, target.taskIndex, nextTask);
+  const validation = validateFlogoApp(nextApp);
+  if (!validation.ok) {
+    throw new ControlFlowSynthesisError(
+      `Generated doWhile task for "${request.taskId}" is not valid`,
+      422,
+      validation.stages.flatMap((stage) => stage.diagnostics)
+    );
+  }
+
+  const plan = DoWhileSynthesisPlanSchema.parse({
+    flowId: request.flowId,
+    taskId: request.taskId,
+    nextTaskType: "doWhile",
+    updatedSettings,
+    diagnostics: [],
+    warnings: []
+  });
+
+  return {
+    app,
+    nextApp,
+    plan,
+    validation,
+    patchSummary: `Converted task "${request.taskId}" in flow "${request.flowId}" to doWhile`
+  };
+}
+
+function buildErrorPathTemplateOperation(
+  document: string | FlogoApp | unknown,
+  requestInput: ErrorPathTemplateRequest | unknown
+): ErrorPathTemplateOperation {
+  const request = ErrorPathTemplateRequestSchema.parse(requestInput);
+  const app = parseFlogoAppDocument(document);
+  const target = resolveErrorPathTarget(app, request.flowId, request.taskId);
+
+  if (!target.task.activityRef?.trim()) {
+    throw new ErrorPathTemplateError(
+      `Task "${request.taskId}" cannot receive an error path because it has no activityRef`,
+      422,
+      [
+        createDiagnostic(
+          "flogo.error_path.missing_activity_ref",
+          `Task "${request.taskId}" cannot receive an error path because it has no activityRef`,
+          "error",
+          `resources.${request.flowId}.tasks.${request.taskId}.activityRef`
+        )
+      ]
+    );
+  }
+
+  const typedFlow = materializeFlowLinks(target.flow);
+  if (!isSupportedErrorPathLinkShape(typedFlow)) {
+    throw new ErrorPathTemplateError(
+      `Flow "${request.flowId}" uses branching links that this slice cannot rewrite`,
+      422,
+      [
+        createDiagnostic(
+          "flogo.error_path.branching_not_supported",
+          `Flow "${request.flowId}" uses branching links that this slice cannot rewrite`,
+          "error",
+          `resources.${request.flowId}.links`
+        )
+      ]
+    );
+  }
+
+  const existingGeneratedPath = findGeneratedErrorPath(typedFlow, request.taskId);
+  if (existingGeneratedPath && !request.replaceExisting) {
+    throw new ErrorPathTemplateError(
+      `Task "${request.taskId}" already has a generated error path`,
+      409,
+      [
+        createDiagnostic(
+          "flogo.error_path.already_exists",
+          `Task "${request.taskId}" already has a generated error path`,
+          "error",
+          `resources.${request.flowId}.tasks.${request.taskId}`
+        )
+      ]
+    );
+  }
+
+  const baseFlow = existingGeneratedPath ? removeExistingGeneratedErrorPath(typedFlow, existingGeneratedPath) : typedFlow;
+  const successorTaskId = findSuccessorTaskId(baseFlow, request.taskId);
+  if (request.template === "log_and_continue" && !successorTaskId) {
+    throw new ErrorPathTemplateError(
+      `Template "${request.template}" requires the task to have a successor`,
+      422,
+      [
+        createDiagnostic(
+          "flogo.error_path.missing_successor",
+          `Template "${request.template}" requires task "${request.taskId}" to have a successor`,
+          "error",
+          `resources.${request.flowId}.tasks.${request.taskId}`
+        )
+      ]
+    );
+  }
+
+  const logImport = resolveLogImport(app);
+  const generatedTaskId = createGeneratedErrorTaskId(baseFlow, request.taskId, request.generatedTaskPrefix);
+  const generatedTask = createErrorLogTask(generatedTaskId, request.taskId, request.logMessage);
+  const nextFlow = insertGeneratedErrorPath(baseFlow, request.taskId, request.template, generatedTask, successorTaskId);
+  const nextApp = applyErrorPathTemplatePlan(app, request.flowId, nextFlow, logImport);
+  const validation = validateFlogoApp(nextApp);
+  if (!validation.ok) {
+    throw new ErrorPathTemplateError(
+      `Generated error path for task "${request.taskId}" is not valid`,
+      422,
+      validation.stages.flatMap((stage) => stage.diagnostics)
+    );
+  }
+
+  const generatedLinks = nextFlow.data.links.filter(
+    (link) => link.from === request.taskId || link.from === generatedTaskId || link.to === generatedTaskId
+  );
+  const warnings: Diagnostic[] = [];
+  if (existingGeneratedPath && request.replaceExisting) {
+    warnings.push(
+      createDiagnostic(
+        "flogo.error_path.replaced_existing",
+        `Replaced an existing generated error path for task "${request.taskId}"`,
+        "warning",
+        `resources.${request.flowId}.tasks.${request.taskId}`
+      )
+    );
+  }
+
+  const plan = ErrorPathTemplatePlanSchema.parse({
+    flowId: request.flowId,
+    taskId: request.taskId,
+    template: request.template,
+    generatedTaskId,
+    addedImport: logImport.addedImport,
+    generatedLinks,
+    diagnostics: [],
+    warnings
+  });
+
+  return {
+    app,
+    nextApp,
+    plan,
+    validation,
+    patchSummary: `Added ${request.template} error path to task "${request.taskId}" in flow "${request.flowId}"`
+  };
+}
+
+function resolveSelectedTaskRegion(flow: FlogoFlow, requestedTaskIds: string[]) {
+  if (!requestedTaskIds.length) {
+    throw new SubflowOperationError(
+      "At least one task must be selected for extraction",
+      422,
+      [createDiagnostic("flogo.subflow.unknown_task", "At least one task must be selected for extraction", "error", `resources.${flow.id}`)]
+    );
+  }
+
+  const uniqueRequested = Array.from(new Set(requestedTaskIds));
+  const indexMap = new Map(flow.data.tasks.map((task, index) => [task.id, index]));
+  const indexes = uniqueRequested.map((taskId) => {
+    const index = indexMap.get(taskId);
+    if (index === undefined) {
+      throw new SubflowOperationError(
+        `Task "${taskId}" was not found in flow "${flow.id}"`,
+        422,
+        [createDiagnostic("flogo.subflow.unknown_task", `Task "${taskId}" was not found in flow "${flow.id}"`, "error", `resources.${flow.id}.tasks.${taskId}`)]
+      );
+    }
+    return index;
+  });
+  const sortedIndexes = [...indexes].sort((left, right) => left - right);
+  const startIndex = sortedIndexes[0];
+  const endIndex = sortedIndexes[sortedIndexes.length - 1];
+  if (endIndex - startIndex + 1 !== uniqueRequested.length) {
+    throw new SubflowOperationError(
+      `Subflow extraction requires a contiguous task selection`,
+      422,
+      [
+        createDiagnostic(
+          "flogo.subflow.non_contiguous_selection",
+          `Subflow extraction requires a contiguous task selection`,
+          "error",
+          `resources.${flow.id}.tasks`
+        )
+      ]
+    );
+  }
+
+  const selectedTasks = flow.data.tasks.slice(startIndex, endIndex + 1).map((task) => FlogoTaskSchema.parse(task));
+  return {
+    startIndex,
+    endIndex,
+    selectedTasks,
+    selectedTaskIds: selectedTasks.map((task) => task.id)
+  };
+}
+
+function buildExtractedFlowId(parentFlowId: string, taskIds: string[]) {
+  const suffix = taskIds.length === 1 ? slugify(taskIds[0]) : `${slugify(taskIds[0])}-${slugify(taskIds[taskIds.length - 1])}`;
+  return `${slugify(parentFlowId)}-subflow-${suffix}`;
+}
+
+function buildExtractedFlowName(parentFlow: FlogoFlow, tasks: FlogoFlow["data"]["tasks"]) {
+  const base = parentFlow.data.name ?? parentFlow.id;
+  const suffix = tasks.length === 1 ? tasks[0].name ?? tasks[0].id : `${tasks[0].name ?? tasks[0].id} to ${tasks[tasks.length - 1].name ?? tasks[tasks.length - 1].id}`;
+  return `${base} subflow (${suffix})`;
+}
+
+function inferSubflowInputs(flow: FlogoFlow, startIndex: number, endIndex: number) {
+  const inputNames = new Set<string>();
+  const producedNames = new Set<string>();
+  for (let index = startIndex; index <= endIndex; index += 1) {
+    const task = flow.data.tasks[index];
+    for (const name of collectFlowResolverNames(task.input)) {
+      if (!producedNames.has(name)) {
+        inputNames.add(name);
+      }
+    }
+    for (const name of collectFlowResolverNames(task.settings)) {
+      if (!producedNames.has(name)) {
+        inputNames.add(name);
+      }
+    }
+    for (const name of collectFlowResolverNames(task.output)) {
+      if (!producedNames.has(name)) {
+        inputNames.add(name);
+      }
+    }
+    for (const producedName of Object.keys(task.output ?? {})) {
+      producedNames.add(producedName);
+    }
+  }
+  return Array.from(inputNames).sort();
+}
+
+function inferSubflowOutputs(app: FlogoApp, flow: FlogoFlow, startIndex: number, endIndex: number) {
+  const producedNames = new Set<string>();
+  for (let index = startIndex; index <= endIndex; index += 1) {
+    for (const producedName of Object.keys(flow.data.tasks[index]?.output ?? {})) {
+      producedNames.add(producedName);
+    }
+  }
+
+  const outputNames = new Set<string>();
+  for (let index = endIndex + 1; index < flow.data.tasks.length; index += 1) {
+    const task = flow.data.tasks[index];
+    for (const name of [...collectFlowResolverNames(task.input), ...collectFlowResolverNames(task.settings), ...collectFlowResolverNames(task.output)]) {
+      if (producedNames.has(name)) {
+        outputNames.add(name);
+      }
+    }
+  }
+
+  const flowContract = inferFlowContract(app, flow.id);
+  for (const outputParam of flowContract?.outputs ?? []) {
+    if (producedNames.has(outputParam.name)) {
+      outputNames.add(outputParam.name);
+    }
+  }
+
+  return Array.from(outputNames).sort();
+}
+
+function buildFlowMetadataField(
+  existingParams: FlowContract["inputs"] | FlowContract["outputs"] | undefined,
+  name: string
+) {
+  const existing = existingParams?.find((param) => param.name === name);
+  return {
+    name,
+    type: existing?.type,
+    required: existing?.required,
+    description: existing?.description
+  };
+}
+
+function createUniqueTaskId(flow: FlogoFlow, baseId: string, reservedIds: string[] = []) {
+  const used = new Set(flow.data.tasks.map((task) => task.id));
+  reservedIds.forEach((id) => used.add(id));
+  let candidate = baseId;
+  let counter = 1;
+  while (used.has(candidate)) {
+    counter += 1;
+    candidate = `${baseId}_${counter}`;
+  }
+  return candidate;
+}
+
+function normalizeTaskType(taskType: unknown) {
+  return typeof taskType === "string" && taskType.trim().length > 0 ? taskType.trim() : undefined;
+}
+
+function resolveControlFlowTarget(
+  app: FlogoApp,
+  flowId: string,
+  taskId: string,
+  pattern: "iterator" | "retry" | "doWhile"
+) {
+  const flow = app.resources.find((resource) => resource.id === flowId);
+  const flowCode = pattern === "retry" ? "flogo.retry.unknown_flow" : `flogo.${pattern}.unknown_flow`;
+  const taskCode = pattern === "retry" ? "flogo.retry.unknown_task" : `flogo.${pattern}.unknown_task`;
+  if (!flow) {
+    throw new ControlFlowSynthesisError(
+      `Flow "${flowId}" was not found`,
+      404,
+      [createDiagnostic(flowCode, `Flow "${flowId}" was not found`, "error", flowId)]
+    );
+  }
+
+  const taskIndex = flow.data.tasks.findIndex((task) => task.id === taskId);
+  if (taskIndex === -1) {
+    throw new ControlFlowSynthesisError(
+      `Task "${taskId}" was not found in flow "${flowId}"`,
+      404,
+      [createDiagnostic(taskCode, `Task "${taskId}" was not found in flow "${flowId}"`, "error", `resources.${flowId}.tasks.${taskId}`)]
+    );
+  }
+
+  return {
+    flow,
+    taskIndex,
+    task: flow.data.tasks[taskIndex]
+  };
+}
+
+function resolveErrorPathTarget(app: FlogoApp, flowId: string, taskId: string) {
+  const flow = app.resources.find((resource) => resource.id === flowId);
+  if (!flow) {
+    throw new ErrorPathTemplateError(
+      `Flow "${flowId}" was not found`,
+      404,
+      [createDiagnostic("flogo.error_path.unknown_flow", `Flow "${flowId}" was not found`, "error", flowId)]
+    );
+  }
+
+  const taskIndex = flow.data.tasks.findIndex((task) => task.id === taskId);
+  if (taskIndex === -1) {
+    throw new ErrorPathTemplateError(
+      `Task "${taskId}" was not found in flow "${flowId}"`,
+      404,
+      [createDiagnostic("flogo.error_path.unknown_task", `Task "${taskId}" was not found in flow "${flowId}"`, "error", `resources.${flowId}.tasks.${taskId}`)]
+    );
+  }
+
+  return {
+    flow,
+    taskIndex,
+    task: flow.data.tasks[taskIndex]
+  };
+}
+
+function materializeFlowLinks(flow: FlogoFlow): FlogoFlow {
+  const existingLinks = (flow.data.links ?? []).map((link) => FlogoLinkSchema.parse(link));
+  const links = existingLinks.length > 0 ? existingLinks : buildLinearDependencyLinks(flow);
+
+  return FlogoFlowSchema.parse({
+    ...flow,
+    data: {
+      ...flow.data,
+      links
+    }
+  });
+}
+
+function buildLinearDependencyLinks(flow: FlogoFlow): FlogoLink[] {
+  const links: FlogoLink[] = [];
+  for (let index = 0; index < flow.data.tasks.length - 1; index += 1) {
+    links.push(
+      FlogoLinkSchema.parse({
+        from: flow.data.tasks[index]?.id,
+        to: flow.data.tasks[index + 1]?.id,
+        type: "dependency"
+      })
+    );
+  }
+  return links;
+}
+
+function canonicalSuccessExpression(taskId: string) {
+  return `=$activity[${taskId}].error == nil`;
+}
+
+function canonicalErrorExpression(taskId: string) {
+  return `=$activity[${taskId}].error != nil`;
+}
+
+function isSuccessExpression(link: FlogoLink, taskId: string) {
+  return link.type === "expression" && link.value === canonicalSuccessExpression(taskId);
+}
+
+function isErrorExpression(link: FlogoLink, taskId: string) {
+  return link.type === "expression" && link.value === canonicalErrorExpression(taskId);
+}
+
+function isSupportedErrorPathLinkShape(flow: FlogoFlow) {
+  if ((flow.data.links ?? []).length === 0) {
+    return true;
+  }
+
+  const links = (flow.data.links ?? []).map((link) => FlogoLinkSchema.parse(link));
+  for (const task of flow.data.tasks) {
+    const outgoing = links.filter((link) => link.from === task.id);
+    if (outgoing.length === 0 || outgoing.length === 1) {
+      const [link] = outgoing;
+      if (!link) {
+        continue;
+      }
+      if (link.type === "dependency") {
+        continue;
+      }
+      if (!isErrorExpression(link, task.id)) {
+        return false;
+      }
+      const errorTask = flow.data.tasks.find((candidate) => candidate.id === link.to);
+      if (!errorTask || errorTask.activityRef !== "#log") {
+        return false;
+      }
+      continue;
+    }
+
+    if (outgoing.length > 2) {
+      return false;
+    }
+
+    const successLink = outgoing.find((link) => isSuccessExpression(link, task.id));
+    const errorLink = outgoing.find((link) => isErrorExpression(link, task.id));
+    if (!successLink || !errorLink) {
+      return false;
+    }
+
+    const errorTask = flow.data.tasks.find((candidate) => candidate.id === errorLink.to);
+    if (!errorTask || errorTask.activityRef !== "#log") {
+      return false;
+    }
+
+    const errorOutgoing = links.filter((link) => link.from === errorTask.id);
+    if (errorOutgoing.length > 1) {
+      return false;
+    }
+    if (errorOutgoing.length === 1 && errorOutgoing[0]?.type !== "dependency") {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function findSuccessorTaskId(flow: FlogoFlow, taskId: string) {
+  const links = (flow.data.links ?? []).map((link) => FlogoLinkSchema.parse(link));
+  const outgoing = links.filter((link) => link.from === taskId);
+  const successLink =
+    outgoing.find((link) => link.type === "dependency") ??
+    outgoing.find((link) => isSuccessExpression(link, taskId));
+  return successLink?.to;
+}
+
+type ExistingGeneratedErrorPath = {
+  taskId: string;
+  generatedTaskId: string;
+};
+
+function findGeneratedErrorPath(flow: FlogoFlow, taskId: string): ExistingGeneratedErrorPath | undefined {
+  const links = (flow.data.links ?? []).map((link) => FlogoLinkSchema.parse(link));
+  const outgoing = links.filter((link) => link.from === taskId);
+  const errorLink = outgoing.find((link) => isErrorExpression(link, taskId));
+  if (!errorLink) {
+    return undefined;
+  }
+
+  const generatedTask = flow.data.tasks.find((task) => task.id === errorLink.to);
+  if (!generatedTask || generatedTask.activityRef !== "#log") {
+    return undefined;
+  }
+
+  return {
+    taskId,
+    generatedTaskId: generatedTask.id
+  };
+}
+
+function removeExistingGeneratedErrorPath(flow: FlogoFlow, existing: ExistingGeneratedErrorPath) {
+  const nextTasks = flow.data.tasks.filter((task) => task.id !== existing.generatedTaskId);
+  const nextLinks = (flow.data.links ?? [])
+    .map((link) => FlogoLinkSchema.parse(link))
+    .filter(
+      (link) =>
+        link.from !== existing.generatedTaskId &&
+        link.to !== existing.generatedTaskId &&
+        !(
+          link.from === existing.taskId &&
+          (isSuccessExpression(link, existing.taskId) || isErrorExpression(link, existing.taskId))
+        )
+    );
+
+  return FlogoFlowSchema.parse({
+    ...flow,
+    data: {
+      ...flow.data,
+      tasks: nextTasks,
+      links: nextLinks
+    }
+  });
+}
+
+function resolveLogImport(app: FlogoApp) {
+  const existing = app.imports.find(
+    (entry) => normalizeAlias(entry.alias) === "log" || entry.ref === "github.com/project-flogo/contrib/activity/log"
+  );
+  return {
+    alias: existing?.alias ?? "log",
+    ref: existing?.ref ?? "github.com/project-flogo/contrib/activity/log",
+    addedImport: !existing
+  };
+}
+
+function createGeneratedErrorTaskId(flow: FlogoFlow, taskId: string, prefix?: string) {
+  const normalizedPrefix = prefix?.trim() ? slugify(prefix).replace(/-/g, "_") : "error";
+  return createUniqueTaskId(flow, `${normalizedPrefix}_log_${taskId}`);
+}
+
+function createErrorLogTask(generatedTaskId: string, taskId: string, message?: string) {
+  return FlogoTaskSchema.parse({
+    id: generatedTaskId,
+    name: `error-log-${taskId}`,
+    activityRef: "#log",
+    input: {
+      message: message?.trim() || `Task ${taskId} failed`
+    },
+    output: {},
+    settings: {}
+  });
+}
+
+function insertGeneratedErrorPath(
+  flow: FlogoFlow,
+  taskId: string,
+  template: ErrorPathTemplateRequest["template"],
+  generatedTask: FlogoTask,
+  successorTaskId?: string
+) {
+  const targetIndex = flow.data.tasks.findIndex((task) => task.id === taskId);
+  const nextTasks = [...flow.data.tasks];
+  nextTasks.splice(targetIndex + 1, 0, generatedTask);
+
+  const existingLinks = (flow.data.links ?? []).map((link) => FlogoLinkSchema.parse(link));
+  const nextLinks = existingLinks.filter((link) => !(link.from === taskId && link.type === "dependency"));
+
+  if (successorTaskId) {
+    nextLinks.push(
+      FlogoLinkSchema.parse({
+        from: taskId,
+        to: successorTaskId,
+        type: "expression",
+        value: canonicalSuccessExpression(taskId)
+      })
+    );
+  }
+
+  nextLinks.push(
+    FlogoLinkSchema.parse({
+      from: taskId,
+      to: generatedTask.id,
+      type: "expression",
+      value: canonicalErrorExpression(taskId)
+    })
+  );
+
+  if (template === "log_and_continue" && successorTaskId) {
+    nextLinks.push(
+      FlogoLinkSchema.parse({
+        from: generatedTask.id,
+        to: successorTaskId,
+        type: "dependency"
+      })
+    );
+  }
+
+  return FlogoFlowSchema.parse({
+    ...flow,
+    data: {
+      ...flow.data,
+      tasks: nextTasks,
+      links: nextLinks
+    }
+  });
+}
+
+function replaceTaskInFlow(app: FlogoApp, flowId: string, taskIndex: number, nextTask: FlogoTask) {
+  const resources = [...app.resources];
+  const flowIndex = resources.findIndex((resource) => resource.id === flowId);
+  const flow = resources[flowIndex];
+  const tasks = [...flow.data.tasks];
+  tasks[taskIndex] = nextTask;
+  resources[flowIndex] = FlogoFlowSchema.parse({
+    ...flow,
+    data: {
+      ...flow.data,
+      tasks
+    }
+  });
+
+  return FlogoAppSchema.parse({
+    ...app,
+    resources
+  });
+}
+
+function applyErrorPathTemplatePlan(
+  app: FlogoApp,
+  flowId: string,
+  nextFlow: FlogoFlow,
+  logImport: { alias: string; ref: string; addedImport: boolean }
+) {
+  const imports = app.imports.some((entry) => entry.alias === logImport.alias || entry.ref === logImport.ref)
+    ? app.imports
+    : [...app.imports, { alias: logImport.alias, ref: logImport.ref }];
+
+  const resources = [...app.resources];
+  const flowIndex = resources.findIndex((resource) => resource.id === flowId);
+  resources[flowIndex] = nextFlow;
+
+  return FlogoAppSchema.parse({
+    ...app,
+    imports,
+    resources
+  });
+}
+
+function applySubflowExtractionPlan(
+  app: FlogoApp,
+  parentFlowId: string,
+  extractedFlow: FlogoFlow,
+  invocation: FlogoTask,
+  selection: { startIndex: number; endIndex: number; selectedTaskIds: string[] },
+  replacingExistingFlow: boolean
+) {
+  const resources = [...app.resources];
+  const parentFlowIndex = resources.findIndex((resource) => resource.id === parentFlowId);
+  const parentFlow = resources[parentFlowIndex];
+  const nextParentTasks = [
+    ...parentFlow.data.tasks.slice(0, selection.startIndex),
+    invocation,
+    ...parentFlow.data.tasks.slice(selection.endIndex + 1)
+  ];
+  resources[parentFlowIndex] = FlogoFlowSchema.parse({
+    ...parentFlow,
+    data: {
+      ...parentFlow.data,
+      tasks: nextParentTasks
+    }
+  });
+
+  const existingTargetIndex = resources.findIndex((resource) => resource.id === extractedFlow.id);
+  if (existingTargetIndex >= 0) {
+    if (replacingExistingFlow) {
+      resources[existingTargetIndex] = extractedFlow;
+    }
+  } else {
+    resources.push(extractedFlow);
+  }
+
+  return FlogoAppSchema.parse({
+    ...app,
+    resources
+  });
+}
+
+function applySubflowInliningPlan(
+  app: FlogoApp,
+  parentFlowId: string,
+  invocationIndex: number,
+  inlinedTasks: FlogoTask[],
+  inlinedFlowId: string,
+  removeExtractedFlowIfUnused: boolean
+) {
+  const resources = [...app.resources];
+  const parentFlowIndex = resources.findIndex((resource) => resource.id === parentFlowId);
+  const parentFlow = resources[parentFlowIndex];
+  const nextParentTasks = [
+    ...parentFlow.data.tasks.slice(0, invocationIndex),
+    ...inlinedTasks,
+    ...parentFlow.data.tasks.slice(invocationIndex + 1)
+  ];
+  resources[parentFlowIndex] = FlogoFlowSchema.parse({
+    ...parentFlow,
+    data: {
+      ...parentFlow.data,
+      tasks: nextParentTasks
+    }
+  });
+
+  let nextApp = FlogoAppSchema.parse({
+    ...app,
+    resources
+  });
+
+  if (removeExtractedFlowIfUnused && countFlowReferences(nextApp, inlinedFlowId) === 0) {
+    nextApp = FlogoAppSchema.parse({
+      ...nextApp,
+      resources: nextApp.resources.filter((resource) => resource.id !== inlinedFlowId)
+    });
+  }
+
+  return nextApp;
+}
+
+function countFlowReferences(app: FlogoApp, flowId: string) {
+  const flowRef = `#flow:${flowId}`;
+  let references = 0;
+  for (const trigger of app.triggers) {
+    for (const handler of trigger.handlers) {
+      if (resolveHandlerFlowRef(handler) === flowRef) {
+        references += 1;
+      }
+    }
+  }
+  for (const resource of app.resources) {
+    for (const task of resource.data.tasks) {
+      if (normalizeFlowActionRef(task.activityRef, task.settings.flowURI) === flowRef) {
+        references += 1;
+      }
+    }
+  }
+  return references;
+}
+
+function resolveTriggerImport(app: FlogoApp, kind: TriggerBindingRequest["profile"]["kind"]) {
+  const registryEntry = triggerImportRegistry[kind];
+  const importMatch = app.imports.find((entry) => entry.ref === registryEntry.ref || normalizeAlias(entry.alias) === registryEntry.alias);
+  return {
+    triggerAlias: importMatch?.alias ?? registryEntry.alias,
+    triggerImportRef: importMatch?.ref ?? registryEntry.ref
+  };
+}
+
+function buildTriggerId(flowId: string, profile: TriggerBindingRequest["profile"]) {
+  return `flogo-${profile.kind}-${slugify(flowId)}`;
+}
+
+function buildHandlerName(flowId: string, profile: TriggerBindingRequest["profile"]) {
+  const slug = slugify(flowId);
+  switch (profile.kind) {
+    case "rest":
+      return `${profile.method.toLowerCase()}_${slug}`;
+    case "timer":
+      return `run_${slug}`;
+    case "cli":
+      return profile.commandName ? slugify(profile.commandName) : slug;
+    case "channel":
+      return `channel_${slug}`;
+  }
+}
+
+function createTriggerDefinition(
+  triggerId: string,
+  triggerRef: string,
+  handlerName: string,
+  flowId: string,
+  profile: TriggerBindingRequest["profile"],
+  mappings: { input: Record<string, unknown>; output: Record<string, unknown> }
+): FlogoApp["triggers"][number] {
+  const baseHandler = {
+    id: handlerName,
+    settings: createHandlerSettings(profile),
+    action: toFlowAction(flowId),
+    input: mappings.input,
+    output: mappings.output
+  };
+
+  return FlogoTriggerSchema.parse({
+    id: triggerId,
+    ref: triggerRef,
+    settings: createTriggerSettings(profile),
+    handlers: [baseHandler]
+  });
+}
+
+function createTriggerSettings(profile: TriggerBindingRequest["profile"]) {
+  switch (profile.kind) {
+    case "rest":
+      return { port: profile.port };
+    case "cli":
+      return { singleCmd: profile.singleCmd };
+    default:
+      return {};
+  }
+}
+
+function createHandlerSettings(profile: TriggerBindingRequest["profile"]) {
+  switch (profile.kind) {
+    case "rest":
+      return {
+        method: profile.method,
+        path: profile.path
+      };
+    case "timer": {
+      const settings: Record<string, unknown> = {};
+      if (profile.startDelay) {
+        settings.startDelay = profile.startDelay;
+      }
+      if (profile.repeatInterval) {
+        settings.repeatInterval = profile.repeatInterval;
+      }
+      return settings;
+    }
+    case "cli":
+      return {
+        command: profile.commandName,
+        usage: profile.usage,
+        short: profile.short,
+        long: profile.long,
+        flags: profile.flags
+      };
+    case "channel":
+      return {
+        channel: profile.channel
+      };
+  }
+}
+
+function generateTriggerMappings(flowContract: FlowContract, profile: TriggerBindingRequest["profile"]) {
+  const input: Record<string, unknown> = {};
+  const output: Record<string, unknown> = {};
+  const diagnostics: Diagnostic[] = [];
+
+  switch (profile.kind) {
+    case "rest": {
+      for (const param of flowContract.inputs) {
+        const expression = inferRestInputMapping(param.name, flowContract.inputs.length);
+        if (expression) {
+          input[param.name] = expression;
+        } else if (param.required) {
+          diagnostics.push(
+            createDiagnostic(
+              "flogo.trigger_binding.unmapped_required_input",
+              `REST auto-mapping cannot satisfy required flow input "${param.name}"`,
+              "error",
+              `flows.${flowContract.flowId}.inputs.${param.name}`
+            )
+          );
+        } else {
+          diagnostics.push(
+            createDiagnostic(
+              "flogo.trigger_binding.unmapped_optional_input",
+              `REST auto-mapping left optional flow input "${param.name}" unmapped`,
+              "warning",
+              `flows.${flowContract.flowId}.inputs.${param.name}`
+            )
+          );
+        }
+      }
+
+      const codeParam = findFlowParam(flowContract.outputs, ["code", "status"]);
+      const dataParam = findFlowParam(flowContract.outputs, ["data", "body", "content"]);
+      const headersParam = findFlowParam(flowContract.outputs, ["headers"]);
+      const cookiesParam = findFlowParam(flowContract.outputs, ["cookies"]);
+      if (codeParam) {
+        output.code = `$flow.${codeParam.name}`;
+      } else if (profile.replyMode === "status_only") {
+        output.code = 200;
+      }
+
+      const outputFallback = flowContract.outputs.length === 1 ? flowContract.outputs[0] : undefined;
+      if (dataParam) {
+        output.data = `$flow.${dataParam.name}`;
+      } else if (outputFallback) {
+        output.data = `$flow.${outputFallback.name}`;
+      } else if (profile.replyMode !== "status_only") {
+        diagnostics.push(
+          createDiagnostic(
+            "flogo.trigger_binding.missing_reply_data",
+            `REST reply data could not be inferred for flow "${flowContract.flowId}"`,
+            "warning",
+            `flows.${flowContract.flowId}.outputs`
+          )
+        );
+      }
+      if (headersParam) {
+        output.headers = `$flow.${headersParam.name}`;
+      }
+      if (cookiesParam) {
+        output.cookies = `$flow.${cookiesParam.name}`;
+      }
+      break;
+    }
+    case "timer": {
+      const requiredInputs = flowContract.inputs.filter((param) => param.required);
+      if (requiredInputs.length > 0) {
+        diagnostics.push(
+          createDiagnostic(
+            "flogo.trigger_binding.timer_requires_zero_inputs",
+            `Timer triggers can only bind flows with zero required inputs in this slice`,
+            "error",
+            `flows.${flowContract.flowId}.inputs`
+          )
+        );
+      }
+      break;
+    }
+    case "cli": {
+      for (const param of flowContract.inputs) {
+        const normalized = param.name.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+        if (normalized === "args") {
+          input[param.name] = "$trigger.args";
+        } else if (normalized === "flags") {
+          input[param.name] = "$trigger.flags";
+        } else if (flowContract.inputs.length === 1) {
+          input[param.name] = "$trigger.args";
+        } else if (param.required) {
+          diagnostics.push(
+            createDiagnostic(
+              "flogo.trigger_binding.unmapped_required_input",
+              `CLI auto-mapping cannot satisfy required flow input "${param.name}"`,
+              "error",
+              `flows.${flowContract.flowId}.inputs.${param.name}`
+            )
+          );
+        }
+      }
+
+      const dataParam = findFlowParam(flowContract.outputs, ["data"]) ?? (flowContract.outputs.length > 0 ? flowContract.outputs[0] : undefined);
+      if (dataParam) {
+        output.data = `$flow.${dataParam.name}`;
+      }
+      break;
+    }
+    case "channel": {
+      for (const param of flowContract.inputs) {
+        const normalized = param.name.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+        if (normalized === "data" || normalized === "payload" || normalized === "content" || flowContract.inputs.length === 1) {
+          input[param.name] = "$trigger.data";
+        } else if (param.required) {
+          diagnostics.push(
+            createDiagnostic(
+              "flogo.trigger_binding.unmapped_required_input",
+              `Channel auto-mapping cannot satisfy required flow input "${param.name}"`,
+              "error",
+              `flows.${flowContract.flowId}.inputs.${param.name}`
+            )
+          );
+        }
+      }
+      break;
+    }
+  }
+
+  return {
+    input,
+    output,
+    diagnostics: dedupeDiagnostics(diagnostics)
+  };
+}
+
+function inferRestInputMapping(name: string, inputCount: number) {
+  const normalized = name.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  if (normalized === "content" || normalized === "body" || normalized === "payload" || normalized === "request") {
+    return "$trigger.content";
+  }
+  if (normalized === "headers") {
+    return "$trigger.headers";
+  }
+  if (normalized === "method") {
+    return "$trigger.method";
+  }
+  if (normalized === "queryparams" || normalized === "query" || normalized === "queryparams") {
+    return "$trigger.queryParams";
+  }
+  if (normalized === "pathparams" || normalized === "path" || normalized === "pathparams") {
+    return "$trigger.pathParams";
+  }
+  if (inputCount === 1) {
+    return "$trigger.content";
+  }
+  return undefined;
+}
+
+function findFlowParam(params: FlowContract["outputs"], candidates: string[]) {
+  const normalizedCandidates = new Set(candidates.map((candidate) => candidate.toLowerCase()));
+  return params.find((param) => normalizedCandidates.has(param.name.toLowerCase()));
+}
+
+function applyTriggerBindingPlan(
+  app: FlogoApp,
+  triggerAlias: string,
+  triggerImportRef: string,
+  trigger: FlogoApp["triggers"][number],
+  existingBinding?: { trigger: FlogoApp["triggers"][number]; triggerIndex: number; handlerIndex: number }
+): FlogoApp {
+  const imports = app.imports.some((entry) => entry.alias === triggerAlias || entry.ref === triggerImportRef)
+    ? app.imports
+    : [...app.imports, { alias: triggerAlias, ref: triggerImportRef }];
+
+  const triggers = [...app.triggers];
+  if (existingBinding) {
+    const currentTrigger = triggers[existingBinding.triggerIndex];
+    if (currentTrigger.handlers.length <= 1) {
+      triggers[existingBinding.triggerIndex] = trigger;
+    } else {
+      const nextHandlers = [...currentTrigger.handlers];
+      nextHandlers[existingBinding.handlerIndex] = trigger.handlers[0];
+      triggers[existingBinding.triggerIndex] = {
+        ...currentTrigger,
+        ref: trigger.ref,
+        settings: trigger.settings,
+        handlers: nextHandlers
+      };
+    }
+  } else {
+    triggers.push(trigger);
+  }
+
+  return FlogoAppSchema.parse({
+    ...app,
+    imports,
+    triggers
+  });
+}
+
+function findExistingBinding(
+  app: FlogoApp,
+  flowRef: string,
+  profile: TriggerBindingRequest["profile"],
+  triggerImportRef: string
+) {
+  for (const [triggerIndex, trigger] of app.triggers.entries()) {
+    if (!matchesTriggerKind(app, trigger, triggerImportRef)) {
+      continue;
+    }
+    for (const [handlerIndex, handler] of trigger.handlers.entries()) {
+      if (resolveHandlerFlowRef(handler) !== flowRef) {
+        continue;
+      }
+      if (matchesTriggerProfile(trigger, handler, profile)) {
+        return {
+          trigger,
+          triggerIndex,
+          handlerIndex
+        };
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function matchesTriggerKind(app: FlogoApp, trigger: FlogoApp["triggers"][number], triggerImportRef: string) {
+  const resolvedRef = trigger.ref.startsWith("#")
+    ? app.imports.find((entry) => entry.alias === normalizeAlias(trigger.ref))?.ref ?? trigger.ref
+    : trigger.ref;
+  return resolvedRef === triggerImportRef || trigger.ref === `#${inferAliasFromRef(triggerImportRef)}`;
+}
+
+function matchesTriggerProfile(
+  trigger: FlogoApp["triggers"][number],
+  handler: FlogoApp["triggers"][number]["handlers"][number],
+  profile: TriggerBindingRequest["profile"]
+) {
+  switch (profile.kind) {
+    case "rest":
+      return (
+        Number(trigger.settings.port) === profile.port &&
+        String(handler.settings.method ?? "").toUpperCase() === profile.method &&
+        String(handler.settings.path ?? "") === profile.path
+      );
+    case "timer":
+      return (
+        String(handler.settings.startDelay ?? "") === String(profile.startDelay ?? "") &&
+        String(handler.settings.repeatInterval ?? "") === String(profile.repeatInterval ?? "")
+      );
+    case "cli":
+      return String(handler.settings.command ?? "") === profile.commandName;
+    case "channel":
+      return String(handler.settings.channel ?? "") === profile.channel;
+  }
+}
+
+function slugify(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "flow";
 }
 
 export function runMappingTest(
@@ -1054,8 +3805,13 @@ export function validateGovernance(document: string | FlogoApp | unknown, option
 
   for (const trigger of app.triggers) {
     trackRefUsage(trigger.ref, `triggers.${trigger.id}.ref`, "trigger", true);
-    for (const handler of trigger.handlers) {
-      trackRefUsage(handler.action.ref, `triggers.${trigger.id}.handlers.action`, "action");
+    for (const [index, handler] of trigger.handlers.entries()) {
+      const resolvedFlowRef = resolveHandlerFlowRef(handler);
+      if (resolvedFlowRef && resolvedFlowRef.startsWith("#flow:")) {
+        trackRefUsage(resolvedFlowRef, `triggers.${trigger.id}.handlers.${index}.action`, "flow");
+      } else {
+        trackRefUsage(handler.action.ref, `triggers.${trigger.id}.handlers.${index}.action`, "action");
+      }
     }
   }
 
@@ -1173,6 +3929,367 @@ export function compareJsonVsProgrammatic(
     differences,
     diagnostics
   });
+}
+
+function inferFlowContractForApp(app: FlogoApp, flow: FlogoFlow, sharedDiagnostics: Diagnostic[]): FlowContract {
+  const diagnostics: Diagnostic[] = [];
+  const inputParams = new Map<string, FlowContract["inputs"][number]>();
+  const outputParams = new Map<string, FlowContract["outputs"][number]>();
+  const metadataInputs = normalizeFlowMetadataParams(flow.data.metadata?.input ?? [], "metadata");
+  const metadataOutputs = normalizeFlowMetadataParams(flow.data.metadata?.output ?? [], "metadata");
+
+  for (const param of metadataInputs) {
+    inputParams.set(param.name, param);
+  }
+  for (const param of metadataOutputs) {
+    outputParams.set(param.name, param);
+  }
+
+  if (metadataInputs.length === 0 && metadataOutputs.length === 0) {
+    diagnostics.push(
+      createDiagnostic(
+        "flogo.flow_contract.missing_metadata",
+        `Flow "${flow.id}" does not declare explicit input/output metadata.`,
+        "warning",
+        `resources.${flow.id}.data.metadata`
+      )
+    );
+  }
+
+  const usage = buildFlowUsage(app, flow);
+  diagnostics.push(...usage.diagnostics);
+  sharedDiagnostics.push(...usage.diagnostics);
+
+  for (const param of usage.inferredInputs) {
+    mergeFlowParam(inputParams, param);
+  }
+  for (const param of usage.inferredOutputs) {
+    mergeFlowParam(outputParams, param);
+  }
+
+  const inputs = Array.from(inputParams.values()).sort((left, right) => left.name.localeCompare(right.name));
+  const outputs = Array.from(outputParams.values()).sort((left, right) => left.name.localeCompare(right.name));
+  const evidenceLevel: FlowContract["evidenceLevel"] = usage.usesMappings
+    ? "metadata_plus_mapping"
+    : usage.usedByCount > 0
+      ? "metadata_plus_usage"
+      : "metadata_only";
+  const reusable = usage.usedByCount > 1 || inputs.length > 0 || outputs.length > 0;
+
+  return FlowContractSchema.parse({
+    flowId: flow.id,
+    name: flow.data.name ?? flow.id,
+    resourceRef: `#flow:${flow.id}`,
+    inputs,
+    outputs,
+    reusable,
+    usage: {
+      flowId: flow.id,
+      handlerRefs: usage.handlerRefs,
+      triggerRefs: usage.triggerRefs,
+      actionRefs: usage.actionRefs,
+      usedByCount: usage.usedByCount
+    },
+    diagnostics: dedupeDiagnostics(diagnostics),
+    evidenceLevel
+  });
+}
+
+function buildFlowUsage(app: FlogoApp, flow: FlogoFlow) {
+  const flowRef = `#flow:${flow.id}`;
+  const handlerRefs: string[] = [];
+  const triggerRefs = new Set<string>();
+  const actionRefs = new Set<string>();
+  const diagnostics: Diagnostic[] = [];
+  const inferredInputs = new Map<string, FlowContract["inputs"][number]>();
+  const inferredOutputs = new Map<string, FlowContract["outputs"][number]>();
+  let flowTaskUseCount = 0;
+  let usesMappings = false;
+
+  for (const trigger of app.triggers) {
+    trigger.handlers.forEach((handler, index) => {
+      if (resolveHandlerFlowRef(handler) !== flowRef) {
+        return;
+      }
+
+      const handlerPath = `triggers.${trigger.id}.handlers.${index}`;
+      handlerRefs.push(handlerPath);
+      triggerRefs.add(trigger.id);
+      actionRefs.add(handler.action.ref);
+
+      for (const [key, value] of Object.entries(handler.input ?? {})) {
+        if (!inferredInputs.has(key)) {
+          inferredInputs.set(key, createFlowParam(key, inferFlowParamType(value), "mapping_inferred"));
+          diagnostics.push(
+            createDiagnostic(
+              "flogo.flow_contract.inferred_input",
+              `Inferred flow input "${key}" for "${flow.id}" from handler input mappings.`,
+              "info",
+              `${handlerPath}.input.${key}`
+            )
+          );
+        }
+      }
+
+      const outputRefs = collectFlowResolverNames(handler.output ?? {});
+      for (const name of outputRefs) {
+        usesMappings = true;
+        if (!inferredOutputs.has(name)) {
+          inferredOutputs.set(name, createFlowParam(name, "unknown", "mapping_inferred"));
+          diagnostics.push(
+            createDiagnostic(
+              "flogo.flow_contract.inferred_output",
+              `Inferred flow output "${name}" for "${flow.id}" from handler output mappings.`,
+              "info",
+              `${handlerPath}.output`
+            )
+          );
+        }
+      }
+    });
+  }
+
+  for (const resource of app.resources) {
+    for (const task of resource.data.tasks) {
+      if (normalizeFlowActionRef(task.activityRef) === flowRef) {
+        actionRefs.add(task.activityRef ?? flowRef);
+        flowTaskUseCount += 1;
+      }
+
+      const flowRefs = collectFlowResolverNames(task.input);
+      flowRefs.push(...collectFlowResolverNames(task.settings));
+      flowRefs.push(...collectFlowResolverNames(task.output));
+      for (const name of flowRefs) {
+        if (!name) {
+          continue;
+        }
+        usesMappings = true;
+        if (!inferredInputs.has(name)) {
+          inferredInputs.set(name, createFlowParam(name, "unknown", "mapping_inferred"));
+          diagnostics.push(
+            createDiagnostic(
+              "flogo.flow_contract.inferred_input",
+              `Inferred flow input "${name}" for "${flow.id}" from task mapping usage.`,
+              "info",
+              `resources.${resource.id}.tasks.${task.id}`
+            )
+          );
+        }
+      }
+    }
+  }
+
+  const usedByCount = handlerRefs.length + flowTaskUseCount;
+  if (usedByCount === 0) {
+    diagnostics.push(
+      createDiagnostic(
+        "flogo.flow_contract.no_usage",
+        `Flow "${flow.id}" has no trigger or flow-call usage in the current app graph.`,
+        "info",
+        `resources.${flow.id}`
+      )
+    );
+  }
+
+  return {
+    handlerRefs: handlerRefs.sort(),
+    triggerRefs: Array.from(triggerRefs).sort(),
+    actionRefs: Array.from(actionRefs).sort(),
+    inferredInputs: Array.from(inferredInputs.values()),
+    inferredOutputs: Array.from(inferredOutputs.values()),
+    usedByCount,
+    usesMappings,
+    diagnostics
+  };
+}
+
+function normalizeFlowMetadataParams(
+  fields: Array<Record<string, unknown>>,
+  source: FlowContract["inputs"][number]["source"]
+) {
+  return fields
+    .map((field, index) => {
+      const name = typeof field.name === "string" ? field.name : `${source}_${index}`;
+      return createFlowParam(name, normalizeFlowParamType(field.type), source, {
+        required: Boolean(field.required),
+        description: typeof field.description === "string" ? field.description : undefined
+      });
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function createFlowParam(
+  name: string,
+  type: FlowContract["inputs"][number]["type"],
+  source: FlowContract["inputs"][number]["source"],
+  options?: {
+    required?: boolean;
+    description?: string;
+  }
+) {
+  return {
+    name,
+    type,
+    required: options?.required ?? false,
+    source,
+    description: options?.description
+  };
+}
+
+function normalizeFlowParamType(value: unknown): FlowContract["inputs"][number]["type"] {
+  if (typeof value !== "string") {
+    return "unknown";
+  }
+
+  switch (value.toLowerCase()) {
+    case "string":
+      return "string";
+    case "integer":
+    case "int":
+    case "long":
+    case "float":
+    case "double":
+    case "number":
+      return "number";
+    case "bool":
+    case "boolean":
+      return "boolean";
+    case "array":
+      return "array";
+    case "object":
+    case "json":
+    case "map":
+      return "object";
+    case "any":
+      return "any";
+    default:
+      return "unknown";
+  }
+}
+
+function inferFlowParamType(value: unknown): FlowContract["inputs"][number]["type"] {
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  if (value !== null && typeof value === "object") {
+    return "object";
+  }
+  if (typeof value === "number") {
+    return "number";
+  }
+  if (typeof value === "boolean") {
+    return "boolean";
+  }
+  if (typeof value === "string") {
+    return classifyMappingValue(value) === "literal" ? "string" : "unknown";
+  }
+  return "unknown";
+}
+
+function mergeFlowParam(
+  target: Map<string, FlowContract["inputs"][number]>,
+  incoming: FlowContract["inputs"][number]
+) {
+  const existing = target.get(incoming.name);
+  if (!existing) {
+    target.set(incoming.name, incoming);
+    return;
+  }
+
+  target.set(incoming.name, {
+    ...existing,
+    type: selectPreferredFlowParamType(existing.type, incoming.type),
+    required: existing.required || incoming.required,
+    source: selectPreferredFlowParamSource(existing.source, incoming.source),
+    description: existing.description ?? incoming.description
+  });
+}
+
+function selectPreferredFlowParamType(
+  left: FlowContract["inputs"][number]["type"],
+  right: FlowContract["inputs"][number]["type"]
+) {
+  const rank: Record<FlowContract["inputs"][number]["type"], number> = {
+    unknown: 0,
+    any: 1,
+    string: 2,
+    number: 2,
+    boolean: 2,
+    object: 2,
+    array: 2
+  };
+  return rank[right] > rank[left] ? right : left;
+}
+
+function selectPreferredFlowParamSource(
+  left: FlowContract["inputs"][number]["source"],
+  right: FlowContract["inputs"][number]["source"]
+) {
+  const rank: Record<FlowContract["inputs"][number]["source"], number> = {
+    unknown: 0,
+    activity_inferred: 1,
+    mapping_inferred: 2,
+    metadata: 3
+  };
+  return rank[right] > rank[left] ? right : left;
+}
+
+function collectFlowResolverNames(value: unknown) {
+  const names = new Set<string>();
+  collectResolverReferencesFromValue(value, names);
+  return Array.from(names).sort();
+}
+
+function collectResolverReferencesFromValue(value: unknown, names: Set<string>) {
+  if (typeof value === "string") {
+    for (const reference of collectResolverReferences(value)) {
+      if (reference === "$flow") {
+        continue;
+      }
+      if (reference.startsWith("$flow.")) {
+        names.add(reference.replace("$flow.", ""));
+      }
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectResolverReferencesFromValue(entry, names));
+    return;
+  }
+
+  if (value && typeof value === "object") {
+    Object.values(value).forEach((entry) => collectResolverReferencesFromValue(entry, names));
+  }
+}
+
+function normalizeFlowActionRef(ref?: string, flowUri?: unknown) {
+  if (typeof flowUri === "string" && /^res:\/\/flow:/.test(flowUri)) {
+    return `#flow:${flowUri.replace(/^res:\/\/flow:/, "")}`;
+  }
+  if (!ref) {
+    return undefined;
+  }
+  if (ref === "#flow" || ref.endsWith("/flow")) {
+    return typeof flowUri === "string" && /^res:\/\/flow:/.test(flowUri)
+      ? `#flow:${flowUri.replace(/^res:\/\/flow:/, "")}`
+      : "#flow";
+  }
+  return ref.startsWith("flow:") ? `#${ref}` : ref;
+}
+
+function resolveHandlerFlowRef(handler: FlogoApp["triggers"][number]["handlers"][number]) {
+  const actionSettings = handler.action.settings as Record<string, unknown> | undefined;
+  return normalizeFlowActionRef(handler.action.ref, actionSettings?.flowURI);
+}
+
+function toFlowAction(flowId: string) {
+  return {
+    ref: "#flow",
+    settings: {
+      flowURI: `res://flow:${flowId}`
+    }
+  };
 }
 
 function buildDescriptorFromRef(ref: string, alias?: string, version?: string, forcedType?: ContribDescriptor["type"]): ContribDescriptor {
@@ -2442,7 +5559,7 @@ function buildCanonicalProjection(app: FlogoApp, request: CompositionCompareRequ
         ref: trigger.ref,
         settings: sortObject(trigger.settings),
         handlers: trigger.handlers.map((handler) => ({
-          actionRef: handler.action.ref,
+          actionRef: resolveHandlerFlowRef(handler) ?? handler.action.ref,
           settings: sortObject(handler.settings),
           input: sortObject(handler.input),
           output: sortObject(handler.output)
@@ -2639,6 +5756,7 @@ function normalizeAppShape(parsed: unknown): unknown {
   appRecord.triggers = normalizeTriggers(appRecord.triggers);
   appRecord.resources = normalizeResources(appRecord.resources);
   appRecord.properties = normalizeProperties(appRecord.properties);
+  appRecord.channels = normalizeChannels(appRecord.channels);
   return appRecord;
 }
 
@@ -2770,6 +5888,14 @@ function normalizeProperties(value: unknown): unknown[] {
   }
 
   return value;
+}
+
+function normalizeChannels(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
 }
 
 function inferNameFromRef(ref: string): string {

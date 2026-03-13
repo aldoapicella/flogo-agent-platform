@@ -96,6 +96,7 @@ Copy `.env.example` to `.env`.
 - `RUNNER_CUSTOM_CONTRIB_JOB_TEMPLATE_NAME`
 - `RUNNER_EVAL_JOB_TEMPLATE_NAME`
 - `RUNNER_INVENTORY_JOB_TEMPLATE_NAME`
+- `RUNNER_FLOW_CONTRACT_JOB_TEMPLATE_NAME`
 - `RUNNER_CATALOG_JOB_TEMPLATE_NAME`
 - `RUNNER_CONTRIB_EVIDENCE_JOB_TEMPLATE_NAME`
 - `RUNNER_MAPPING_PREVIEW_JOB_TEMPLATE_NAME`
@@ -139,6 +140,45 @@ The inventory/catalog path now also searches for nearest `go.mod` roots and vend
 The contribution evidence path also searches the Go module cache (`GOMODCACHE`, `GOPATH/pkg/mod`, and the default user Go module cache) so installed contrib packages can surface package roots and discovered versions even when they are not vendored into the repo.
 
 The evidence path builds on the same inventory model and now exposes confidence plus `modulePath` and `goPackagePath` when a contribution can be tied back to local Go workspace/package structure.
+
+Flow-contract inference now uses the same app-analysis path. The helper command is:
+
+```bash
+go run ./go-runtime/flogo-helper flows contracts --app examples/hello-rest/flogo.json
+```
+
+Trigger binding now builds on the inferred flow-contract layer. The helper planning command is:
+
+```bash
+go run ./go-runtime/flogo-helper triggers bind --app examples/hello-rest/flogo.json --flow hello --profile trigger-profile.json --validate-only
+```
+
+Advanced control-flow synthesis now builds on the same flow-design layer. Example helper commands are:
+
+```bash
+go run ./go-runtime/flogo-helper flows add-iterator --app examples/hello-rest/flogo.json --request iterator-request.json
+go run ./go-runtime/flogo-helper flows add-retry-policy --app examples/hello-rest/flogo.json --request retry-request.json
+go run ./go-runtime/flogo-helper flows add-dowhile --app examples/hello-rest/flogo.json --request dowhile-request.json
+go run ./go-runtime/flogo-helper flows add-error-path --app examples/hello-rest/flogo.json --request error-path-request.json
+```
+
+Runtime trace capture is the first Phase 3 runtime-aware helper command:
+
+```bash
+go run ./go-runtime/flogo-helper flows trace --app examples/hello-rest/flogo.json --request run-trace-request.json
+```
+
+Replay now builds on the runtime trace path. The helper command is:
+
+```bash
+go run ./go-runtime/flogo-helper flows replay --app examples/hello-rest/flogo.json --request replay-request.json
+```
+
+Run comparison builds on persisted trace and replay artifacts. The helper parity command is:
+
+```bash
+go run ./go-runtime/flogo-helper flows compare-runs --app examples/hello-rest/flogo.json --request compare-runs-request.json
+```
 
 #### Model integration
 
@@ -278,6 +318,23 @@ Current Phase 1 helper commands:
 - `mapping test`
 - `properties plan`
 
+Current Phase 2 helper commands:
+
+- `flows contracts`
+- `triggers bind`
+- `flows extract-subflow`
+- `flows inline-subflow`
+- `flows add-iterator`
+- `flows add-retry-policy`
+- `flows add-dowhile`
+- `flows add-error-path`
+
+Current Phase 3 helper commands:
+
+- `flows trace`
+- `flows replay`
+- `flows compare-runs`
+
 When adding a helper command:
 
 1. define or reuse shared contracts first,
@@ -336,6 +393,6 @@ Current important test areas:
 - `next build` and Vitest can hit environment-specific `spawn EPERM` failures in restricted Windows shells even when the code is type-correct.
 - Some artifact URIs are still logical/local rather than Blob-backed.
 - App-analysis inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test artifacts are Blob/Azurite-backed, but broader runtime artifacts are not yet.
-- The Go helper currently covers the completed Phase 1 inventory/catalog/descriptor/contribution-evidence/governance/composition-compare/mapping-preview/mapping-test/property-plan slice.
+- The Go helper currently covers the completed Phase 1 inventory/catalog/descriptor/contribution-evidence/governance/composition-compare/mapping-preview/mapping-test/property-plan slice plus the current Phase 2 flow-contract, trigger-binding, subflow-refactor, and advanced control-flow synthesis commands, including error-path templates.
 
 If the environment blocks build/test execution, validate the same commands again in CI or an unrestricted local shell before assuming the code is broken.

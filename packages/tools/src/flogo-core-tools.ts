@@ -5,18 +5,48 @@ import type {
   ContribCatalog,
   ContribDescriptor,
   FlogoApp,
+  FlowContracts,
   GovernanceReport,
+  IteratorSynthesisRequest,
+  IteratorSynthesisResponse,
+  RetryPolicyRequest,
+  RetryPolicyResponse,
+  DoWhileSynthesisRequest,
+  DoWhileSynthesisResponse,
+  ErrorPathTemplateRequest,
+  ErrorPathTemplateResponse,
+  SubflowExtractionRequest,
+  SubflowExtractionResponse,
+  SubflowInliningRequest,
+  SubflowInliningResponse,
+  TriggerBindingRequest,
+  TriggerBindingResponse,
   TaskRequest,
   ToolResponse
 } from "@flogo-agent/contracts";
 import {
+  applyDoWhileSynthesis,
+  applyErrorPathTemplate,
+  applyIteratorSynthesis,
+  applyRetryPolicy,
+  applySubflowExtraction,
+  applySubflowInlining,
+  applyTriggerBinding,
   buildContributionInventory,
   buildContribCatalog,
   compareJsonVsProgrammatic,
   inspectContribEvidence,
   defineProperties,
+  inferFlowContracts,
   inspectContribDescriptor,
   parseFlogoAppDocument,
+  planDoWhileSynthesis,
+  planErrorPathTemplate,
+  planIteratorSynthesis,
+  planRetryPolicy,
+  planSubflowExtraction,
+  planSubflowInlining,
+  planTriggerBinding,
   summarizeAppDiff,
   validateGovernance,
   validateAliases,
@@ -136,6 +166,130 @@ export class FlogoCoreTools {
             }
           ],
       artifacts: [],
+      retryable: false
+    });
+  }
+
+  inferFlowContracts(raw: string | FlogoApp | unknown): ToolResponse {
+    const contracts: FlowContracts = inferFlowContracts(raw);
+    return toolResponse({
+      ok: true,
+      summary: `Inferred ${contracts.contracts.length} flow contracts`,
+      data: { contracts },
+      diagnostics: contracts.diagnostics,
+      artifacts: [],
+      retryable: false
+    });
+  }
+
+  bindTrigger(raw: string | FlogoApp | unknown, request: TriggerBindingRequest, validateOnly = false): ToolResponse {
+    const response: TriggerBindingResponse = validateOnly
+      ? planTriggerBinding(raw, { ...request, validateOnly: true })
+      : applyTriggerBinding(raw, { ...request, validateOnly: false });
+    return toolResponse({
+      ok: true,
+      summary: response.result.applied
+        ? `Bound ${request.profile.kind} trigger to flow ${request.flowId}`
+        : `Planned ${request.profile.kind} trigger binding for flow ${request.flowId}`,
+      data: { result: response.result },
+      diagnostics: response.result.plan.warnings,
+      artifacts: response.result.artifact ? [response.result.artifact] : [],
+      retryable: false
+    });
+  }
+
+  extractSubflow(raw: string | FlogoApp | unknown, request: SubflowExtractionRequest, validateOnly = false): ToolResponse {
+    const response: SubflowExtractionResponse = validateOnly
+      ? planSubflowExtraction(raw, { ...request, validateOnly: true })
+      : applySubflowExtraction(raw, { ...request, validateOnly: false });
+    return toolResponse({
+      ok: true,
+      summary: response.result.applied
+        ? `Extracted subflow ${response.result.plan.newFlowId} from flow ${request.flowId}`
+        : `Planned subflow extraction from flow ${request.flowId}`,
+      data: { result: response.result },
+      diagnostics: [...response.result.plan.diagnostics, ...response.result.plan.warnings],
+      artifacts: response.result.artifact ? [response.result.artifact] : [],
+      retryable: false
+    });
+  }
+
+  inlineSubflow(raw: string | FlogoApp | unknown, request: SubflowInliningRequest, validateOnly = false): ToolResponse {
+    const response: SubflowInliningResponse = validateOnly
+      ? planSubflowInlining(raw, { ...request, validateOnly: true })
+      : applySubflowInlining(raw, { ...request, validateOnly: false });
+    return toolResponse({
+      ok: true,
+      summary: response.result.applied
+        ? `Inlined subflow ${response.result.plan.inlinedFlowId} into flow ${request.parentFlowId}`
+        : `Planned subflow inlining into flow ${request.parentFlowId}`,
+      data: { result: response.result },
+      diagnostics: [...response.result.plan.diagnostics, ...response.result.plan.warnings],
+      artifacts: response.result.artifact ? [response.result.artifact] : [],
+      retryable: false
+    });
+  }
+
+  addIterator(raw: string | FlogoApp | unknown, request: IteratorSynthesisRequest, validateOnly = false): ToolResponse {
+    const response: IteratorSynthesisResponse = validateOnly
+      ? planIteratorSynthesis(raw, { ...request, validateOnly: true })
+      : applyIteratorSynthesis(raw, { ...request, validateOnly: false });
+    return toolResponse({
+      ok: true,
+      summary: response.result.applied
+        ? `Converted task ${request.taskId} into an iterator in flow ${request.flowId}`
+        : `Planned iterator synthesis for task ${request.taskId} in flow ${request.flowId}`,
+      data: { result: response.result },
+      diagnostics: [...response.result.plan.diagnostics, ...response.result.plan.warnings],
+      artifacts: response.result.artifact ? [response.result.artifact] : [],
+      retryable: false
+    });
+  }
+
+  addRetryPolicy(raw: string | FlogoApp | unknown, request: RetryPolicyRequest, validateOnly = false): ToolResponse {
+    const response: RetryPolicyResponse = validateOnly
+      ? planRetryPolicy(raw, { ...request, validateOnly: true })
+      : applyRetryPolicy(raw, { ...request, validateOnly: false });
+    return toolResponse({
+      ok: true,
+      summary: response.result.applied
+        ? `Added retryOnError to task ${request.taskId} in flow ${request.flowId}`
+        : `Planned retryOnError for task ${request.taskId} in flow ${request.flowId}`,
+      data: { result: response.result },
+      diagnostics: [...response.result.plan.diagnostics, ...response.result.plan.warnings],
+      artifacts: response.result.artifact ? [response.result.artifact] : [],
+      retryable: false
+    });
+  }
+
+  addDoWhile(raw: string | FlogoApp | unknown, request: DoWhileSynthesisRequest, validateOnly = false): ToolResponse {
+    const response: DoWhileSynthesisResponse = validateOnly
+      ? planDoWhileSynthesis(raw, { ...request, validateOnly: true })
+      : applyDoWhileSynthesis(raw, { ...request, validateOnly: false });
+    return toolResponse({
+      ok: true,
+      summary: response.result.applied
+        ? `Converted task ${request.taskId} into doWhile in flow ${request.flowId}`
+        : `Planned doWhile synthesis for task ${request.taskId} in flow ${request.flowId}`,
+      data: { result: response.result },
+      diagnostics: [...response.result.plan.diagnostics, ...response.result.plan.warnings],
+      artifacts: response.result.artifact ? [response.result.artifact] : [],
+      retryable: false
+    });
+  }
+
+  addErrorPath(raw: string | FlogoApp | unknown, request: ErrorPathTemplateRequest, validateOnly = false): ToolResponse {
+    const response: ErrorPathTemplateResponse = validateOnly
+      ? planErrorPathTemplate(raw, { ...request, validateOnly: true })
+      : applyErrorPathTemplate(raw, { ...request, validateOnly: false });
+    return toolResponse({
+      ok: true,
+      summary: response.result.applied
+        ? `Added ${request.template} error path to task ${request.taskId} in flow ${request.flowId}`
+        : `Planned ${request.template} error path for task ${request.taskId} in flow ${request.flowId}`,
+      data: { result: response.result },
+      diagnostics: [...response.result.plan.diagnostics, ...response.result.plan.warnings],
+      artifacts: response.result.artifact ? [response.result.artifact] : [],
       retryable: false
     });
   }

@@ -45,9 +45,46 @@ const approvalMap: Record<TaskRequest["type"], ApprovalType[]> = {
 
 function getAnalysisMode(
   task: TaskRequest
-): "inventory" | "catalog" | "contrib_evidence" | "mapping_preview" | "mapping_test" | "property_plan" | "governance" | "composition_compare" | undefined {
+) :
+  | "flow_contracts"
+  | "trigger_binding_plan"
+  | "subflow_extraction_plan"
+  | "subflow_inlining_plan"
+  | "iterator_plan"
+  | "retry_policy_plan"
+  | "dowhile_plan"
+  | "error_path_plan"
+  | "run_trace_plan"
+  | "run_trace"
+  | "replay_plan"
+  | "replay"
+  | "run_comparison_plan"
+  | "run_comparison"
+  | "inventory"
+  | "catalog"
+  | "contrib_evidence"
+  | "mapping_preview"
+  | "mapping_test"
+  | "property_plan"
+  | "governance"
+  | "composition_compare"
+  | undefined {
   const mode = task.inputs["mode"];
-  return mode === "inventory" ||
+  return mode === "flow_contracts" ||
+    mode === "trigger_binding_plan" ||
+    mode === "subflow_extraction_plan" ||
+    mode === "subflow_inlining_plan" ||
+    mode === "iterator_plan" ||
+    mode === "retry_policy_plan" ||
+    mode === "dowhile_plan" ||
+    mode === "error_path_plan" ||
+    mode === "run_trace_plan" ||
+    mode === "run_trace" ||
+    mode === "replay_plan" ||
+    mode === "replay" ||
+    mode === "run_comparison_plan" ||
+    mode === "run_comparison" ||
+    mode === "inventory" ||
     mode === "catalog" ||
     mode === "contrib_evidence" ||
     mode === "mapping_preview" ||
@@ -95,12 +132,41 @@ export class TaskPlanner {
     const validation = task.type === "create" ? undefined : this.validateDraft(task);
     const summary = task.summary.toLowerCase();
     const analysisMode = getAnalysisMode(task);
+    let skipMutationTail = Boolean(analysisMode);
     const steps: ExecutionPlanStep[] = [
       { id: "graph", label: "Parse current Flogo graph", tool: "flogo.parseApp" },
       { id: "validate", label: "Validate structure and mappings", tool: "flogo.validateApp" }
     ];
 
-    if (analysisMode === "inventory") {
+    if (analysisMode === "flow_contracts") {
+      steps.push({ id: "flow-contracts", label: "Infer reusable flow input/output contracts", tool: "runner.inferFlowContracts" });
+    } else if (analysisMode === "trigger_binding_plan") {
+      steps.push({ id: "bind-trigger", label: "Plan trigger binding for an existing flow", tool: "runner.bindTrigger" });
+    } else if (analysisMode === "subflow_extraction_plan") {
+      steps.push({ id: "extract-subflow", label: "Plan extracting a selected task region into a reusable subflow", tool: "runner.extractSubflow" });
+    } else if (analysisMode === "subflow_inlining_plan") {
+      steps.push({ id: "inline-subflow", label: "Plan inlining a subflow invocation back into the parent flow", tool: "runner.inlineSubflow" });
+    } else if (analysisMode === "iterator_plan") {
+      steps.push({ id: "iterator", label: "Plan iterator synthesis for a flow task", tool: "runner.addIterator" });
+    } else if (analysisMode === "retry_policy_plan") {
+      steps.push({ id: "retry", label: "Plan retryOnError synthesis for a flow task", tool: "runner.addRetryPolicy" });
+    } else if (analysisMode === "dowhile_plan") {
+      steps.push({ id: "dowhile", label: "Plan doWhile synthesis for a flow task", tool: "runner.addDoWhile" });
+    } else if (analysisMode === "error_path_plan") {
+      steps.push({ id: "error-path", label: "Plan a generated error branch for a flow task", tool: "runner.addErrorPath" });
+    } else if (analysisMode === "run_trace_plan") {
+      steps.push({ id: "run-trace", label: "Validate runtime trace capture for a flow", tool: "runner.captureRunTrace" });
+    } else if (analysisMode === "run_trace") {
+      steps.push({ id: "run-trace", label: "Execute a flow and capture a runtime trace", tool: "runner.captureRunTrace" });
+    } else if (analysisMode === "replay_plan") {
+      steps.push({ id: "replay", label: "Validate replay execution for a flow", tool: "runner.replayFlow" });
+    } else if (analysisMode === "replay") {
+      steps.push({ id: "replay", label: "Replay a flow execution with optional overrides", tool: "runner.replayFlow" });
+    } else if (analysisMode === "run_comparison_plan") {
+      steps.push({ id: "run-comparison", label: "Validate comparison of two captured runtime executions", tool: "runner.compareRuns" });
+    } else if (analysisMode === "run_comparison") {
+      steps.push({ id: "run-comparison", label: "Compare two captured runtime executions", tool: "runner.compareRuns" });
+    } else if (analysisMode === "inventory") {
       steps.push({ id: "inventory", label: "Inventory Flogo contributions and package evidence", tool: "runner.inventoryContribs" });
     } else if (analysisMode === "catalog") {
       steps.push({ id: "catalog", label: "Catalog Flogo contributions and descriptors", tool: "runner.catalogContribs" });
@@ -118,6 +184,53 @@ export class TaskPlanner {
     } else if (analysisMode === "composition_compare") {
       steps.push({ id: "compare", label: "Compare canonical JSON to programmatic composition", tool: "runner.compareComposition" });
     } else {
+      if (/(flow contract|flow signature|flow io|reusable flow)/i.test(summary)) {
+        steps.push({ id: "flow-contracts", label: "Infer reusable flow input/output contracts", tool: "runner.inferFlowContracts" });
+      }
+
+      if (/(bind flow|bind trigger|expose this flow|timer trigger|cli trigger|channel trigger)/i.test(summary)) {
+        steps.push({ id: "bind-trigger", label: "Plan trigger binding for an existing flow", tool: "runner.bindTrigger" });
+      }
+
+      if (/(extract subflow|make reusable flow|factor flow sequence|extract reusable sequence)/i.test(summary)) {
+        steps.push({ id: "extract-subflow", label: "Plan extracting a selected task region into a reusable subflow", tool: "runner.extractSubflow" });
+      }
+
+      if (/(inline subflow|expand subflow|de-inline subflow)/i.test(summary)) {
+        steps.push({ id: "inline-subflow", label: "Plan inlining a subflow invocation back into the parent flow", tool: "runner.inlineSubflow" });
+      }
+
+      if (/(iterate|for each|for every|loop over|repeat for each item)/i.test(summary)) {
+        steps.push({ id: "iterator", label: "Plan iterator synthesis for a flow task", tool: "runner.addIterator" });
+      }
+
+      if (/(retry|retry on error)/i.test(summary)) {
+        steps.push({ id: "retry", label: "Plan retryOnError synthesis for a flow task", tool: "runner.addRetryPolicy" });
+      }
+
+      if (/(do while|repeat while|repeat on true|repeat until false)/i.test(summary)) {
+        steps.push({ id: "dowhile", label: "Plan doWhile synthesis for a flow task", tool: "runner.addDoWhile" });
+      }
+
+      if (/(error path|on error|failure branch|fallback branch|log and continue on failure|log and stop on failure)/i.test(summary)) {
+        steps.push({ id: "error-path", label: "Plan a generated error branch for a flow task", tool: "runner.addErrorPath" });
+      }
+
+      if (/(trace this flow|show step execution|capture runtime trace|what happened during execution|execute and trace|runtime trace)/i.test(summary)) {
+        steps.push({ id: "run-trace", label: "Execute a flow and capture a runtime trace", tool: "runner.captureRunTrace" });
+        skipMutationTail = true;
+      }
+
+      if (/(replay|rerun with overrides|run again with different input|re-execute this trace|replay this run)/i.test(summary)) {
+        steps.push({ id: "replay", label: "Replay a flow execution with optional overrides", tool: "runner.replayFlow" });
+        skipMutationTail = true;
+      }
+
+      if (/(compare runs|compare traces|compare replay|show differences between runs|diff these executions)/i.test(summary)) {
+        steps.push({ id: "run-comparison", label: "Compare two captured runtime executions", tool: "runner.compareRuns" });
+        skipMutationTail = true;
+      }
+
       if (/(inventory|package metadata|descriptor source|contrib inventory)/i.test(summary)) {
         steps.push({ id: "inventory", label: "Inventory Flogo contributions and package evidence", tool: "runner.inventoryContribs" });
       }
@@ -151,7 +264,7 @@ export class TaskPlanner {
       }
     }
 
-    if (!analysisMode) {
+    if (!skipMutationTail) {
       steps.push(
         { id: "patch", label: "Generate or patch flogo.json", tool: task.type === "create" ? "flogo.generateApp" : "flogo.patchApp" },
         { id: "build", label: "Queue build step", tool: "runner.buildApp" },

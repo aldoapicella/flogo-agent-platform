@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 type diagnostic struct {
@@ -245,6 +246,463 @@ type propertyPlanResponse struct {
 	PropertyPlan propertyPlan `json:"propertyPlan"`
 }
 
+type flowParam struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Required    bool   `json:"required"`
+	Source      string `json:"source"`
+	Description string `json:"description,omitempty"`
+}
+
+type flowUsage struct {
+	FlowID      string   `json:"flowId"`
+	HandlerRefs []string `json:"handlerRefs"`
+	TriggerRefs []string `json:"triggerRefs"`
+	ActionRefs  []string `json:"actionRefs"`
+	UsedByCount int      `json:"usedByCount"`
+}
+
+type flowContract struct {
+	FlowID        string       `json:"flowId"`
+	Name          string       `json:"name"`
+	ResourceRef   string       `json:"resourceRef"`
+	Inputs        []flowParam  `json:"inputs"`
+	Outputs       []flowParam  `json:"outputs"`
+	Reusable      bool         `json:"reusable"`
+	Usage         flowUsage    `json:"usage"`
+	Diagnostics   []diagnostic `json:"diagnostics"`
+	EvidenceLevel string       `json:"evidenceLevel"`
+}
+
+type flowContracts struct {
+	AppName     string         `json:"appName"`
+	Contracts   []flowContract `json:"contracts"`
+	Diagnostics []diagnostic   `json:"diagnostics"`
+}
+
+type flowContractsResponse struct {
+	Contracts flowContracts `json:"contracts"`
+}
+
+type validationStageResult struct {
+	Stage       string       `json:"stage"`
+	Ok          bool         `json:"ok"`
+	Diagnostics []diagnostic `json:"diagnostics"`
+}
+
+type validationReport struct {
+	Ok        bool                    `json:"ok"`
+	Stages    []validationStageResult `json:"stages"`
+	Summary   string                  `json:"summary"`
+	Artifacts []map[string]any        `json:"artifacts"`
+}
+
+type runTraceCaptureOptions struct {
+	IncludeFlowState       bool `json:"includeFlowState"`
+	IncludeActivityOutputs bool `json:"includeActivityOutputs"`
+	IncludeTaskInputs      bool `json:"includeTaskInputs"`
+	IncludeTaskOutputs     bool `json:"includeTaskOutputs"`
+}
+
+type runTraceRequest struct {
+	FlowID       string                 `json:"flowId"`
+	SampleInput  map[string]any         `json:"sampleInput"`
+	Capture      runTraceCaptureOptions `json:"capture"`
+	ValidateOnly bool                   `json:"validateOnly"`
+}
+
+type runTraceTaskStep struct {
+	TaskID        string         `json:"taskId"`
+	TaskName      string         `json:"taskName,omitempty"`
+	ActivityRef   string         `json:"activityRef,omitempty"`
+	Type          string         `json:"type,omitempty"`
+	Status        string         `json:"status"`
+	Input         map[string]any `json:"input,omitempty"`
+	Output        map[string]any `json:"output,omitempty"`
+	FlowState     map[string]any `json:"flowState,omitempty"`
+	ActivityState map[string]any `json:"activityState,omitempty"`
+	Error         string         `json:"error,omitempty"`
+	StartedAt     string         `json:"startedAt,omitempty"`
+	FinishedAt    string         `json:"finishedAt,omitempty"`
+	Diagnostics   []diagnostic   `json:"diagnostics"`
+}
+
+type runTraceSummary struct {
+	FlowID      string         `json:"flowId"`
+	Status      string         `json:"status"`
+	Input       map[string]any `json:"input"`
+	Output      map[string]any `json:"output,omitempty"`
+	Error       string         `json:"error,omitempty"`
+	StepCount   int            `json:"stepCount"`
+	Diagnostics []diagnostic   `json:"diagnostics"`
+}
+
+type runTrace struct {
+	AppName     string             `json:"appName"`
+	FlowID      string             `json:"flowId"`
+	Summary     runTraceSummary    `json:"summary"`
+	Steps       []runTraceTaskStep `json:"steps"`
+	Diagnostics []diagnostic       `json:"diagnostics"`
+}
+
+type runTraceResponse struct {
+	Trace      *runTrace         `json:"trace,omitempty"`
+	Validation *validationReport `json:"validation,omitempty"`
+}
+
+type replayRequest struct {
+	FlowID          string                 `json:"flowId"`
+	TraceArtifactID string                 `json:"traceArtifactId,omitempty"`
+	BaseInput       map[string]any         `json:"baseInput,omitempty"`
+	Overrides       map[string]any         `json:"overrides,omitempty"`
+	Capture         runTraceCaptureOptions `json:"capture"`
+	ValidateOnly    bool                   `json:"validateOnly"`
+}
+
+type replaySummary struct {
+	FlowID           string         `json:"flowId"`
+	Status           string         `json:"status"`
+	InputSource      string         `json:"inputSource"`
+	BaseInput        map[string]any `json:"baseInput"`
+	EffectiveInput   map[string]any `json:"effectiveInput"`
+	OverridesApplied bool           `json:"overridesApplied"`
+	Diagnostics      []diagnostic   `json:"diagnostics"`
+}
+
+type replayResult struct {
+	Summary    replaySummary     `json:"summary"`
+	Trace      *runTrace         `json:"trace,omitempty"`
+	Validation *validationReport `json:"validation,omitempty"`
+}
+
+type replayResponse struct {
+	Result replayResult `json:"result"`
+}
+
+type runComparisonOptions struct {
+	IncludeStepInputs    bool `json:"includeStepInputs"`
+	IncludeStepOutputs   bool `json:"includeStepOutputs"`
+	IncludeFlowState     bool `json:"includeFlowState"`
+	IncludeActivityState bool `json:"includeActivityState"`
+	IncludeDiagnostics   bool `json:"includeDiagnostics"`
+}
+
+type comparableRunArtifactInput struct {
+	ArtifactID string         `json:"artifactId"`
+	Kind       string         `json:"kind"`
+	Payload    map[string]any `json:"payload"`
+}
+
+type runComparisonRequest struct {
+	LeftArtifact  comparableRunArtifactInput `json:"leftArtifact"`
+	RightArtifact comparableRunArtifactInput `json:"rightArtifact"`
+	Compare       runComparisonOptions       `json:"compare"`
+	ValidateOnly  bool                       `json:"validateOnly"`
+}
+
+type runComparisonArtifactRef struct {
+	ArtifactID    string `json:"artifactId"`
+	Kind          string `json:"kind"`
+	SummaryStatus string `json:"summaryStatus"`
+	FlowID        string `json:"flowId"`
+}
+
+type runComparisonValueDiff struct {
+	Kind  string `json:"kind"`
+	Left  any    `json:"left,omitempty"`
+	Right any    `json:"right,omitempty"`
+}
+
+type runComparisonStepDiff struct {
+	TaskID            string                  `json:"taskId"`
+	LeftStatus        string                  `json:"leftStatus,omitempty"`
+	RightStatus       string                  `json:"rightStatus,omitempty"`
+	InputDiff         *runComparisonValueDiff `json:"inputDiff,omitempty"`
+	OutputDiff        *runComparisonValueDiff `json:"outputDiff,omitempty"`
+	FlowStateDiff     *runComparisonValueDiff `json:"flowStateDiff,omitempty"`
+	ActivityStateDiff *runComparisonValueDiff `json:"activityStateDiff,omitempty"`
+	DiagnosticDiffs   []diagnostic            `json:"diagnosticDiffs"`
+	ChangeKind        string                  `json:"changeKind"`
+}
+
+type runComparisonSummaryDiff struct {
+	StatusChanged   bool                   `json:"statusChanged"`
+	InputDiff       runComparisonValueDiff `json:"inputDiff"`
+	OutputDiff      runComparisonValueDiff `json:"outputDiff"`
+	ErrorDiff       runComparisonValueDiff `json:"errorDiff"`
+	StepCountDiff   runComparisonValueDiff `json:"stepCountDiff"`
+	DiagnosticDiffs []diagnostic           `json:"diagnosticDiffs"`
+}
+
+type runComparisonResult struct {
+	Left        runComparisonArtifactRef `json:"left"`
+	Right       runComparisonArtifactRef `json:"right"`
+	Summary     runComparisonSummaryDiff `json:"summary"`
+	Steps       []runComparisonStepDiff  `json:"steps"`
+	Diagnostics []diagnostic             `json:"diagnostics"`
+}
+
+type runComparisonResponse struct {
+	Result     *runComparisonResult `json:"result,omitempty"`
+	Validation *validationReport    `json:"validation,omitempty"`
+}
+
+type triggerProfile struct {
+	Kind               string   `json:"kind"`
+	Method             string   `json:"method,omitempty"`
+	Path               string   `json:"path,omitempty"`
+	Port               int      `json:"port,omitempty"`
+	ReplyMode          string   `json:"replyMode,omitempty"`
+	RequestMappingMode string   `json:"requestMappingMode,omitempty"`
+	ReplyMappingMode   string   `json:"replyMappingMode,omitempty"`
+	RunMode            string   `json:"runMode,omitempty"`
+	StartDelay         string   `json:"startDelay,omitempty"`
+	RepeatInterval     string   `json:"repeatInterval,omitempty"`
+	SingleCmd          bool     `json:"singleCmd,omitempty"`
+	CommandName        string   `json:"commandName,omitempty"`
+	Usage              string   `json:"usage,omitempty"`
+	Short              string   `json:"short,omitempty"`
+	Long               string   `json:"long,omitempty"`
+	Flags              []string `json:"flags,omitempty"`
+	Channel            string   `json:"channel,omitempty"`
+}
+
+type triggerBindingRequest struct {
+	FlowID          string         `json:"flowId"`
+	Profile         triggerProfile `json:"profile"`
+	ValidateOnly    bool           `json:"validateOnly"`
+	ReplaceExisting bool           `json:"replaceExisting"`
+	HandlerName     string         `json:"handlerName,omitempty"`
+	TriggerID       string         `json:"triggerId,omitempty"`
+	TriggerName     string         `json:"triggerName,omitempty"`
+}
+
+type triggerBindingMappings struct {
+	Input  map[string]any `json:"input"`
+	Output map[string]any `json:"output"`
+}
+
+type triggerBindingPlan struct {
+	FlowID           string                 `json:"flowId"`
+	Profile          triggerProfile         `json:"profile"`
+	TriggerRef       string                 `json:"triggerRef"`
+	TriggerID        string                 `json:"triggerId"`
+	HandlerName      string                 `json:"handlerName"`
+	GeneratedMapping triggerBindingMappings `json:"generatedMappings"`
+	Trigger          map[string]any         `json:"trigger"`
+	Diagnostics      []diagnostic           `json:"diagnostics"`
+	Warnings         []diagnostic           `json:"warnings"`
+}
+
+type simpleValidationReport struct {
+	Ok     bool             `json:"ok"`
+	Stages []map[string]any `json:"stages,omitempty"`
+}
+
+type triggerBindingResult struct {
+	Applied      bool                    `json:"applied"`
+	Plan         triggerBindingPlan      `json:"plan"`
+	PatchSummary string                  `json:"patchSummary"`
+	Validation   *simpleValidationReport `json:"validation,omitempty"`
+	App          map[string]any          `json:"app,omitempty"`
+}
+
+type triggerBindingResponse struct {
+	Result triggerBindingResult `json:"result"`
+}
+
+type subflowInvocation struct {
+	ParentFlowID string         `json:"parentFlowId"`
+	TaskID       string         `json:"taskId"`
+	ActivityRef  string         `json:"activityRef"`
+	Input        map[string]any `json:"input"`
+	Output       map[string]any `json:"output"`
+	Settings     map[string]any `json:"settings"`
+}
+
+type subflowExtractionRequest struct {
+	FlowID          string   `json:"flowId"`
+	TaskIDs         []string `json:"taskIds"`
+	NewFlowID       string   `json:"newFlowId,omitempty"`
+	NewFlowName     string   `json:"newFlowName,omitempty"`
+	ValidateOnly    bool     `json:"validateOnly"`
+	ReplaceExisting bool     `json:"replaceExisting"`
+}
+
+type subflowExtractionPlan struct {
+	ParentFlowID    string            `json:"parentFlowId"`
+	NewFlowID       string            `json:"newFlowId"`
+	NewFlowName     string            `json:"newFlowName"`
+	SelectedTaskIDs []string          `json:"selectedTaskIds"`
+	NewFlowContract flowContract      `json:"newFlowContract"`
+	Invocation      subflowInvocation `json:"invocation"`
+	Diagnostics     []diagnostic      `json:"diagnostics"`
+	Warnings        []diagnostic      `json:"warnings"`
+}
+
+type subflowExtractionResult struct {
+	Applied      bool                    `json:"applied"`
+	Plan         subflowExtractionPlan   `json:"plan"`
+	PatchSummary string                  `json:"patchSummary"`
+	Validation   *simpleValidationReport `json:"validation,omitempty"`
+	App          map[string]any          `json:"app,omitempty"`
+}
+
+type subflowExtractionResponse struct {
+	Result subflowExtractionResult `json:"result"`
+}
+
+type subflowInliningRequest struct {
+	ParentFlowID                string `json:"parentFlowId"`
+	InvocationTaskID            string `json:"invocationTaskId"`
+	ValidateOnly                bool   `json:"validateOnly"`
+	RemoveExtractedFlowIfUnused bool   `json:"removeExtractedFlowIfUnused"`
+}
+
+type subflowInliningPlan struct {
+	ParentFlowID     string       `json:"parentFlowId"`
+	InvocationTaskID string       `json:"invocationTaskId"`
+	InlinedFlowID    string       `json:"inlinedFlowId"`
+	GeneratedTaskIDs []string     `json:"generatedTaskIds"`
+	Diagnostics      []diagnostic `json:"diagnostics"`
+	Warnings         []diagnostic `json:"warnings"`
+}
+
+type subflowInliningResult struct {
+	Applied      bool                    `json:"applied"`
+	Plan         subflowInliningPlan     `json:"plan"`
+	PatchSummary string                  `json:"patchSummary"`
+	Validation   *simpleValidationReport `json:"validation,omitempty"`
+	App          map[string]any          `json:"app,omitempty"`
+}
+
+type subflowInliningResponse struct {
+	Result subflowInliningResult `json:"result"`
+}
+
+type iteratorSynthesisRequest struct {
+	FlowID          string `json:"flowId"`
+	TaskID          string `json:"taskId"`
+	IterateExpr     string `json:"iterateExpr"`
+	Accumulate      *bool  `json:"accumulate,omitempty"`
+	ValidateOnly    bool   `json:"validateOnly"`
+	ReplaceExisting bool   `json:"replaceExisting"`
+}
+
+type iteratorSynthesisPlan struct {
+	FlowID       string         `json:"flowId"`
+	TaskID       string         `json:"taskId"`
+	NextTaskType string         `json:"nextTaskType"`
+	UpdatedSetts map[string]any `json:"updatedSettings"`
+	Diagnostics  []diagnostic   `json:"diagnostics"`
+	Warnings     []diagnostic   `json:"warnings"`
+}
+
+type iteratorSynthesisResult struct {
+	Applied      bool                    `json:"applied"`
+	Plan         iteratorSynthesisPlan   `json:"plan"`
+	PatchSummary string                  `json:"patchSummary"`
+	Validation   *simpleValidationReport `json:"validation,omitempty"`
+	App          map[string]any          `json:"app,omitempty"`
+}
+
+type iteratorSynthesisResponse struct {
+	Result iteratorSynthesisResult `json:"result"`
+}
+
+type retryPolicyRequest struct {
+	FlowID          string `json:"flowId"`
+	TaskID          string `json:"taskId"`
+	Count           int    `json:"count"`
+	IntervalMs      int    `json:"intervalMs"`
+	ValidateOnly    bool   `json:"validateOnly"`
+	ReplaceExisting bool   `json:"replaceExisting"`
+}
+
+type retryPolicyPlan struct {
+	FlowID       string         `json:"flowId"`
+	TaskID       string         `json:"taskId"`
+	RetryOnError map[string]any `json:"retryOnError"`
+	Diagnostics  []diagnostic   `json:"diagnostics"`
+	Warnings     []diagnostic   `json:"warnings"`
+}
+
+type retryPolicyResult struct {
+	Applied      bool                    `json:"applied"`
+	Plan         retryPolicyPlan         `json:"plan"`
+	PatchSummary string                  `json:"patchSummary"`
+	Validation   *simpleValidationReport `json:"validation,omitempty"`
+	App          map[string]any          `json:"app,omitempty"`
+}
+
+type retryPolicyResponse struct {
+	Result retryPolicyResult `json:"result"`
+}
+
+type doWhileSynthesisRequest struct {
+	FlowID          string `json:"flowId"`
+	TaskID          string `json:"taskId"`
+	Condition       string `json:"condition"`
+	DelayMs         *int   `json:"delayMs,omitempty"`
+	Accumulate      *bool  `json:"accumulate,omitempty"`
+	ValidateOnly    bool   `json:"validateOnly"`
+	ReplaceExisting bool   `json:"replaceExisting"`
+}
+
+type doWhileSynthesisPlan struct {
+	FlowID       string         `json:"flowId"`
+	TaskID       string         `json:"taskId"`
+	NextTaskType string         `json:"nextTaskType"`
+	UpdatedSetts map[string]any `json:"updatedSettings"`
+	Diagnostics  []diagnostic   `json:"diagnostics"`
+	Warnings     []diagnostic   `json:"warnings"`
+}
+
+type doWhileSynthesisResult struct {
+	Applied      bool                    `json:"applied"`
+	Plan         doWhileSynthesisPlan    `json:"plan"`
+	PatchSummary string                  `json:"patchSummary"`
+	Validation   *simpleValidationReport `json:"validation,omitempty"`
+	App          map[string]any          `json:"app,omitempty"`
+}
+
+type doWhileSynthesisResponse struct {
+	Result doWhileSynthesisResult `json:"result"`
+}
+
+type errorPathTemplateRequest struct {
+	FlowID              string `json:"flowId"`
+	TaskID              string `json:"taskId"`
+	Template            string `json:"template"`
+	ValidateOnly        bool   `json:"validateOnly"`
+	ReplaceExisting     bool   `json:"replaceExisting"`
+	LogMessage          string `json:"logMessage,omitempty"`
+	GeneratedTaskPrefix string `json:"generatedTaskPrefix,omitempty"`
+}
+
+type errorPathTemplatePlan struct {
+	FlowID          string           `json:"flowId"`
+	TaskID          string           `json:"taskId"`
+	Template        string           `json:"template"`
+	GeneratedTaskID string           `json:"generatedTaskId"`
+	AddedImport     bool             `json:"addedImport"`
+	GeneratedLinks  []map[string]any `json:"generatedLinks"`
+	Diagnostics     []diagnostic     `json:"diagnostics"`
+	Warnings        []diagnostic     `json:"warnings"`
+}
+
+type errorPathTemplateResult struct {
+	Applied      bool                    `json:"applied"`
+	Plan         errorPathTemplatePlan   `json:"plan"`
+	PatchSummary string                  `json:"patchSummary"`
+	Validation   *simpleValidationReport `json:"validation,omitempty"`
+	App          map[string]any          `json:"app,omitempty"`
+}
+
+type errorPathTemplateResponse struct {
+	Result errorPathTemplateResult `json:"result"`
+}
+
 type mappingDifference struct {
 	Path     string `json:"path"`
 	Expected any    `json:"expected,omitempty"`
@@ -272,8 +730,12 @@ type flogoImport struct {
 }
 
 type flogoHandler struct {
-	ActionRef string
-	Settings  map[string]any
+	ID             string
+	ActionRef      string
+	ActionSettings map[string]any
+	Settings       map[string]any
+	Input          map[string]any
+	Output         map[string]any
 }
 
 type flogoTrigger struct {
@@ -286,6 +748,7 @@ type flogoTrigger struct {
 type flogoTask struct {
 	ID          string
 	Name        string
+	Type        string
 	ActivityRef string
 	Input       map[string]any
 	Output      map[string]any
@@ -298,6 +761,7 @@ type flogoFlow struct {
 	MetadataInput  []map[string]any
 	MetadataOutput []map[string]any
 	Tasks          []flogoTask
+	Links          []map[string]any
 }
 
 type flogoApp struct {
@@ -395,6 +859,28 @@ var knownRegistry = map[string]contribDescriptor{
 	},
 }
 
+var triggerImportRegistry = map[string]struct {
+	Alias string
+	Ref   string
+}{
+	"rest": {
+		Alias: "rest",
+		Ref:   "github.com/project-flogo/contrib/trigger/rest",
+	},
+	"timer": {
+		Alias: "timer",
+		Ref:   "github.com/project-flogo/contrib/trigger/timer",
+	},
+	"cli": {
+		Alias: "cli",
+		Ref:   "github.com/project-flogo/trigger/cli",
+	},
+	"channel": {
+		Alias: "channel",
+		Ref:   "github.com/project-flogo/contrib/trigger/channel",
+	},
+}
+
 func main() {
 	if len(os.Args) < 3 {
 		fail("expected a command such as 'catalog contribs', 'inspect descriptor', or 'preview mapping'")
@@ -409,6 +895,40 @@ func main() {
 	app := loadApp(appPath)
 
 	switch command {
+	case "flows contracts":
+		flowID := lookupFlag("--flow")
+		result := inferFlowContracts(app)
+		if flowID != "" {
+			filtered := []flowContract{}
+			for _, contract := range result.Contracts {
+				if contract.FlowID == flowID {
+					filtered = append(filtered, contract)
+				}
+			}
+			if len(filtered) == 0 {
+				fail(fmt.Sprintf("flow contract %q was not found", flowID))
+			}
+			result.Contracts = filtered
+		}
+		encode(flowContractsResponse{Contracts: result})
+	case "flows trace":
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(traceFlow(app, loadRunTraceRequest(requestPath)))
+	case "flows replay":
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(replayFlow(app, loadReplayRequest(requestPath)))
+	case "flows compare-runs":
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(compareRuns(loadCompareRunsRequest(requestPath)))
 	case "inventory contribs":
 		encode(buildContributionInventory(app, appPath))
 	case "catalog contribs":
@@ -471,6 +991,62 @@ func main() {
 		encode(propertyPlanResponse{
 			PropertyPlan: analyzePropertyUsage(app, profile),
 		})
+	case "triggers bind":
+		flowID := lookupFlag("--flow")
+		profilePath := lookupFlag("--profile")
+		if flowID == "" {
+			fail("missing required --flow flag")
+		}
+		if profilePath == "" {
+			fail("missing required --profile flag")
+		}
+		profile := loadTriggerProfile(profilePath)
+		request := triggerBindingRequest{
+			FlowID:          flowID,
+			Profile:         profile,
+			ValidateOnly:    hasFlag("--validate-only"),
+			ReplaceExisting: hasFlag("--replace-existing"),
+			HandlerName:     lookupFlag("--handler-name"),
+			TriggerID:       lookupFlag("--trigger-id"),
+			TriggerName:     lookupFlag("--trigger-name"),
+		}
+		encode(bindTrigger(app, request))
+	case "flows extract-subflow":
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(extractSubflow(app, loadSubflowExtractionRequest(requestPath)))
+	case "flows inline-subflow":
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(inlineSubflow(app, loadSubflowInliningRequest(requestPath)))
+	case "flows add-iterator":
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(addIterator(app, loadIteratorSynthesisRequest(requestPath)))
+	case "flows add-retry-policy":
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(addRetryPolicy(app, loadRetryPolicyRequest(requestPath)))
+	case "flows add-dowhile":
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(addDoWhile(app, loadDoWhileSynthesisRequest(requestPath)))
+	case "flows add-error-path":
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(addErrorPath(app, loadErrorPathTemplateRequest(requestPath)))
 	default:
 		fail(fmt.Sprintf("unsupported command %q", command))
 	}
@@ -557,6 +1133,264 @@ func loadExpectedOutput(inputPath string) map[string]any {
 	return expected
 }
 
+func loadTriggerProfile(inputPath string) triggerProfile {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var profile triggerProfile
+	if err := json.Unmarshal(contents, &profile); err != nil {
+		fail(err.Error())
+	}
+	if profile.Kind == "" {
+		fail("trigger profile is missing kind")
+	}
+	return profile
+}
+
+func loadSubflowExtractionRequest(inputPath string) subflowExtractionRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var request subflowExtractionRequest
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+	if request.FlowID == "" {
+		fail("subflow extraction request is missing flowId")
+	}
+	if len(request.TaskIDs) == 0 {
+		fail("subflow extraction request is missing taskIds")
+	}
+	return request
+}
+
+func loadSubflowInliningRequest(inputPath string) subflowInliningRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var request subflowInliningRequest
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+	if request.ParentFlowID == "" {
+		fail("subflow inlining request is missing parentFlowId")
+	}
+	if request.InvocationTaskID == "" {
+		fail("subflow inlining request is missing invocationTaskId")
+	}
+	return request
+}
+
+func loadIteratorSynthesisRequest(inputPath string) iteratorSynthesisRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var request iteratorSynthesisRequest
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+	if request.FlowID == "" {
+		fail("iterator synthesis request is missing flowId")
+	}
+	if request.TaskID == "" {
+		fail("iterator synthesis request is missing taskId")
+	}
+	if strings.TrimSpace(request.IterateExpr) == "" {
+		fail("iterator synthesis request is missing iterateExpr")
+	}
+	return request
+}
+
+func loadRetryPolicyRequest(inputPath string) retryPolicyRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var request retryPolicyRequest
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+	if request.FlowID == "" {
+		fail("retry policy request is missing flowId")
+	}
+	if request.TaskID == "" {
+		fail("retry policy request is missing taskId")
+	}
+	return request
+}
+
+func loadDoWhileSynthesisRequest(inputPath string) doWhileSynthesisRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var request doWhileSynthesisRequest
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+	if request.FlowID == "" {
+		fail("doWhile synthesis request is missing flowId")
+	}
+	if request.TaskID == "" {
+		fail("doWhile synthesis request is missing taskId")
+	}
+	if strings.TrimSpace(request.Condition) == "" {
+		fail("doWhile synthesis request is missing condition")
+	}
+	return request
+}
+
+func loadErrorPathTemplateRequest(inputPath string) errorPathTemplateRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var request errorPathTemplateRequest
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+	if request.FlowID == "" {
+		fail("error path request is missing flowId")
+	}
+	if request.TaskID == "" {
+		fail("error path request is missing taskId")
+	}
+	if request.Template == "" {
+		fail("error path request is missing template")
+	}
+	return request
+}
+
+func loadRunTraceRequest(inputPath string) runTraceRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+	request := runTraceRequest{
+		SampleInput: map[string]any{},
+		Capture: runTraceCaptureOptions{
+			IncludeFlowState:       true,
+			IncludeActivityOutputs: true,
+			IncludeTaskInputs:      true,
+			IncludeTaskOutputs:     true,
+		},
+	}
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+	if strings.TrimSpace(request.FlowID) == "" {
+		fail("run trace request is missing flowId")
+	}
+	if request.SampleInput == nil {
+		request.SampleInput = map[string]any{}
+	}
+	if !request.Capture.IncludeFlowState && !request.Capture.IncludeActivityOutputs && !request.Capture.IncludeTaskInputs && !request.Capture.IncludeTaskOutputs {
+		request.Capture = runTraceCaptureOptions{
+			IncludeFlowState:       true,
+			IncludeActivityOutputs: true,
+			IncludeTaskInputs:      true,
+			IncludeTaskOutputs:     true,
+		}
+	}
+	return request
+}
+
+func loadReplayRequest(inputPath string) replayRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+	request := replayRequest{
+		BaseInput: map[string]any{},
+		Overrides: map[string]any{},
+		Capture: runTraceCaptureOptions{
+			IncludeFlowState:       true,
+			IncludeActivityOutputs: true,
+			IncludeTaskInputs:      true,
+			IncludeTaskOutputs:     true,
+		},
+	}
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+	if strings.TrimSpace(request.FlowID) == "" {
+		fail("replay request is missing flowId")
+	}
+	if request.TraceArtifactID != "" && request.BaseInput != nil && len(request.BaseInput) > 0 {
+		fail("replay request must not provide both traceArtifactId and baseInput")
+	}
+	if request.TraceArtifactID == "" && request.BaseInput == nil {
+		fail("replay request requires either traceArtifactId or baseInput")
+	}
+	if request.TraceArtifactID != "" && request.BaseInput == nil {
+		fail("replay helper requires resolved baseInput when traceArtifactId is used")
+	}
+	if request.Overrides == nil {
+		request.Overrides = map[string]any{}
+	}
+	if !request.Capture.IncludeFlowState && !request.Capture.IncludeActivityOutputs && !request.Capture.IncludeTaskInputs && !request.Capture.IncludeTaskOutputs {
+		request.Capture = runTraceCaptureOptions{
+			IncludeFlowState:       true,
+			IncludeActivityOutputs: true,
+			IncludeTaskInputs:      true,
+			IncludeTaskOutputs:     true,
+		}
+	}
+	return request
+}
+
+func loadCompareRunsRequest(inputPath string) runComparisonRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+	request := runComparisonRequest{
+		Compare: runComparisonOptions{
+			IncludeStepInputs:    true,
+			IncludeStepOutputs:   true,
+			IncludeFlowState:     true,
+			IncludeActivityState: true,
+			IncludeDiagnostics:   true,
+		},
+	}
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+	if strings.TrimSpace(request.LeftArtifact.ArtifactID) == "" {
+		fail("run comparison request is missing leftArtifact.artifactId")
+	}
+	if strings.TrimSpace(request.RightArtifact.ArtifactID) == "" {
+		fail("run comparison request is missing rightArtifact.artifactId")
+	}
+	if request.LeftArtifact.Kind != "run_trace" && request.LeftArtifact.Kind != "replay_report" {
+		fail("run comparison request has invalid leftArtifact.kind")
+	}
+	if request.RightArtifact.Kind != "run_trace" && request.RightArtifact.Kind != "replay_report" {
+		fail("run comparison request has invalid rightArtifact.kind")
+	}
+	return request
+}
+
+func hasFlag(flag string) bool {
+	for _, value := range os.Args[1:] {
+		if value == flag {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeApp(raw map[string]any) flogoApp {
 	app := flogoApp{
 		Name:       stringValue(raw["name"]),
@@ -631,15 +1465,21 @@ func normalizeTriggers(value any) []flogoTrigger {
 				continue
 			}
 			actionRef := ""
+			actionSettings := map[string]any{}
 			if action, ok := handlerRecord["action"].(map[string]any); ok {
 				actionRef = stringValue(action["ref"])
 				if strings.HasPrefix(actionRef, "flow:") {
 					actionRef = "#" + actionRef
 				}
+				actionSettings = mapValue(action["settings"])
 			}
 			handlers = append(handlers, flogoHandler{
-				ActionRef: actionRef,
-				Settings:  mapValue(handlerRecord["settings"]),
+				ID:             stringValue(handlerRecord["id"]),
+				ActionRef:      actionRef,
+				ActionSettings: actionSettings,
+				Settings:       mapValue(handlerRecord["settings"]),
+				Input:          mapValue(handlerRecord["input"]),
+				Output:         mapValue(handlerRecord["output"]),
 			})
 		}
 
@@ -696,9 +1536,27 @@ func normalizeFlow(record map[string]any, fallbackID string) flogoFlow {
 		MetadataInput:  normalizeMetadataFields(metadata["input"]),
 		MetadataOutput: normalizeMetadataFields(metadata["output"]),
 		Tasks:          normalizeTasks(data["tasks"]),
+		Links:          normalizeLinks(data["links"]),
 	}
 
 	return flow
+}
+
+func normalizeLinks(value any) []map[string]any {
+	items, ok := value.([]any)
+	if !ok {
+		return []map[string]any{}
+	}
+
+	links := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		record, ok := item.(map[string]any)
+		if ok {
+			links = append(links, record)
+		}
+	}
+
+	return links
 }
 
 func normalizeMetadataFields(value any) []map[string]any {
@@ -743,6 +1601,7 @@ func normalizeTasks(value any) []flogoTask {
 		tasks = append(tasks, flogoTask{
 			ID:          stringValue(record["id"]),
 			Name:        stringValue(record["name"]),
+			Type:        stringValue(record["type"]),
 			ActivityRef: activityRef,
 			Input:       mapValue(record["input"]),
 			Output:      mapValue(record["output"]),
@@ -1077,7 +1936,11 @@ func validateGovernance(app flogoApp, appPath string) governanceReport {
 	for _, trigger := range app.Triggers {
 		trackUsage(trigger.Ref, "triggers."+trigger.ID+".ref", "trigger", true)
 		for _, handler := range trigger.Handlers {
-			trackUsage(handler.ActionRef, "triggers."+trigger.ID+".handlers.action", "action", false)
+			if flowRef := resolveHandlerFlowRef(handler); flowRef != "" {
+				trackUsage(flowRef, "triggers."+trigger.ID+".handlers.action", "flow", false)
+			} else {
+				trackUsage(handler.ActionRef, "triggers."+trigger.ID+".handlers.action", "action", false)
+			}
 		}
 	}
 
@@ -1213,6 +2076,3088 @@ func compareComposition(app flogoApp, appPath string, target string, resourceID 
 		Differences:            differences,
 		Diagnostics:            diagnostics,
 	}
+}
+
+func inferFlowContracts(app flogoApp) flowContracts {
+	diagnostics := []diagnostic{}
+	contracts := make([]flowContract, 0, len(app.Resources))
+	for _, flow := range app.Resources {
+		contract := inferFlowContract(app, flow, &diagnostics)
+		contracts = append(contracts, contract)
+	}
+	sort.Slice(contracts, func(i, j int) bool {
+		return contracts[i].FlowID < contracts[j].FlowID
+	})
+	return flowContracts{
+		AppName:     app.Name,
+		Contracts:   contracts,
+		Diagnostics: dedupeDiagnostics(diagnostics),
+	}
+}
+
+func inferFlowContract(app flogoApp, flow flogoFlow, sharedDiagnostics *[]diagnostic) flowContract {
+	diagnostics := []diagnostic{}
+	inputs := map[string]flowParam{}
+	outputs := map[string]flowParam{}
+	metadataInputs := normalizeFlowMetadataParams(flow.MetadataInput, "metadata")
+	metadataOutputs := normalizeFlowMetadataParams(flow.MetadataOutput, "metadata")
+	for _, param := range metadataInputs {
+		inputs[param.Name] = param
+	}
+	for _, param := range metadataOutputs {
+		outputs[param.Name] = param
+	}
+	if len(metadataInputs) == 0 && len(metadataOutputs) == 0 {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.flow_contract.missing_metadata",
+			Message:  fmt.Sprintf("Flow %q does not declare explicit input/output metadata.", flow.ID),
+			Severity: "warning",
+			Path:     "resources." + flow.ID + ".data.metadata",
+		})
+	}
+
+	usage := buildFlowUsage(app, flow)
+	diagnostics = append(diagnostics, usage.Diagnostics...)
+	*sharedDiagnostics = append(*sharedDiagnostics, usage.Diagnostics...)
+
+	for _, param := range usage.InferredInputs {
+		inputs[param.Name] = mergeFlowParam(inputs[param.Name], param)
+	}
+	for _, param := range usage.InferredOutputs {
+		outputs[param.Name] = mergeFlowParam(outputs[param.Name], param)
+	}
+
+	inputList := mapFlowParams(inputs)
+	outputList := mapFlowParams(outputs)
+	evidenceLevel := "metadata_only"
+	if usage.UsesMappings {
+		evidenceLevel = "metadata_plus_mapping"
+	} else if usage.UsedByCount > 0 {
+		evidenceLevel = "metadata_plus_usage"
+	}
+
+	return flowContract{
+		FlowID:      flow.ID,
+		Name:        valueOrFallback(flow.Name, flow.ID),
+		ResourceRef: "#flow:" + flow.ID,
+		Inputs:      inputList,
+		Outputs:     outputList,
+		Reusable:    usage.UsedByCount > 1 || len(inputList) > 0 || len(outputList) > 0,
+		Usage: flowUsage{
+			FlowID:      flow.ID,
+			HandlerRefs: usage.HandlerRefs,
+			TriggerRefs: usage.TriggerRefs,
+			ActionRefs:  usage.ActionRefs,
+			UsedByCount: usage.UsedByCount,
+		},
+		Diagnostics:   dedupeDiagnostics(diagnostics),
+		EvidenceLevel: evidenceLevel,
+	}
+}
+
+func traceFlow(app flogoApp, request runTraceRequest) runTraceResponse {
+	flowIndex := -1
+	for index, candidate := range app.Resources {
+		if candidate.ID == request.FlowID {
+			flowIndex = index
+			break
+		}
+	}
+	if flowIndex < 0 {
+		fail(fmt.Sprintf("flow %q was not found", request.FlowID))
+	}
+
+	validation := preflightRunTrace(app, request)
+	if request.ValidateOnly || !validation.Ok {
+		return runTraceResponse{
+			Validation: &validation,
+		}
+	}
+
+	propertyState := buildPropertyState(app)
+	flowState := cloneStringAnyMap(request.SampleInput)
+	activityState := map[string]map[string]any{}
+	steps := []runTraceTaskStep{}
+	diagnostics := []diagnostic{}
+	var traceErr string
+	flow := app.Resources[flowIndex]
+	taskIndex := buildTraceTaskIndex(flow)
+	currentTaskID := ""
+	if len(flow.Tasks) > 0 {
+		currentTaskID = flow.Tasks[0].ID
+	}
+	visited := map[string]int{}
+	for currentTaskID != "" {
+		task, ok := taskIndex[currentTaskID]
+		if !ok {
+			break
+		}
+		visited[currentTaskID]++
+		if visited[currentTaskID] > len(flow.Tasks)+1 {
+			traceErr = fmt.Sprintf("Detected a cyclic trace path at task %q", currentTaskID)
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.run_trace.cycle_detected",
+				Message:  traceErr,
+				Severity: "error",
+				Path:     "resources." + request.FlowID + ".tasks." + currentTaskID,
+			})
+			break
+		}
+		startedAt := nowRFC3339()
+		stepDiagnostics := []diagnostic{}
+		stepStatus := "completed"
+		stepInput := map[string]any{}
+		stepOutput := map[string]any{}
+		activitySnapshot := map[string]any{}
+		resolvedInput := map[string]any{}
+
+		if len(task.Input) > 0 {
+			for key, value := range task.Input {
+				resolved := makeJSONSafe(resolveValue(value, mappingPreviewContext{
+					Flow:     flowState,
+					Activity: activityState,
+					Env:      map[string]any{},
+					Property: propertyState,
+					Trigger:  map[string]any{},
+				}))
+				resolvedInput[key] = resolved
+			}
+		}
+		if request.Capture.IncludeTaskInputs {
+			stepInput = cloneStringAnyMap(resolvedInput)
+		}
+
+		switch {
+		case strings.TrimSpace(task.ActivityRef) == "":
+			stepStatus = "failed"
+			traceErr = fmt.Sprintf("Task %q is missing activityRef", task.ID)
+			stepDiagnostics = append(stepDiagnostics, diagnostic{
+				Code:     "flogo.run_trace.missing_activity_ref",
+				Message:  traceErr,
+				Severity: "error",
+				Path:     "resources." + request.FlowID + ".tasks." + task.ID,
+			})
+		case normalizeFlowActionRef(task.ActivityRef, stringValue(task.Settings["flowURI"])) != "" &&
+			strings.HasPrefix(normalizeFlowActionRef(task.ActivityRef, stringValue(task.Settings["flowURI"])), "#flow:"):
+			childFlowID := strings.TrimPrefix(normalizeFlowActionRef(task.ActivityRef, stringValue(task.Settings["flowURI"])), "#flow:")
+			childTrace := traceFlow(app, runTraceRequest{
+				FlowID:       childFlowID,
+				SampleInput:  cloneStringAnyMap(resolvedInput),
+				Capture:      request.Capture,
+				ValidateOnly: false,
+			})
+			if childTrace.Trace == nil {
+				stepStatus = "failed"
+				traceErr = fmt.Sprintf("Subflow %q could not be traced", childFlowID)
+				if childTrace.Validation != nil {
+					stepDiagnostics = append(stepDiagnostics, childTrace.Validation.Stages[0].Diagnostics...)
+				}
+			} else {
+				stepOutput = cloneStringAnyMap(childTrace.Trace.Summary.Output)
+				activitySnapshot = cloneStringAnyMap(stepOutput)
+				diagnostics = append(diagnostics, diagnostic{
+					Code:     "flogo.run_trace.subflow",
+					Message:  fmt.Sprintf("Captured nested trace for subflow %q", childFlowID),
+					Severity: "info",
+					Path:     "resources." + request.FlowID + ".tasks." + task.ID,
+				})
+			}
+		default:
+			stepOutput = evaluateTaskOutput(task, flowState, activityState, propertyState)
+			activitySnapshot = cloneStringAnyMap(stepOutput)
+			if task.Type == "iterator" || task.Type == "doWhile" {
+				stepDiagnostics = append(stepDiagnostics, diagnostic{
+					Code:     "flogo.run_trace.simulated_control_flow",
+					Message:  fmt.Sprintf("Task %q with type %q was traced in single-pass simulation mode", task.ID, task.Type),
+					Severity: "info",
+					Path:     "resources." + request.FlowID + ".tasks." + task.ID,
+				})
+			}
+		}
+
+		if stepStatus == "completed" {
+			for key, value := range stepOutput {
+				flowState[key] = value
+			}
+			activityState[task.ID] = cloneStringAnyMap(stepOutput)
+		}
+
+		step := runTraceTaskStep{
+			TaskID:      task.ID,
+			TaskName:    task.Name,
+			ActivityRef: task.ActivityRef,
+			Type:        valueOrFallback(task.Type, "activity"),
+			Status:      stepStatus,
+			Diagnostics: dedupeDiagnostics(stepDiagnostics),
+			StartedAt:   startedAt,
+			FinishedAt:  nowRFC3339(),
+		}
+		if request.Capture.IncludeTaskInputs && len(stepInput) > 0 {
+			step.Input = stepInput
+		}
+		if request.Capture.IncludeTaskOutputs && len(stepOutput) > 0 {
+			step.Output = cloneStringAnyMap(stepOutput)
+		}
+		if request.Capture.IncludeFlowState {
+			step.FlowState = cloneStringAnyMap(flowState)
+		}
+		if request.Capture.IncludeActivityOutputs && len(activitySnapshot) > 0 {
+			step.ActivityState = activitySnapshot
+		}
+		if traceErr != "" && stepStatus == "failed" {
+			step.Error = traceErr
+		}
+		steps = append(steps, step)
+		diagnostics = append(diagnostics, step.Diagnostics...)
+		if stepStatus == "failed" {
+			break
+		}
+		currentTaskID = nextTraceTaskID(flow, task, false)
+	}
+
+	contract := inferFlowContract(app, app.Resources[flowIndex], &[]diagnostic{})
+	finalOutput := map[string]any{}
+	if len(contract.Outputs) > 0 {
+		for _, output := range contract.Outputs {
+			if value, ok := flowState[output.Name]; ok {
+				finalOutput[output.Name] = makeJSONSafe(value)
+			}
+		}
+	}
+	if len(finalOutput) == 0 {
+		finalOutput = cloneStringAnyMap(flowState)
+	}
+
+	status := "completed"
+	if traceErr != "" {
+		status = "failed"
+	}
+
+	return runTraceResponse{
+		Trace: &runTrace{
+			AppName: app.Name,
+			FlowID:  request.FlowID,
+			Summary: runTraceSummary{
+				FlowID:      request.FlowID,
+				Status:      status,
+				Input:       cloneStringAnyMap(request.SampleInput),
+				Output:      finalOutput,
+				Error:       traceErr,
+				StepCount:   len(steps),
+				Diagnostics: dedupeDiagnostics(diagnostics),
+			},
+			Steps:       steps,
+			Diagnostics: dedupeDiagnostics(diagnostics),
+		},
+	}
+}
+
+func replayFlow(app flogoApp, request replayRequest) replayResponse {
+	baseInput := cloneStringAnyMap(request.BaseInput)
+	effectiveInput := mergeReplayInput(baseInput, request.Overrides)
+	traceRequest := runTraceRequest{
+		FlowID:       request.FlowID,
+		SampleInput:  effectiveInput,
+		Capture:      request.Capture,
+		ValidateOnly: request.ValidateOnly,
+	}
+	traceResponse := traceFlow(app, traceRequest)
+	status := "completed"
+	diagnostics := []diagnostic{}
+	if traceResponse.Validation != nil {
+		for _, stage := range traceResponse.Validation.Stages {
+			diagnostics = append(diagnostics, stage.Diagnostics...)
+		}
+	}
+	if traceResponse.Trace != nil {
+		status = traceResponse.Trace.Summary.Status
+		diagnostics = append(diagnostics, traceResponse.Trace.Diagnostics...)
+	}
+	if traceResponse.Trace == nil && traceResponse.Validation != nil && !traceResponse.Validation.Ok {
+		status = "failed"
+	}
+
+	return replayResponse{
+		Result: replayResult{
+			Summary: replaySummary{
+				FlowID:           request.FlowID,
+				Status:           status,
+				InputSource:      replayInputSource(request),
+				BaseInput:        baseInput,
+				EffectiveInput:   effectiveInput,
+				OverridesApplied: len(request.Overrides) > 0,
+				Diagnostics:      dedupeDiagnostics(diagnostics),
+			},
+			Trace:      traceResponse.Trace,
+			Validation: traceResponse.Validation,
+		},
+	}
+}
+
+type comparableRunStep struct {
+	TaskID        string
+	Status        string
+	Input         map[string]any
+	Output        map[string]any
+	FlowState     map[string]any
+	ActivityState map[string]any
+	Diagnostics   []diagnostic
+}
+
+type comparableRun struct {
+	ArtifactID    string
+	Kind          string
+	FlowID        string
+	SummaryStatus string
+	Input         map[string]any
+	Output        map[string]any
+	Error         string
+	StepCount     int
+	Diagnostics   []diagnostic
+	Steps         []comparableRunStep
+	ReplaySummary *replaySummary
+}
+
+func compareRuns(request runComparisonRequest) runComparisonResponse {
+	left := normalizeComparableRun(request.LeftArtifact)
+	right := normalizeComparableRun(request.RightArtifact)
+	diagnostics := []diagnostic{}
+	if left.FlowID != right.FlowID {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.run_comparison.flow_mismatch",
+			Message:  fmt.Sprintf("Comparing runs from different flows (%q vs %q).", left.FlowID, right.FlowID),
+			Severity: "warning",
+		})
+	}
+
+	if request.ValidateOnly {
+		validation := validationReport{
+			Ok: true,
+			Stages: []validationStageResult{
+				{
+					Stage:       "runtime",
+					Ok:          true,
+					Diagnostics: append(diagnostics, diagnostic{Code: "flogo.run_comparison.ready", Message: "Run comparison inputs are valid and ready to compare.", Severity: "info"}),
+				},
+			},
+			Summary:   "Run comparison inputs are valid.",
+			Artifacts: []map[string]any{},
+		}
+		return runComparisonResponse{Validation: &validation}
+	}
+
+	result := runComparisonResult{
+		Left: runComparisonArtifactRef{
+			ArtifactID:    left.ArtifactID,
+			Kind:          left.Kind,
+			SummaryStatus: left.SummaryStatus,
+			FlowID:        left.FlowID,
+		},
+		Right: runComparisonArtifactRef{
+			ArtifactID:    right.ArtifactID,
+			Kind:          right.Kind,
+			SummaryStatus: right.SummaryStatus,
+			FlowID:        right.FlowID,
+		},
+		Summary: runComparisonSummaryDiff{
+			StatusChanged:   left.SummaryStatus != right.SummaryStatus,
+			InputDiff:       createRunComparisonValueDiff(left.Input, right.Input),
+			OutputDiff:      createRunComparisonValueDiff(left.Output, right.Output),
+			ErrorDiff:       createRunComparisonValueDiff(emptyStringToNil(left.Error), emptyStringToNil(right.Error)),
+			StepCountDiff:   createRunComparisonValueDiff(left.StepCount, right.StepCount),
+			DiagnosticDiffs: buildRunComparisonSummaryDiagnostics(left, right, request.Compare.IncludeDiagnostics),
+		},
+		Steps:       compareRunSteps(left, right, request.Compare),
+		Diagnostics: diagnostics,
+	}
+
+	return runComparisonResponse{
+		Result: &result,
+	}
+}
+
+func normalizeComparableRun(artifact comparableRunArtifactInput) comparableRun {
+	if artifact.Kind == "run_trace" {
+		tracePayload, _ := artifact.Payload["trace"].(map[string]any)
+		if tracePayload == nil {
+			fail(fmt.Sprintf("artifact %q does not contain a trace payload", artifact.ArtifactID))
+		}
+		trace := parseRunTrace(tracePayload)
+		return comparableRun{
+			ArtifactID:    artifact.ArtifactID,
+			Kind:          artifact.Kind,
+			FlowID:        trace.FlowID,
+			SummaryStatus: trace.Summary.Status,
+			Input:         cloneStringAnyMap(trace.Summary.Input),
+			Output:        cloneStringAnyMap(trace.Summary.Output),
+			Error:         trace.Summary.Error,
+			StepCount:     trace.Summary.StepCount,
+			Diagnostics:   dedupeDiagnostics(append(cloneDiagnostics(trace.Summary.Diagnostics), trace.Diagnostics...)),
+			Steps:         mapComparableRunSteps(trace.Steps),
+		}
+	}
+
+	resultPayload, _ := artifact.Payload["result"].(map[string]any)
+	if resultPayload == nil {
+		fail(fmt.Sprintf("artifact %q does not contain a replay result payload", artifact.ArtifactID))
+	}
+	replay := parseReplayResult(resultPayload)
+	input := cloneStringAnyMap(replay.Summary.EffectiveInput)
+	output := map[string]any{}
+	flowID := replay.Summary.FlowID
+	summaryStatus := replay.Summary.Status
+	stepCount := 0
+	diagnostics := cloneDiagnostics(replay.Summary.Diagnostics)
+	steps := []comparableRunStep{}
+	errorValue := ""
+	if replay.Trace != nil {
+		input = cloneStringAnyMap(replay.Trace.Summary.Input)
+		output = cloneStringAnyMap(replay.Trace.Summary.Output)
+		flowID = replay.Trace.FlowID
+		summaryStatus = replay.Trace.Summary.Status
+		stepCount = replay.Trace.Summary.StepCount
+		errorValue = replay.Trace.Summary.Error
+		diagnostics = append(diagnostics, replay.Trace.Summary.Diagnostics...)
+		diagnostics = append(diagnostics, replay.Trace.Diagnostics...)
+		steps = mapComparableRunSteps(replay.Trace.Steps)
+	}
+	return comparableRun{
+		ArtifactID:    artifact.ArtifactID,
+		Kind:          artifact.Kind,
+		FlowID:        flowID,
+		SummaryStatus: summaryStatus,
+		Input:         input,
+		Output:        output,
+		Error:         errorValue,
+		StepCount:     stepCount,
+		Diagnostics:   dedupeDiagnostics(diagnostics),
+		Steps:         steps,
+		ReplaySummary: &replay.Summary,
+	}
+}
+
+func mapComparableRunSteps(steps []runTraceTaskStep) []comparableRunStep {
+	items := make([]comparableRunStep, 0, len(steps))
+	for _, step := range steps {
+		items = append(items, comparableRunStep{
+			TaskID:        step.TaskID,
+			Status:        step.Status,
+			Input:         cloneStringAnyMap(step.Input),
+			Output:        cloneStringAnyMap(step.Output),
+			FlowState:     cloneStringAnyMap(step.FlowState),
+			ActivityState: cloneStringAnyMap(step.ActivityState),
+			Diagnostics:   cloneDiagnostics(step.Diagnostics),
+		})
+	}
+	return items
+}
+
+func buildRunComparisonSummaryDiagnostics(left, right comparableRun, includeDiagnostics bool) []diagnostic {
+	diagnostics := []diagnostic{}
+	if !includeDiagnostics {
+		return diagnostics
+	}
+	if !runComparisonValuesEqual(left.Diagnostics, right.Diagnostics) {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.run_comparison.summary_diagnostics_changed",
+			Message:  "Runtime diagnostics differ between the compared runs.",
+			Severity: "info",
+			Details: map[string]any{
+				"left":  left.Diagnostics,
+				"right": right.Diagnostics,
+			},
+		})
+	}
+	if left.ReplaySummary != nil && right.ReplaySummary != nil && left.ReplaySummary.InputSource != right.ReplaySummary.InputSource {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.run_comparison.replay_input_source_changed",
+			Message:  "Replay input sources differ between the compared runs.",
+			Severity: "info",
+			Details: map[string]any{
+				"left":  left.ReplaySummary.InputSource,
+				"right": right.ReplaySummary.InputSource,
+			},
+		})
+	}
+	if left.ReplaySummary != nil && right.ReplaySummary != nil && left.ReplaySummary.OverridesApplied != right.ReplaySummary.OverridesApplied {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.run_comparison.replay_overrides_changed",
+			Message:  "Replay override usage differs between the compared runs.",
+			Severity: "info",
+			Details: map[string]any{
+				"left":  left.ReplaySummary.OverridesApplied,
+				"right": right.ReplaySummary.OverridesApplied,
+			},
+		})
+	}
+	return diagnostics
+}
+
+func compareRunSteps(left, right comparableRun, options runComparisonOptions) []runComparisonStepDiff {
+	leftSteps := map[string]comparableRunStep{}
+	rightSteps := map[string]comparableRunStep{}
+	taskIDs := map[string]struct{}{}
+	for _, step := range left.Steps {
+		leftSteps[step.TaskID] = step
+		taskIDs[step.TaskID] = struct{}{}
+	}
+	for _, step := range right.Steps {
+		rightSteps[step.TaskID] = step
+		taskIDs[step.TaskID] = struct{}{}
+	}
+
+	keys := make([]string, 0, len(taskIDs))
+	for taskID := range taskIDs {
+		keys = append(keys, taskID)
+	}
+	sort.Strings(keys)
+
+	results := make([]runComparisonStepDiff, 0, len(keys))
+	for _, taskID := range keys {
+		leftStep, hasLeft := leftSteps[taskID]
+		rightStep, hasRight := rightSteps[taskID]
+		changeKind := "changed"
+		switch {
+		case !hasLeft:
+			changeKind = "added"
+		case !hasRight:
+			changeKind = "removed"
+		case runComparisonValuesEqual(leftStep, rightStep):
+			changeKind = "same"
+		}
+		diagnosticDiffs := []diagnostic{}
+		if options.IncludeDiagnostics && hasLeft && hasRight && !runComparisonValuesEqual(leftStep.Diagnostics, rightStep.Diagnostics) {
+			diagnosticDiffs = append(diagnosticDiffs, diagnostic{
+				Code:     "flogo.run_comparison.step_diagnostics_changed",
+				Message:  fmt.Sprintf("Diagnostics differ for task %q.", taskID),
+				Severity: "info",
+				Details: map[string]any{
+					"left":  leftStep.Diagnostics,
+					"right": rightStep.Diagnostics,
+				},
+			})
+		}
+
+		diff := runComparisonStepDiff{
+			TaskID:          taskID,
+			DiagnosticDiffs: diagnosticDiffs,
+			ChangeKind:      changeKind,
+		}
+		if hasLeft {
+			diff.LeftStatus = leftStep.Status
+		}
+		if hasRight {
+			diff.RightStatus = rightStep.Status
+		}
+		if options.IncludeStepInputs {
+			value := createRunComparisonValueDiff(zeroMap(leftStep.Input), zeroMap(rightStep.Input))
+			diff.InputDiff = &value
+		}
+		if options.IncludeStepOutputs {
+			value := createRunComparisonValueDiff(zeroMap(leftStep.Output), zeroMap(rightStep.Output))
+			diff.OutputDiff = &value
+		}
+		if options.IncludeFlowState {
+			value := createRunComparisonValueDiff(zeroMap(leftStep.FlowState), zeroMap(rightStep.FlowState))
+			diff.FlowStateDiff = &value
+		}
+		if options.IncludeActivityState {
+			value := createRunComparisonValueDiff(zeroMap(leftStep.ActivityState), zeroMap(rightStep.ActivityState))
+			diff.ActivityStateDiff = &value
+		}
+		results = append(results, diff)
+	}
+	return results
+}
+
+func createRunComparisonValueDiff(left, right any) runComparisonValueDiff {
+	switch {
+	case left == nil && right == nil:
+		return runComparisonValueDiff{Kind: "same"}
+	case left == nil:
+		return runComparisonValueDiff{Kind: "added", Right: right}
+	case right == nil:
+		return runComparisonValueDiff{Kind: "removed", Left: left}
+	case runComparisonValuesEqual(left, right):
+		return runComparisonValueDiff{Kind: "same", Left: left, Right: right}
+	default:
+		return runComparisonValueDiff{Kind: "changed", Left: left, Right: right}
+	}
+}
+
+func runComparisonValuesEqual(left, right any) bool {
+	return reflect.DeepEqual(normalizeRunComparisonValue(left), normalizeRunComparisonValue(right))
+}
+
+func normalizeRunComparisonValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		normalized := map[string]any{}
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			normalized[key] = normalizeRunComparisonValue(typed[key])
+		}
+		return normalized
+	case []any:
+		items := make([]any, 0, len(typed))
+		for _, item := range typed {
+			items = append(items, normalizeRunComparisonValue(item))
+		}
+		return items
+	default:
+		return value
+	}
+}
+
+func zeroMap(value map[string]any) any {
+	if len(value) == 0 {
+		return nil
+	}
+	return value
+}
+
+func emptyStringToNil(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
+}
+
+func parseRunTrace(value map[string]any) runTrace {
+	contents, err := json.Marshal(value)
+	if err != nil {
+		fail(err.Error())
+	}
+	var trace runTrace
+	if err := json.Unmarshal(contents, &trace); err != nil {
+		fail(err.Error())
+	}
+	return trace
+}
+
+func parseReplayResult(value map[string]any) replayResult {
+	contents, err := json.Marshal(value)
+	if err != nil {
+		fail(err.Error())
+	}
+	var result replayResult
+	if err := json.Unmarshal(contents, &result); err != nil {
+		fail(err.Error())
+	}
+	return result
+}
+
+func cloneDiagnostics(values []diagnostic) []diagnostic {
+	if len(values) == 0 {
+		return []diagnostic{}
+	}
+	items := make([]diagnostic, 0, len(values))
+	for _, item := range values {
+		items = append(items, item)
+	}
+	return items
+}
+
+func replayInputSource(request replayRequest) string {
+	if strings.TrimSpace(request.TraceArtifactID) != "" {
+		return "trace_artifact"
+	}
+	return "explicit_input"
+}
+
+func mergeReplayInput(baseInput, overrides map[string]any) map[string]any {
+	merged := cloneStringAnyMap(baseInput)
+	for key, value := range overrides {
+		merged[key] = mergeReplayValue(merged[key], value)
+	}
+	return merged
+}
+
+func mergeReplayValue(base, override any) any {
+	switch overrideValue := override.(type) {
+	case map[string]any:
+		baseMap, _ := base.(map[string]any)
+		result := cloneStringAnyMap(baseMap)
+		for key, value := range overrideValue {
+			result[key] = mergeReplayValue(result[key], value)
+		}
+		return result
+	case []any:
+		items := make([]any, 0, len(overrideValue))
+		for _, item := range overrideValue {
+			items = append(items, mergeReplayValue(nil, item))
+		}
+		return items
+	default:
+		return override
+	}
+}
+
+func preflightRunTrace(app flogoApp, request runTraceRequest) validationReport {
+	contracts := inferFlowContracts(app)
+	var target *flowContract
+	for _, contract := range contracts.Contracts {
+		if contract.FlowID == request.FlowID {
+			contractCopy := contract
+			target = &contractCopy
+			break
+		}
+	}
+
+	diagnostics := []diagnostic{}
+	if target == nil {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.run_trace.unknown_flow",
+			Message:  fmt.Sprintf("Unable to locate flow %q", request.FlowID),
+			Severity: "error",
+			Path:     request.FlowID,
+		})
+	} else {
+		for _, input := range target.Inputs {
+			if input.Required {
+				if _, ok := request.SampleInput[input.Name]; !ok {
+					diagnostics = append(diagnostics, diagnostic{
+						Code:     "flogo.run_trace.missing_required_input",
+						Message:  fmt.Sprintf("Flow %q requires input %q for trace execution", request.FlowID, input.Name),
+						Severity: "error",
+						Path:     "sampleInput." + input.Name,
+					})
+				}
+			}
+		}
+	}
+
+	if len(diagnostics) == 0 {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.run_trace.ready",
+			Message:  fmt.Sprintf("Flow %q can be traced with the provided sample input", request.FlowID),
+			Severity: "info",
+			Path:     request.FlowID,
+		})
+	}
+
+	ok := true
+	for _, item := range diagnostics {
+		if item.Severity == "error" {
+			ok = false
+			break
+		}
+	}
+
+	return validationReport{
+		Ok: ok,
+		Stages: []validationStageResult{
+			{
+				Stage:       "runtime",
+				Ok:          ok,
+				Diagnostics: dedupeDiagnostics(diagnostics),
+			},
+		},
+		Summary: func() string {
+			if ok {
+				return fmt.Sprintf("Run trace plan is valid for flow %s.", request.FlowID)
+			}
+			return fmt.Sprintf("Run trace plan is invalid for flow %s.", request.FlowID)
+		}(),
+		Artifacts: []map[string]any{},
+	}
+}
+
+func buildPropertyState(app flogoApp) map[string]any {
+	properties := map[string]any{}
+	for _, property := range app.Properties {
+		name := stringValue(property["name"])
+		if name == "" {
+			continue
+		}
+		properties[name] = makeJSONSafe(property["value"])
+	}
+	return properties
+}
+
+func buildTraceTaskOrder(flow flogoFlow) []flogoTask {
+	if len(flow.Links) == 0 {
+		return append([]flogoTask{}, flow.Tasks...)
+	}
+
+	taskIndex := map[string]flogoTask{}
+	inDegree := map[string]int{}
+	outgoing := map[string][]map[string]any{}
+	for _, task := range flow.Tasks {
+		taskIndex[task.ID] = task
+		inDegree[task.ID] = 0
+	}
+	for _, link := range flow.Links {
+		from := stringValue(link["from"])
+		to := stringValue(link["to"])
+		if from == "" || to == "" {
+			continue
+		}
+		outgoing[from] = append(outgoing[from], link)
+		inDegree[to]++
+	}
+
+	queue := []string{}
+	for _, task := range flow.Tasks {
+		if inDegree[task.ID] == 0 {
+			queue = append(queue, task.ID)
+		}
+	}
+	order := []flogoTask{}
+	seen := map[string]bool{}
+	for len(queue) > 0 {
+		currentID := queue[0]
+		queue = queue[1:]
+		if seen[currentID] {
+			continue
+		}
+		seen[currentID] = true
+		order = append(order, taskIndex[currentID])
+		for _, link := range outgoing[currentID] {
+			to := stringValue(link["to"])
+			inDegree[to]--
+			if inDegree[to] <= 0 {
+				queue = append(queue, to)
+			}
+		}
+	}
+	if len(order) == len(flow.Tasks) {
+		return order
+	}
+	return append([]flogoTask{}, flow.Tasks...)
+}
+
+func buildTraceTaskIndex(flow flogoFlow) map[string]flogoTask {
+	index := make(map[string]flogoTask, len(flow.Tasks))
+	for _, task := range flow.Tasks {
+		index[task.ID] = task
+	}
+	return index
+}
+
+func nextTraceTaskID(flow flogoFlow, current flogoTask, failed bool) string {
+	outgoing := []map[string]any{}
+	for _, link := range flow.Links {
+		if stringValue(link["from"]) == current.ID {
+			outgoing = append(outgoing, link)
+		}
+	}
+	if len(outgoing) == 0 {
+		for index, task := range flow.Tasks {
+			if task.ID == current.ID && index+1 < len(flow.Tasks) {
+				return flow.Tasks[index+1].ID
+			}
+		}
+		return ""
+	}
+
+	for _, link := range outgoing {
+		linkType := strings.ToLower(stringValue(link["type"]))
+		if linkType == "expression" && matchesTraceLinkCondition(stringValue(link["value"]), current.ID, failed) {
+			return stringValue(link["to"])
+		}
+	}
+	for _, link := range outgoing {
+		linkType := strings.ToLower(stringValue(link["type"]))
+		if linkType == "" || linkType == "dependency" {
+			return stringValue(link["to"])
+		}
+	}
+	return ""
+}
+
+func matchesTraceLinkCondition(condition string, taskID string, failed bool) bool {
+	trimmed := strings.TrimSpace(condition)
+	if trimmed == "" {
+		return false
+	}
+	errorNilExpr := fmt.Sprintf("=$activity[%s].error == nil", taskID)
+	errorNotNilExpr := fmt.Sprintf("=$activity[%s].error != nil", taskID)
+	switch trimmed {
+	case errorNilExpr:
+		return !failed
+	case errorNotNilExpr:
+		return failed
+	default:
+		return false
+	}
+}
+
+func evaluateTaskOutput(task flogoTask, flowState map[string]any, activityState map[string]map[string]any, propertyState map[string]any) map[string]any {
+	output := map[string]any{}
+	for key, value := range task.Output {
+		output[key] = makeJSONSafe(resolveValue(value, mappingPreviewContext{
+			Flow:     flowState,
+			Activity: activityState,
+			Env:      map[string]any{},
+			Property: propertyState,
+			Trigger:  map[string]any{},
+		}))
+	}
+	return output
+}
+
+func makeJSONSafe(value any) any {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case string, bool, float64, float32, int, int32, int64, uint, uint32, uint64:
+		return typed
+	case map[string]any:
+		result := map[string]any{}
+		for key, nested := range typed {
+			result[key] = makeJSONSafe(nested)
+		}
+		return result
+	case []any:
+		result := make([]any, 0, len(typed))
+		for _, nested := range typed {
+			result = append(result, makeJSONSafe(nested))
+		}
+		return result
+	default:
+		rv := reflect.ValueOf(value)
+		if !rv.IsValid() {
+			return nil
+		}
+		if rv.Kind() == reflect.Map {
+			result := map[string]any{}
+			for _, key := range rv.MapKeys() {
+				result[fmt.Sprint(key.Interface())] = makeJSONSafe(rv.MapIndex(key).Interface())
+			}
+			return result
+		}
+		if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+			result := make([]any, 0, rv.Len())
+			for index := 0; index < rv.Len(); index++ {
+				result = append(result, makeJSONSafe(rv.Index(index).Interface()))
+			}
+			return result
+		}
+		return fmt.Sprintf("<non-serializable:%T>", value)
+	}
+}
+
+func nowRFC3339() string {
+	return time.Now().UTC().Format(time.RFC3339Nano)
+}
+
+type triggerBindingOperation struct {
+	NextApp      flogoApp
+	Plan         triggerBindingPlan
+	PatchSummary string
+}
+
+type triggerBindingFailure struct {
+	Message     string
+	Diagnostics []diagnostic
+}
+
+func (failure triggerBindingFailure) Error() string {
+	return failure.Message
+}
+
+func bindTrigger(app flogoApp, request triggerBindingRequest) triggerBindingResponse {
+	operation, err := buildTriggerBindingOperation(app, request)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	response := triggerBindingResponse{
+		Result: triggerBindingResult{
+			Applied:      !request.ValidateOnly,
+			Plan:         operation.Plan,
+			PatchSummary: operation.PatchSummary,
+			Validation: &simpleValidationReport{
+				Ok:     true,
+				Stages: []map[string]any{},
+			},
+		},
+	}
+
+	if !request.ValidateOnly {
+		response.Result.App = buildBindableAppPayload(operation.NextApp)
+	}
+
+	return response
+}
+
+func buildTriggerBindingOperation(app flogoApp, request triggerBindingRequest) (triggerBindingOperation, error) {
+	contracts := inferFlowContracts(app)
+	var flow flowContract
+	found := false
+	for _, candidate := range contracts.Contracts {
+		if candidate.FlowID == request.FlowID {
+			flow = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		return triggerBindingOperation{}, triggerBindingFailure{
+			Message: fmt.Sprintf("Flow %q was not found", request.FlowID),
+			Diagnostics: []diagnostic{{
+				Code:     "flogo.trigger_binding.unknown_flow",
+				Message:  fmt.Sprintf("Flow %q was not found", request.FlowID),
+				Severity: "error",
+				Path:     request.FlowID,
+			}},
+		}
+	}
+
+	triggerAlias, triggerImportRef := resolveTriggerImportForBinding(app, request.Profile.Kind)
+	triggerRef := "#" + triggerAlias
+	triggerID := valueOrFallback(strings.TrimSpace(request.TriggerID), buildTriggerID(request.FlowID, request.Profile))
+	handlerName := valueOrFallback(strings.TrimSpace(request.HandlerName), buildTriggerHandlerName(request.FlowID, request.Profile))
+	flowRef := "#flow:" + request.FlowID
+
+	existing := findExistingTriggerBinding(app, flowRef, request.Profile, triggerImportRef)
+	if existing != nil && !request.ReplaceExisting {
+		return triggerBindingOperation{}, triggerBindingFailure{
+			Message: fmt.Sprintf("A %s binding for flow %q already exists", request.Profile.Kind, request.FlowID),
+			Diagnostics: []diagnostic{{
+				Code:     "flogo.trigger_binding.duplicate",
+				Message:  fmt.Sprintf("A %s trigger binding for flow %q already exists", request.Profile.Kind, request.FlowID),
+				Severity: "error",
+				Path:     "triggers." + existing.Trigger.ID,
+			}},
+		}
+	}
+
+	mappings := generateTriggerBindingMappings(flow, request.Profile)
+	errors := []diagnostic{}
+	warnings := []diagnostic{}
+	for _, item := range mappings.Diagnostics {
+		if item.Severity == "error" {
+			errors = append(errors, item)
+		} else {
+			warnings = append(warnings, item)
+		}
+	}
+	if len(errors) > 0 {
+		return triggerBindingOperation{}, triggerBindingFailure{
+			Message:     errors[0].Message,
+			Diagnostics: errors,
+		}
+	}
+
+	trigger := createBindingTrigger(triggerID, triggerRef, handlerName, request.FlowID, request.Profile, mappings)
+	nextApp := applyTriggerBindingPlanToApp(app, triggerAlias, triggerImportRef, trigger, existing)
+
+	plan := triggerBindingPlan{
+		FlowID:      request.FlowID,
+		Profile:     request.Profile,
+		TriggerRef:  triggerRef,
+		TriggerID:   triggerID,
+		HandlerName: handlerName,
+		GeneratedMapping: triggerBindingMappings{
+			Input:  cloneStringAnyMap(mappings.Input),
+			Output: cloneStringAnyMap(mappings.Output),
+		},
+		Trigger:     buildTriggerPayload(trigger),
+		Diagnostics: []diagnostic{},
+		Warnings:    dedupeDiagnostics(warnings),
+	}
+
+	return triggerBindingOperation{
+		NextApp:      nextApp,
+		Plan:         plan,
+		PatchSummary: summarizeTriggerBindingPatch(app, nextApp, trigger.ID),
+	}, nil
+}
+
+func extractSubflow(app flogoApp, request subflowExtractionRequest) subflowExtractionResponse {
+	operation, err := buildSubflowExtractionOperation(app, request)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	response := subflowExtractionResponse{
+		Result: subflowExtractionResult{
+			Applied:      !request.ValidateOnly,
+			Plan:         operation.Plan,
+			PatchSummary: operation.PatchSummary,
+			Validation: &simpleValidationReport{
+				Ok:     true,
+				Stages: []map[string]any{},
+			},
+		},
+	}
+	if !request.ValidateOnly {
+		response.Result.App = buildBindableAppPayload(operation.NextApp)
+	}
+	return response
+}
+
+func inlineSubflow(app flogoApp, request subflowInliningRequest) subflowInliningResponse {
+	operation, err := buildSubflowInliningOperation(app, request)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	response := subflowInliningResponse{
+		Result: subflowInliningResult{
+			Applied:      !request.ValidateOnly,
+			Plan:         operation.Plan,
+			PatchSummary: operation.PatchSummary,
+			Validation: &simpleValidationReport{
+				Ok:     true,
+				Stages: []map[string]any{},
+			},
+		},
+	}
+	if !request.ValidateOnly {
+		response.Result.App = buildBindableAppPayload(operation.NextApp)
+	}
+	return response
+}
+
+type subflowExtractionOperation struct {
+	NextApp      flogoApp
+	Plan         subflowExtractionPlan
+	PatchSummary string
+}
+
+type subflowInliningOperation struct {
+	NextApp      flogoApp
+	Plan         subflowInliningPlan
+	PatchSummary string
+}
+
+type subflowFailure struct {
+	Message string
+}
+
+func (failure subflowFailure) Error() string {
+	return failure.Message
+}
+
+type iteratorSynthesisOperation struct {
+	NextApp      flogoApp
+	Plan         iteratorSynthesisPlan
+	PatchSummary string
+}
+
+type retryPolicyOperation struct {
+	NextApp      flogoApp
+	Plan         retryPolicyPlan
+	PatchSummary string
+}
+
+type doWhileSynthesisOperation struct {
+	NextApp      flogoApp
+	Plan         doWhileSynthesisPlan
+	PatchSummary string
+}
+
+type errorPathTemplateOperation struct {
+	NextApp      flogoApp
+	Plan         errorPathTemplatePlan
+	PatchSummary string
+}
+
+type controlFlowFailure struct {
+	Message string
+}
+
+func (failure controlFlowFailure) Error() string {
+	return failure.Message
+}
+
+func buildSubflowExtractionOperation(app flogoApp, request subflowExtractionRequest) (subflowExtractionOperation, error) {
+	parentFlow, parentIndex := findFlowByID(app, request.FlowID)
+	if parentIndex == -1 {
+		return subflowExtractionOperation{}, subflowFailure{Message: fmt.Sprintf("Flow %q was not found", request.FlowID)}
+	}
+	if len(parentFlow.Links) > 0 {
+		return subflowExtractionOperation{}, subflowFailure{Message: fmt.Sprintf("Flow %q uses links or branching that subflow extraction does not yet support", request.FlowID)}
+	}
+
+	startIndex, endIndex, selectedTasks, selectedTaskIDs, err := resolveSelectedTaskRegion(parentFlow, request.TaskIDs)
+	if err != nil {
+		return subflowExtractionOperation{}, err
+	}
+
+	newFlowID := strings.TrimSpace(request.NewFlowID)
+	if newFlowID == "" {
+		newFlowID = buildExtractedFlowID(parentFlow.ID, selectedTaskIDs)
+	}
+	if newFlowID == parentFlow.ID {
+		return subflowExtractionOperation{}, subflowFailure{Message: fmt.Sprintf("Extracted subflow id %q conflicts with the parent flow", newFlowID)}
+	}
+	if _, existingIndex := findFlowByID(app, newFlowID); existingIndex >= 0 && !request.ReplaceExisting {
+		return subflowExtractionOperation{}, subflowFailure{Message: fmt.Sprintf("Flow %q already exists", newFlowID)}
+	}
+
+	contracts := inferFlowContracts(app)
+	var parentContract *flowContract
+	for _, contract := range contracts.Contracts {
+		if contract.FlowID == parentFlow.ID {
+			contractCopy := contract
+			parentContract = &contractCopy
+			break
+		}
+	}
+
+	inputNames := inferSubflowInputs(parentFlow, startIndex, endIndex)
+	outputNames := inferSubflowOutputs(app, parentFlow, startIndex, endIndex)
+	warnings := []diagnostic{}
+	if len(inputNames) == 0 && len(outputNames) == 0 {
+		warnings = append(warnings, diagnostic{
+			Code:     "flogo.subflow.no_external_contract",
+			Message:  "Selected tasks do not expose clear external inputs or outputs; extraction will create a self-contained subflow",
+			Severity: "warning",
+			Path:     "resources." + parentFlow.ID,
+		})
+	}
+
+	newFlowName := strings.TrimSpace(request.NewFlowName)
+	if newFlowName == "" {
+		newFlowName = buildExtractedFlowName(parentFlow, selectedTasks)
+	}
+	invocationTaskID := createUniqueTaskID(parentFlow, strings.ReplaceAll("subflow_"+slugify(newFlowID), "-", "_"), map[string]bool{})
+	invocation := flogoTask{
+		ID:          invocationTaskID,
+		Name:        newFlowName,
+		ActivityRef: "#flow",
+		Input:       map[string]any{},
+		Output:      map[string]any{},
+		Settings: map[string]any{
+			"flowURI": "res://flow:" + newFlowID,
+		},
+	}
+	for _, name := range inputNames {
+		invocation.Input[name] = "$flow." + name
+	}
+	for _, name := range outputNames {
+		invocation.Output[name] = fmt.Sprintf("$activity[%s].%s", invocationTaskID, name)
+	}
+
+	extractedFlow := flogoFlow{
+		ID:             newFlowID,
+		Name:           newFlowName,
+		MetadataInput:  buildSubflowMetadata(parentContract, inputNames, true),
+		MetadataOutput: buildSubflowMetadata(parentContract, outputNames, false),
+		Tasks:          cloneTasks(selectedTasks),
+		Links:          []map[string]any{},
+	}
+
+	nextApp := applySubflowExtractionToApp(app, parentIndex, startIndex, endIndex, invocation, extractedFlow, request.ReplaceExisting)
+	var newFlowContract flowContract
+	diagnostics := []diagnostic{}
+	if flow, index := findFlowByID(nextApp, newFlowID); index >= 0 {
+		newFlowContract = inferFlowContract(nextApp, flow, &diagnostics)
+	} else {
+		return subflowExtractionOperation{}, subflowFailure{Message: fmt.Sprintf("Unable to infer extracted subflow contract for %q", newFlowID)}
+	}
+
+	plan := subflowExtractionPlan{
+		ParentFlowID:    parentFlow.ID,
+		NewFlowID:       newFlowID,
+		NewFlowName:     newFlowName,
+		SelectedTaskIDs: append([]string{}, selectedTaskIDs...),
+		NewFlowContract: newFlowContract,
+		Invocation: subflowInvocation{
+			ParentFlowID: parentFlow.ID,
+			TaskID:       invocation.ID,
+			ActivityRef:  invocation.ActivityRef,
+			Input:        cloneStringAnyMap(invocation.Input),
+			Output:       cloneStringAnyMap(invocation.Output),
+			Settings:     cloneStringAnyMap(invocation.Settings),
+		},
+		Diagnostics: []diagnostic{},
+		Warnings:    dedupeDiagnostics(warnings),
+	}
+
+	return subflowExtractionOperation{
+		NextApp:      nextApp,
+		Plan:         plan,
+		PatchSummary: summarizeSubflowPatch(app, nextApp, "extract"),
+	}, nil
+}
+
+func buildSubflowInliningOperation(app flogoApp, request subflowInliningRequest) (subflowInliningOperation, error) {
+	parentFlow, parentIndex := findFlowByID(app, request.ParentFlowID)
+	if parentIndex == -1 {
+		return subflowInliningOperation{}, subflowFailure{Message: fmt.Sprintf("Flow %q was not found", request.ParentFlowID)}
+	}
+	if len(parentFlow.Links) > 0 {
+		return subflowInliningOperation{}, subflowFailure{Message: fmt.Sprintf("Flow %q uses links or branching that subflow inlining does not yet support", request.ParentFlowID)}
+	}
+
+	invocationIndex := -1
+	var invocation flogoTask
+	for index, task := range parentFlow.Tasks {
+		if task.ID == request.InvocationTaskID {
+			invocationIndex = index
+			invocation = task
+			break
+		}
+	}
+	if invocationIndex == -1 {
+		return subflowInliningOperation{}, subflowFailure{Message: fmt.Sprintf("Invocation task %q was not found", request.InvocationTaskID)}
+	}
+
+	flowRef := normalizeFlowActionRef(invocation.ActivityRef, stringValue(invocation.Settings["flowURI"]))
+	if !strings.HasPrefix(flowRef, "#flow:") {
+		return subflowInliningOperation{}, subflowFailure{Message: fmt.Sprintf("Task %q is not a flow invocation", request.InvocationTaskID)}
+	}
+	inlinedFlowID := strings.TrimPrefix(flowRef, "#flow:")
+	inlinedFlow, inlinedIndex := findFlowByID(app, inlinedFlowID)
+	if inlinedIndex == -1 {
+		return subflowInliningOperation{}, subflowFailure{Message: fmt.Sprintf("Subflow %q was not found", inlinedFlowID)}
+	}
+	if len(inlinedFlow.Links) > 0 {
+		return subflowInliningOperation{}, subflowFailure{Message: fmt.Sprintf("Subflow %q uses links or branching that subflow inlining does not yet support", inlinedFlowID)}
+	}
+
+	generatedTaskIDs := []string{}
+	usedIDs := map[string]bool{}
+	for _, task := range parentFlow.Tasks {
+		usedIDs[task.ID] = true
+	}
+	inlinedTasks := make([]flogoTask, 0, len(inlinedFlow.Tasks))
+	for _, task := range inlinedFlow.Tasks {
+		generatedID := createUniqueTaskID(parentFlow, request.InvocationTaskID+"__"+task.ID, usedIDs)
+		usedIDs[generatedID] = true
+		generatedTaskIDs = append(generatedTaskIDs, generatedID)
+		inlinedTasks = append(inlinedTasks, flogoTask{
+			ID:          generatedID,
+			Name:        task.Name,
+			Type:        task.Type,
+			ActivityRef: task.ActivityRef,
+			Input:       cloneStringAnyMap(task.Input),
+			Output:      cloneStringAnyMap(task.Output),
+			Settings:    cloneStringAnyMap(task.Settings),
+		})
+	}
+
+	nextApp := applySubflowInliningToApp(app, parentIndex, invocationIndex, inlinedTasks, inlinedFlowID, request.RemoveExtractedFlowIfUnused)
+	warnings := []diagnostic{}
+	if request.RemoveExtractedFlowIfUnused {
+		if _, stillPresent := findFlowByID(nextApp, inlinedFlowID); stillPresent >= 0 {
+			warnings = append(warnings, diagnostic{
+				Code:     "flogo.subflow.unused_extracted_flow",
+				Message:  fmt.Sprintf("Flow %q is still referenced elsewhere and was not removed", inlinedFlowID),
+				Severity: "warning",
+				Path:     "resources." + inlinedFlowID,
+			})
+		}
+	}
+
+	return subflowInliningOperation{
+		NextApp: nextApp,
+		Plan: subflowInliningPlan{
+			ParentFlowID:     parentFlow.ID,
+			InvocationTaskID: request.InvocationTaskID,
+			InlinedFlowID:    inlinedFlowID,
+			GeneratedTaskIDs: generatedTaskIDs,
+			Diagnostics:      []diagnostic{},
+			Warnings:         warnings,
+		},
+		PatchSummary: summarizeSubflowPatch(app, nextApp, "inline"),
+	}, nil
+}
+
+func addIterator(app flogoApp, request iteratorSynthesisRequest) iteratorSynthesisResponse {
+	operation, err := buildIteratorSynthesisOperation(app, request)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	response := iteratorSynthesisResponse{
+		Result: iteratorSynthesisResult{
+			Applied:      !request.ValidateOnly,
+			Plan:         operation.Plan,
+			PatchSummary: operation.PatchSummary,
+			Validation: &simpleValidationReport{
+				Ok:     true,
+				Stages: []map[string]any{},
+			},
+		},
+	}
+	if !request.ValidateOnly {
+		response.Result.App = buildBindableAppPayload(operation.NextApp)
+	}
+	return response
+}
+
+func addRetryPolicy(app flogoApp, request retryPolicyRequest) retryPolicyResponse {
+	operation, err := buildRetryPolicyOperation(app, request)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	response := retryPolicyResponse{
+		Result: retryPolicyResult{
+			Applied:      !request.ValidateOnly,
+			Plan:         operation.Plan,
+			PatchSummary: operation.PatchSummary,
+			Validation: &simpleValidationReport{
+				Ok:     true,
+				Stages: []map[string]any{},
+			},
+		},
+	}
+	if !request.ValidateOnly {
+		response.Result.App = buildBindableAppPayload(operation.NextApp)
+	}
+	return response
+}
+
+func addDoWhile(app flogoApp, request doWhileSynthesisRequest) doWhileSynthesisResponse {
+	operation, err := buildDoWhileSynthesisOperation(app, request)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	response := doWhileSynthesisResponse{
+		Result: doWhileSynthesisResult{
+			Applied:      !request.ValidateOnly,
+			Plan:         operation.Plan,
+			PatchSummary: operation.PatchSummary,
+			Validation: &simpleValidationReport{
+				Ok:     true,
+				Stages: []map[string]any{},
+			},
+		},
+	}
+	if !request.ValidateOnly {
+		response.Result.App = buildBindableAppPayload(operation.NextApp)
+	}
+	return response
+}
+
+func addErrorPath(app flogoApp, request errorPathTemplateRequest) errorPathTemplateResponse {
+	operation, err := buildErrorPathTemplateOperation(app, request)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	response := errorPathTemplateResponse{
+		Result: errorPathTemplateResult{
+			Applied:      !request.ValidateOnly,
+			Plan:         operation.Plan,
+			PatchSummary: operation.PatchSummary,
+			Validation: &simpleValidationReport{
+				Ok:     true,
+				Stages: []map[string]any{},
+			},
+		},
+	}
+	if !request.ValidateOnly {
+		response.Result.App = buildBindableAppPayload(operation.NextApp)
+	}
+	return response
+}
+
+func buildIteratorSynthesisOperation(app flogoApp, request iteratorSynthesisRequest) (iteratorSynthesisOperation, error) {
+	flow, flowIndex := findFlowByID(app, request.FlowID)
+	if flowIndex == -1 {
+		return iteratorSynthesisOperation{}, controlFlowFailure{Message: fmt.Sprintf("Flow %q was not found", request.FlowID)}
+	}
+	task, taskIndex := findTaskInFlow(flow, request.TaskID)
+	if taskIndex == -1 {
+		return iteratorSynthesisOperation{}, controlFlowFailure{Message: fmt.Sprintf("Task %q was not found in flow %q", request.TaskID, request.FlowID)}
+	}
+	if strings.TrimSpace(request.IterateExpr) == "" {
+		return iteratorSynthesisOperation{}, controlFlowFailure{Message: "Iterator synthesis requires a non-empty iterate expression"}
+	}
+	if strings.TrimSpace(task.ActivityRef) == "" {
+		return iteratorSynthesisOperation{}, controlFlowFailure{Message: fmt.Sprintf("Task %q cannot be converted to an iterator because it has no activityRef", request.TaskID)}
+	}
+	taskType := normalizeTaskType(task.Type)
+	if taskType == "doWhile" {
+		return iteratorSynthesisOperation{}, controlFlowFailure{Message: fmt.Sprintf("Task %q is already a doWhile task and cannot also be an iterator in this slice", request.TaskID)}
+	}
+	if taskType == "iterator" && !request.ReplaceExisting {
+		return iteratorSynthesisOperation{}, controlFlowFailure{Message: fmt.Sprintf("Task %q already has iterator settings", request.TaskID)}
+	}
+
+	nextApp := cloneFlogoApp(app)
+	nextTask := nextApp.Resources[flowIndex].Tasks[taskIndex]
+	nextTask.Type = "iterator"
+	nextTask.Settings = cloneStringAnyMap(task.Settings)
+	nextTask.Settings["iterate"] = strings.TrimSpace(request.IterateExpr)
+	if request.Accumulate != nil {
+		nextTask.Settings["accumulate"] = *request.Accumulate
+	}
+	nextApp.Resources[flowIndex].Tasks[taskIndex] = nextTask
+
+	return iteratorSynthesisOperation{
+		NextApp: nextApp,
+		Plan: iteratorSynthesisPlan{
+			FlowID:       request.FlowID,
+			TaskID:       request.TaskID,
+			NextTaskType: "iterator",
+			UpdatedSetts: cloneStringAnyMap(nextTask.Settings),
+			Diagnostics:  []diagnostic{},
+			Warnings:     []diagnostic{},
+		},
+		PatchSummary: fmt.Sprintf("Converted task %q in flow %q to iterator", request.TaskID, request.FlowID),
+	}, nil
+}
+
+func buildRetryPolicyOperation(app flogoApp, request retryPolicyRequest) (retryPolicyOperation, error) {
+	flow, flowIndex := findFlowByID(app, request.FlowID)
+	if flowIndex == -1 {
+		return retryPolicyOperation{}, controlFlowFailure{Message: fmt.Sprintf("Flow %q was not found", request.FlowID)}
+	}
+	task, taskIndex := findTaskInFlow(flow, request.TaskID)
+	if taskIndex == -1 {
+		return retryPolicyOperation{}, controlFlowFailure{Message: fmt.Sprintf("Task %q was not found in flow %q", request.TaskID, request.FlowID)}
+	}
+	if request.Count <= 0 {
+		return retryPolicyOperation{}, controlFlowFailure{Message: "Retry policy count must be a positive integer"}
+	}
+	if request.IntervalMs < 0 {
+		return retryPolicyOperation{}, controlFlowFailure{Message: "Retry policy interval must be a non-negative integer"}
+	}
+	if strings.TrimSpace(task.ActivityRef) == "" {
+		return retryPolicyOperation{}, controlFlowFailure{Message: fmt.Sprintf("Task %q cannot accept retryOnError because it has no activityRef", request.TaskID)}
+	}
+	if _, exists := task.Settings["retryOnError"]; exists && !request.ReplaceExisting {
+		return retryPolicyOperation{}, controlFlowFailure{Message: fmt.Sprintf("Task %q already has retryOnError settings", request.TaskID)}
+	}
+
+	nextApp := cloneFlogoApp(app)
+	nextTask := nextApp.Resources[flowIndex].Tasks[taskIndex]
+	nextTask.Settings = cloneStringAnyMap(task.Settings)
+	nextTask.Settings["retryOnError"] = map[string]any{
+		"count":    request.Count,
+		"interval": request.IntervalMs,
+	}
+	nextApp.Resources[flowIndex].Tasks[taskIndex] = nextTask
+
+	return retryPolicyOperation{
+		NextApp: nextApp,
+		Plan: retryPolicyPlan{
+			FlowID: request.FlowID,
+			TaskID: request.TaskID,
+			RetryOnError: map[string]any{
+				"count":    request.Count,
+				"interval": request.IntervalMs,
+			},
+			Diagnostics: []diagnostic{},
+			Warnings:    []diagnostic{},
+		},
+		PatchSummary: fmt.Sprintf("Added retryOnError to task %q in flow %q", request.TaskID, request.FlowID),
+	}, nil
+}
+
+func buildDoWhileSynthesisOperation(app flogoApp, request doWhileSynthesisRequest) (doWhileSynthesisOperation, error) {
+	flow, flowIndex := findFlowByID(app, request.FlowID)
+	if flowIndex == -1 {
+		return doWhileSynthesisOperation{}, controlFlowFailure{Message: fmt.Sprintf("Flow %q was not found", request.FlowID)}
+	}
+	task, taskIndex := findTaskInFlow(flow, request.TaskID)
+	if taskIndex == -1 {
+		return doWhileSynthesisOperation{}, controlFlowFailure{Message: fmt.Sprintf("Task %q was not found in flow %q", request.TaskID, request.FlowID)}
+	}
+	if strings.TrimSpace(request.Condition) == "" {
+		return doWhileSynthesisOperation{}, controlFlowFailure{Message: "DoWhile synthesis requires a non-empty condition"}
+	}
+	if strings.TrimSpace(task.ActivityRef) == "" {
+		return doWhileSynthesisOperation{}, controlFlowFailure{Message: fmt.Sprintf("Task %q cannot be converted to doWhile because it has no activityRef", request.TaskID)}
+	}
+	taskType := normalizeTaskType(task.Type)
+	if taskType == "iterator" {
+		return doWhileSynthesisOperation{}, controlFlowFailure{Message: fmt.Sprintf("Task %q is already an iterator task and cannot also be a doWhile task in this slice", request.TaskID)}
+	}
+	if taskType == "doWhile" && !request.ReplaceExisting {
+		return doWhileSynthesisOperation{}, controlFlowFailure{Message: fmt.Sprintf("Task %q already has doWhile settings", request.TaskID)}
+	}
+
+	nextApp := cloneFlogoApp(app)
+	nextTask := nextApp.Resources[flowIndex].Tasks[taskIndex]
+	nextTask.Type = "doWhile"
+	nextTask.Settings = cloneStringAnyMap(task.Settings)
+	nextTask.Settings["condition"] = strings.TrimSpace(request.Condition)
+	if request.DelayMs != nil {
+		nextTask.Settings["delay"] = *request.DelayMs
+	}
+	if request.Accumulate != nil {
+		nextTask.Settings["accumulate"] = *request.Accumulate
+	}
+	nextApp.Resources[flowIndex].Tasks[taskIndex] = nextTask
+
+	return doWhileSynthesisOperation{
+		NextApp: nextApp,
+		Plan: doWhileSynthesisPlan{
+			FlowID:       request.FlowID,
+			TaskID:       request.TaskID,
+			NextTaskType: "doWhile",
+			UpdatedSetts: cloneStringAnyMap(nextTask.Settings),
+			Diagnostics:  []diagnostic{},
+			Warnings:     []diagnostic{},
+		},
+		PatchSummary: fmt.Sprintf("Converted task %q in flow %q to doWhile", request.TaskID, request.FlowID),
+	}, nil
+}
+
+func buildErrorPathTemplateOperation(app flogoApp, request errorPathTemplateRequest) (errorPathTemplateOperation, error) {
+	flow, flowIndex := findFlowByID(app, request.FlowID)
+	if flowIndex == -1 {
+		return errorPathTemplateOperation{}, controlFlowFailure{Message: fmt.Sprintf("Flow %q was not found", request.FlowID)}
+	}
+	task, taskIndex := findTaskInFlow(flow, request.TaskID)
+	if taskIndex == -1 {
+		return errorPathTemplateOperation{}, controlFlowFailure{Message: fmt.Sprintf("Task %q was not found in flow %q", request.TaskID, request.FlowID)}
+	}
+	if strings.TrimSpace(task.ActivityRef) == "" {
+		return errorPathTemplateOperation{}, controlFlowFailure{Message: fmt.Sprintf("Task %q cannot receive an error path because it has no activityRef", request.TaskID)}
+	}
+	if !isSupportedErrorPathLinkShapeGo(flow) {
+		return errorPathTemplateOperation{}, controlFlowFailure{Message: fmt.Sprintf("Flow %q uses branching links that this slice cannot rewrite", request.FlowID)}
+	}
+
+	normalizedFlow := materializeFlowLinksGo(flow)
+	existingGeneratedTaskID := findGeneratedErrorTaskIDGo(normalizedFlow, request.TaskID)
+	if existingGeneratedTaskID != "" && !request.ReplaceExisting {
+		return errorPathTemplateOperation{}, controlFlowFailure{Message: fmt.Sprintf("Task %q already has a generated error path", request.TaskID)}
+	}
+	if existingGeneratedTaskID != "" {
+		normalizedFlow = removeGeneratedErrorPathGo(normalizedFlow, request.TaskID, existingGeneratedTaskID)
+	}
+
+	successorTaskID := findSuccessorTaskIDGo(normalizedFlow, request.TaskID)
+	if request.Template == "log_and_continue" && successorTaskID == "" {
+		return errorPathTemplateOperation{}, controlFlowFailure{Message: fmt.Sprintf("Template %q requires task %q to have a successor", request.Template, request.TaskID)}
+	}
+
+	logAlias, logRef, addedImport := resolveLogImportForErrorPath(app)
+	generatedTaskID := createGeneratedErrorTaskIDGo(normalizedFlow, request.TaskID, request.GeneratedTaskPrefix)
+	generatedTask := flogoTask{
+		ID:          generatedTaskID,
+		Name:        fmt.Sprintf("error-log-%s", request.TaskID),
+		ActivityRef: "#log",
+		Input: map[string]any{
+			"message": defaultString(strings.TrimSpace(request.LogMessage), fmt.Sprintf("Task %s failed", request.TaskID)),
+		},
+		Output:   map[string]any{},
+		Settings: map[string]any{},
+	}
+
+	nextFlow, generatedLinks := insertGeneratedErrorPathGo(normalizedFlow, request.TaskID, request.Template, generatedTask, successorTaskID)
+	nextApp := cloneFlogoApp(app)
+	nextApp.Resources[flowIndex] = nextFlow
+	if !importExists(nextApp, logAlias, logRef) {
+		nextApp.Imports = append(nextApp.Imports, flogoImport{Alias: logAlias, Ref: logRef})
+	}
+
+	return errorPathTemplateOperation{
+		NextApp: nextApp,
+		Plan: errorPathTemplatePlan{
+			FlowID:          request.FlowID,
+			TaskID:          request.TaskID,
+			Template:        request.Template,
+			GeneratedTaskID: generatedTaskID,
+			AddedImport:     addedImport,
+			GeneratedLinks:  generatedLinks,
+			Diagnostics:     []diagnostic{},
+			Warnings:        []diagnostic{},
+		},
+		PatchSummary: fmt.Sprintf("Added %s error path to task %q in flow %q", request.Template, request.TaskID, request.FlowID),
+	}, nil
+}
+
+func findTaskInFlow(flow flogoFlow, taskID string) (flogoTask, int) {
+	for index, task := range flow.Tasks {
+		if task.ID == taskID {
+			return task, index
+		}
+	}
+	return flogoTask{}, -1
+}
+
+func normalizeTaskType(taskType string) string {
+	return strings.TrimSpace(taskType)
+}
+
+func materializeFlowLinksGo(flow flogoFlow) flogoFlow {
+	next := cloneFlogoFlow(flow)
+	if len(next.Links) == 0 {
+		next.Links = buildLinearDependencyLinksGo(flow)
+	}
+	return next
+}
+
+func buildLinearDependencyLinksGo(flow flogoFlow) []map[string]any {
+	capHint := 0
+	if len(flow.Tasks) > 1 {
+		capHint = len(flow.Tasks) - 1
+	}
+	links := make([]map[string]any, 0, capHint)
+	for index := 0; index < len(flow.Tasks)-1; index++ {
+		links = append(links, map[string]any{
+			"from": flow.Tasks[index].ID,
+			"to":   flow.Tasks[index+1].ID,
+			"type": "dependency",
+		})
+	}
+	return links
+}
+
+func canonicalSuccessExpressionGo(taskID string) string {
+	return fmt.Sprintf("=$activity[%s].error == nil", taskID)
+}
+
+func canonicalErrorExpressionGo(taskID string) string {
+	return fmt.Sprintf("=$activity[%s].error != nil", taskID)
+}
+
+func linkType(link map[string]any) string {
+	if value, ok := link["type"].(string); ok && strings.TrimSpace(value) != "" {
+		return value
+	}
+	return "dependency"
+}
+
+func isSupportedErrorPathLinkShapeGo(flow flogoFlow) bool {
+	if len(flow.Links) == 0 {
+		return true
+	}
+	for _, task := range flow.Tasks {
+		outgoing := outgoingLinksGo(flow.Links, task.ID)
+		if len(outgoing) <= 1 {
+			if len(outgoing) == 0 {
+				continue
+			}
+			link := outgoing[0]
+			if linkType(link) == "dependency" {
+				continue
+			}
+			if !isErrorExpressionGo(link, task.ID) {
+				return false
+			}
+			errorTask, ok := findTaskByID(flow, asString(link["to"]))
+			if !ok || strings.TrimSpace(errorTask.ActivityRef) != "#log" {
+				return false
+			}
+			continue
+		}
+		if len(outgoing) > 2 {
+			return false
+		}
+		if !hasLinkGo(outgoing, "expression", canonicalSuccessExpressionGo(task.ID)) || !hasLinkGo(outgoing, "expression", canonicalErrorExpressionGo(task.ID)) {
+			return false
+		}
+		errorTaskID := ""
+		for _, link := range outgoing {
+			if isErrorExpressionGo(link, task.ID) {
+				errorTaskID = asString(link["to"])
+				break
+			}
+		}
+		errorTask, ok := findTaskByID(flow, errorTaskID)
+		if !ok || strings.TrimSpace(errorTask.ActivityRef) != "#log" {
+			return false
+		}
+	}
+	return true
+}
+
+func outgoingLinksGo(links []map[string]any, from string) []map[string]any {
+	out := make([]map[string]any, 0)
+	for _, link := range links {
+		if asString(link["from"]) == from {
+			out = append(out, link)
+		}
+	}
+	return out
+}
+
+func hasLinkGo(links []map[string]any, expectedType string, expectedValue string) bool {
+	for _, link := range links {
+		if linkType(link) == expectedType && asString(link["value"]) == expectedValue {
+			return true
+		}
+	}
+	return false
+}
+
+func isSuccessExpressionGo(link map[string]any, taskID string) bool {
+	return linkType(link) == "expression" && asString(link["value"]) == canonicalSuccessExpressionGo(taskID)
+}
+
+func isErrorExpressionGo(link map[string]any, taskID string) bool {
+	return linkType(link) == "expression" && asString(link["value"]) == canonicalErrorExpressionGo(taskID)
+}
+
+func findSuccessorTaskIDGo(flow flogoFlow, taskID string) string {
+	outgoing := outgoingLinksGo(flow.Links, taskID)
+	for _, link := range outgoing {
+		if linkType(link) == "dependency" {
+			return asString(link["to"])
+		}
+	}
+	for _, link := range outgoing {
+		if isSuccessExpressionGo(link, taskID) {
+			return asString(link["to"])
+		}
+	}
+	return ""
+}
+
+func findGeneratedErrorTaskIDGo(flow flogoFlow, taskID string) string {
+	for _, link := range outgoingLinksGo(flow.Links, taskID) {
+		if !isErrorExpressionGo(link, taskID) {
+			continue
+		}
+		errorTaskID := asString(link["to"])
+		task, ok := findTaskByID(flow, errorTaskID)
+		if ok && strings.TrimSpace(task.ActivityRef) == "#log" {
+			return errorTaskID
+		}
+	}
+	return ""
+}
+
+func removeGeneratedErrorPathGo(flow flogoFlow, taskID string, generatedTaskID string) flogoFlow {
+	next := cloneFlogoFlow(flow)
+	filteredTasks := make([]flogoTask, 0, len(next.Tasks))
+	for _, task := range next.Tasks {
+		if task.ID != generatedTaskID {
+			filteredTasks = append(filteredTasks, task)
+		}
+	}
+	next.Tasks = filteredTasks
+
+	filteredLinks := make([]map[string]any, 0, len(next.Links))
+	for _, link := range next.Links {
+		from := asString(link["from"])
+		to := asString(link["to"])
+		if from == generatedTaskID || to == generatedTaskID {
+			continue
+		}
+		if from == taskID && (isSuccessExpressionGo(link, taskID) || isErrorExpressionGo(link, taskID)) {
+			continue
+		}
+		filteredLinks = append(filteredLinks, cloneStringAnyMap(link))
+	}
+	next.Links = filteredLinks
+	return next
+}
+
+func createGeneratedErrorTaskIDGo(flow flogoFlow, taskID string, prefix string) string {
+	basePrefix := "error"
+	if strings.TrimSpace(prefix) != "" {
+		basePrefix = strings.ReplaceAll(slugify(strings.TrimSpace(prefix)), "-", "_")
+	}
+	return createUniqueTaskIDGo(flow, fmt.Sprintf("%s_log_%s", basePrefix, taskID))
+}
+
+func createUniqueTaskIDGo(flow flogoFlow, base string) string {
+	used := make(map[string]struct{}, len(flow.Tasks))
+	for _, task := range flow.Tasks {
+		used[task.ID] = struct{}{}
+	}
+	candidate := base
+	counter := 1
+	for {
+		if _, exists := used[candidate]; !exists {
+			return candidate
+		}
+		counter++
+		candidate = fmt.Sprintf("%s_%d", base, counter)
+	}
+}
+
+func resolveLogImportForErrorPath(app flogoApp) (string, string, bool) {
+	for _, entry := range app.Imports {
+		if normalizeAlias(entry.Alias) == "log" || entry.Ref == "github.com/project-flogo/contrib/activity/log" {
+			return entry.Alias, entry.Ref, false
+		}
+	}
+	return "log", "github.com/project-flogo/contrib/activity/log", true
+}
+
+func importExists(app flogoApp, alias string, ref string) bool {
+	for _, entry := range app.Imports {
+		if entry.Alias == alias || entry.Ref == ref {
+			return true
+		}
+	}
+	return false
+}
+
+func insertGeneratedErrorPathGo(flow flogoFlow, taskID string, template string, generatedTask flogoTask, successorTaskID string) (flogoFlow, []map[string]any) {
+	next := cloneFlogoFlow(flow)
+	taskIndex := -1
+	for index, task := range next.Tasks {
+		if task.ID == taskID {
+			taskIndex = index
+			break
+		}
+	}
+	if taskIndex >= 0 {
+		next.Tasks = append(next.Tasks[:taskIndex+1], append([]flogoTask{generatedTask}, next.Tasks[taskIndex+1:]...)...)
+	}
+
+	filteredLinks := make([]map[string]any, 0, len(next.Links))
+	for _, link := range next.Links {
+		if asString(link["from"]) == taskID && linkType(link) == "dependency" {
+			continue
+		}
+		filteredLinks = append(filteredLinks, cloneStringAnyMap(link))
+	}
+	next.Links = filteredLinks
+
+	generatedLinks := make([]map[string]any, 0, 3)
+	if successorTaskID != "" {
+		successLink := map[string]any{
+			"from":  taskID,
+			"to":    successorTaskID,
+			"type":  "expression",
+			"value": canonicalSuccessExpressionGo(taskID),
+		}
+		next.Links = append(next.Links, successLink)
+		generatedLinks = append(generatedLinks, cloneStringAnyMap(successLink))
+	}
+
+	errorLink := map[string]any{
+		"from":  taskID,
+		"to":    generatedTask.ID,
+		"type":  "expression",
+		"value": canonicalErrorExpressionGo(taskID),
+	}
+	next.Links = append(next.Links, errorLink)
+	generatedLinks = append(generatedLinks, cloneStringAnyMap(errorLink))
+
+	if template == "log_and_continue" && successorTaskID != "" {
+		continueLink := map[string]any{
+			"from": generatedTask.ID,
+			"to":   successorTaskID,
+			"type": "dependency",
+		}
+		next.Links = append(next.Links, continueLink)
+		generatedLinks = append(generatedLinks, cloneStringAnyMap(continueLink))
+	}
+
+	return next, generatedLinks
+}
+
+func findTaskByID(flow flogoFlow, taskID string) (flogoTask, bool) {
+	for _, task := range flow.Tasks {
+		if task.ID == taskID {
+			return task, true
+		}
+	}
+	return flogoTask{}, false
+}
+
+func asString(value any) string {
+	if typed, ok := value.(string); ok {
+		return typed
+	}
+	return ""
+}
+
+func defaultString(value string, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+type generatedTriggerMappings struct {
+	Input       map[string]any
+	Output      map[string]any
+	Diagnostics []diagnostic
+}
+
+type existingTriggerBinding struct {
+	Trigger      flogoTrigger
+	TriggerIndex int
+	HandlerIndex int
+}
+
+func resolveTriggerImportForBinding(app flogoApp, kind string) (string, string) {
+	registryEntry := triggerImportRegistry[kind]
+	for _, entry := range app.Imports {
+		if entry.Ref == registryEntry.Ref || normalizeAlias(entry.Alias) == registryEntry.Alias {
+			return entry.Alias, entry.Ref
+		}
+	}
+	return registryEntry.Alias, registryEntry.Ref
+}
+
+func buildTriggerID(flowID string, profile triggerProfile) string {
+	return "flogo-" + profile.Kind + "-" + slugify(flowID)
+}
+
+func buildTriggerHandlerName(flowID string, profile triggerProfile) string {
+	slug := slugify(flowID)
+	switch profile.Kind {
+	case "rest":
+		return strings.ToLower(profile.Method) + "_" + slug
+	case "timer":
+		return "run_" + slug
+	case "cli":
+		if strings.TrimSpace(profile.CommandName) != "" {
+			return slugify(profile.CommandName)
+		}
+		return slug
+	case "channel":
+		return "channel_" + slug
+	default:
+		return slug
+	}
+}
+
+func createBindingTrigger(triggerID string, triggerRef string, handlerName string, flowID string, profile triggerProfile, mappings generatedTriggerMappings) flogoTrigger {
+	return flogoTrigger{
+		ID:       triggerID,
+		Ref:      triggerRef,
+		Settings: createBindingTriggerSettings(profile),
+		Handlers: []flogoHandler{
+			{
+				ID:             handlerName,
+				ActionRef:      "#flow",
+				ActionSettings: map[string]any{"flowURI": "res://flow:" + flowID},
+				Settings:       createBindingHandlerSettings(profile),
+				Input:          cloneStringAnyMap(mappings.Input),
+				Output:         cloneStringAnyMap(mappings.Output),
+			},
+		},
+	}
+}
+
+func createBindingTriggerSettings(profile triggerProfile) map[string]any {
+	switch profile.Kind {
+	case "rest":
+		return map[string]any{"port": profile.Port}
+	case "cli":
+		return map[string]any{"singleCmd": profile.SingleCmd}
+	default:
+		return map[string]any{}
+	}
+}
+
+func createBindingHandlerSettings(profile triggerProfile) map[string]any {
+	switch profile.Kind {
+	case "rest":
+		return map[string]any{
+			"method": profile.Method,
+			"path":   profile.Path,
+		}
+	case "timer":
+		settings := map[string]any{}
+		if profile.StartDelay != "" {
+			settings["startDelay"] = profile.StartDelay
+		}
+		if profile.RepeatInterval != "" {
+			settings["repeatInterval"] = profile.RepeatInterval
+		}
+		return settings
+	case "cli":
+		settings := map[string]any{
+			"command": profile.CommandName,
+		}
+		if profile.Usage != "" {
+			settings["usage"] = profile.Usage
+		}
+		if profile.Short != "" {
+			settings["short"] = profile.Short
+		}
+		if profile.Long != "" {
+			settings["long"] = profile.Long
+		}
+		if len(profile.Flags) > 0 {
+			flags := make([]any, 0, len(profile.Flags))
+			for _, flag := range profile.Flags {
+				flags = append(flags, flag)
+			}
+			settings["flags"] = flags
+		}
+		return settings
+	case "channel":
+		return map[string]any{"channel": profile.Channel}
+	default:
+		return map[string]any{}
+	}
+}
+
+func generateTriggerBindingMappings(flow flowContract, profile triggerProfile) generatedTriggerMappings {
+	input := map[string]any{}
+	output := map[string]any{}
+	diagnostics := []diagnostic{}
+
+	switch profile.Kind {
+	case "rest":
+		for _, param := range flow.Inputs {
+			expression := inferRestBindingInput(param.Name, len(flow.Inputs))
+			if expression != "" {
+				input[param.Name] = expression
+			} else if param.Required {
+				diagnostics = append(diagnostics, diagnostic{
+					Code:     "flogo.trigger_binding.unmapped_required_input",
+					Message:  fmt.Sprintf("REST auto-mapping cannot satisfy required flow input %q", param.Name),
+					Severity: "error",
+					Path:     "flows." + flow.FlowID + ".inputs." + param.Name,
+				})
+			} else {
+				diagnostics = append(diagnostics, diagnostic{
+					Code:     "flogo.trigger_binding.unmapped_optional_input",
+					Message:  fmt.Sprintf("REST auto-mapping left optional flow input %q unmapped", param.Name),
+					Severity: "warning",
+					Path:     "flows." + flow.FlowID + ".inputs." + param.Name,
+				})
+			}
+		}
+
+		codeParam := findFlowOutputParam(flow.Outputs, []string{"code", "status"})
+		dataParam := findFlowOutputParam(flow.Outputs, []string{"data", "body", "content"})
+		headersParam := findFlowOutputParam(flow.Outputs, []string{"headers"})
+		cookiesParam := findFlowOutputParam(flow.Outputs, []string{"cookies"})
+		if codeParam != nil {
+			output["code"] = "$flow." + codeParam.Name
+		} else if profile.ReplyMode == "status_only" {
+			output["code"] = 200
+		}
+		fallbackOutput := (*flowParam)(nil)
+		if len(flow.Outputs) == 1 {
+			fallbackOutput = &flow.Outputs[0]
+		}
+		if dataParam != nil {
+			output["data"] = "$flow." + dataParam.Name
+		} else if fallbackOutput != nil {
+			output["data"] = "$flow." + fallbackOutput.Name
+		} else if profile.ReplyMode != "status_only" {
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.trigger_binding.missing_reply_data",
+				Message:  fmt.Sprintf("REST reply data could not be inferred for flow %q", flow.FlowID),
+				Severity: "warning",
+				Path:     "flows." + flow.FlowID + ".outputs",
+			})
+		}
+		if headersParam != nil {
+			output["headers"] = "$flow." + headersParam.Name
+		}
+		if cookiesParam != nil {
+			output["cookies"] = "$flow." + cookiesParam.Name
+		}
+	case "timer":
+		requiredInputs := 0
+		for _, param := range flow.Inputs {
+			if param.Required {
+				requiredInputs++
+			}
+		}
+		if requiredInputs > 0 {
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.trigger_binding.timer_requires_zero_inputs",
+				Message:  "Timer triggers can only bind flows with zero required inputs in this slice",
+				Severity: "error",
+				Path:     "flows." + flow.FlowID + ".inputs",
+			})
+		}
+	case "cli":
+		for _, param := range flow.Inputs {
+			normalized := strings.ToLower(regexp.MustCompile(`[^a-zA-Z0-9]`).ReplaceAllString(param.Name, ""))
+			if normalized == "args" {
+				input[param.Name] = "$trigger.args"
+			} else if normalized == "flags" {
+				input[param.Name] = "$trigger.flags"
+			} else if len(flow.Inputs) == 1 {
+				input[param.Name] = "$trigger.args"
+			} else if param.Required {
+				diagnostics = append(diagnostics, diagnostic{
+					Code:     "flogo.trigger_binding.unmapped_required_input",
+					Message:  fmt.Sprintf("CLI auto-mapping cannot satisfy required flow input %q", param.Name),
+					Severity: "error",
+					Path:     "flows." + flow.FlowID + ".inputs." + param.Name,
+				})
+			}
+		}
+		dataParam := findFlowOutputParam(flow.Outputs, []string{"data"})
+		if dataParam == nil && len(flow.Outputs) > 0 {
+			dataParam = &flow.Outputs[0]
+		}
+		if dataParam != nil {
+			output["data"] = "$flow." + dataParam.Name
+		}
+	case "channel":
+		for _, param := range flow.Inputs {
+			normalized := strings.ToLower(regexp.MustCompile(`[^a-zA-Z0-9]`).ReplaceAllString(param.Name, ""))
+			if normalized == "data" || normalized == "payload" || normalized == "content" || len(flow.Inputs) == 1 {
+				input[param.Name] = "$trigger.data"
+			} else if param.Required {
+				diagnostics = append(diagnostics, diagnostic{
+					Code:     "flogo.trigger_binding.unmapped_required_input",
+					Message:  fmt.Sprintf("Channel auto-mapping cannot satisfy required flow input %q", param.Name),
+					Severity: "error",
+					Path:     "flows." + flow.FlowID + ".inputs." + param.Name,
+				})
+			}
+		}
+	}
+
+	return generatedTriggerMappings{
+		Input:       input,
+		Output:      output,
+		Diagnostics: dedupeDiagnostics(diagnostics),
+	}
+}
+
+func inferRestBindingInput(name string, inputCount int) string {
+	normalized := strings.ToLower(regexp.MustCompile(`[^a-zA-Z0-9]`).ReplaceAllString(name, ""))
+	switch normalized {
+	case "content", "body", "payload", "request":
+		return "$trigger.content"
+	case "headers":
+		return "$trigger.headers"
+	case "method":
+		return "$trigger.method"
+	case "queryparams", "query":
+		return "$trigger.queryParams"
+	case "pathparams", "path":
+		return "$trigger.pathParams"
+	default:
+		if inputCount == 1 {
+			return "$trigger.content"
+		}
+		return ""
+	}
+}
+
+func findFlowOutputParam(params []flowParam, candidates []string) *flowParam {
+	normalizedCandidates := map[string]bool{}
+	for _, candidate := range candidates {
+		normalizedCandidates[strings.ToLower(candidate)] = true
+	}
+	for _, param := range params {
+		if normalizedCandidates[strings.ToLower(param.Name)] {
+			copy := param
+			return &copy
+		}
+	}
+	return nil
+}
+
+func applyTriggerBindingPlanToApp(app flogoApp, triggerAlias string, triggerImportRef string, trigger flogoTrigger, existing *existingTriggerBinding) flogoApp {
+	next := cloneFlogoApp(app)
+	if !appHasTriggerImport(next, triggerAlias, triggerImportRef) {
+		next.Imports = append(next.Imports, flogoImport{
+			Alias: triggerAlias,
+			Ref:   triggerImportRef,
+		})
+	}
+
+	if existing != nil {
+		current := next.Triggers[existing.TriggerIndex]
+		if len(current.Handlers) <= 1 {
+			next.Triggers[existing.TriggerIndex] = trigger
+		} else {
+			updatedHandlers := append([]flogoHandler{}, current.Handlers...)
+			updatedHandlers[existing.HandlerIndex] = trigger.Handlers[0]
+			current.Ref = trigger.Ref
+			current.Settings = cloneStringAnyMap(trigger.Settings)
+			current.Handlers = updatedHandlers
+			next.Triggers[existing.TriggerIndex] = current
+		}
+		return next
+	}
+
+	next.Triggers = append(next.Triggers, trigger)
+	return next
+}
+
+func findExistingTriggerBinding(app flogoApp, flowRef string, profile triggerProfile, triggerImportRef string) *existingTriggerBinding {
+	for triggerIndex, trigger := range app.Triggers {
+		if !matchesTriggerKind(app, trigger, triggerImportRef) {
+			continue
+		}
+		for handlerIndex, handler := range trigger.Handlers {
+			if resolveHandlerFlowRef(handler) != flowRef {
+				continue
+			}
+			if matchesTriggerProfile(trigger, handler, profile) {
+				return &existingTriggerBinding{
+					Trigger:      trigger,
+					TriggerIndex: triggerIndex,
+					HandlerIndex: handlerIndex,
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func matchesTriggerKind(app flogoApp, trigger flogoTrigger, triggerImportRef string) bool {
+	resolvedRef := trigger.Ref
+	if strings.HasPrefix(trigger.Ref, "#") {
+		alias := inferAlias(trigger.Ref)
+		for _, entry := range app.Imports {
+			if normalizeAlias(entry.Alias) == alias {
+				resolvedRef = entry.Ref
+				break
+			}
+		}
+	}
+	return resolvedRef == triggerImportRef || trigger.Ref == "#"+inferAliasFromRef(triggerImportRef)
+}
+
+func matchesTriggerProfile(trigger flogoTrigger, handler flogoHandler, profile triggerProfile) bool {
+	switch profile.Kind {
+	case "rest":
+		return numberValue(trigger.Settings["port"]) == float64(profile.Port) &&
+			strings.EqualFold(stringValue(handler.Settings["method"]), profile.Method) &&
+			stringValue(handler.Settings["path"]) == profile.Path
+	case "timer":
+		return stringValue(handler.Settings["startDelay"]) == profile.StartDelay &&
+			stringValue(handler.Settings["repeatInterval"]) == profile.RepeatInterval
+	case "cli":
+		return stringValue(handler.Settings["command"]) == profile.CommandName
+	case "channel":
+		return stringValue(handler.Settings["channel"]) == profile.Channel
+	default:
+		return false
+	}
+}
+
+func appHasTriggerImport(app flogoApp, alias string, ref string) bool {
+	for _, entry := range app.Imports {
+		if entry.Alias == alias || entry.Ref == ref {
+			return true
+		}
+	}
+	return false
+}
+
+func findFlowByID(app flogoApp, flowID string) (flogoFlow, int) {
+	for index, flow := range app.Resources {
+		if flow.ID == flowID {
+			return flow, index
+		}
+	}
+	return flogoFlow{}, -1
+}
+
+func resolveSelectedTaskRegion(flow flogoFlow, requestedTaskIDs []string) (int, int, []flogoTask, []string, error) {
+	if len(requestedTaskIDs) == 0 {
+		return 0, 0, nil, nil, subflowFailure{Message: "At least one task must be selected for extraction"}
+	}
+	indexByID := map[string]int{}
+	for index, task := range flow.Tasks {
+		indexByID[task.ID] = index
+	}
+	seen := map[string]bool{}
+	indexes := make([]int, 0, len(requestedTaskIDs))
+	for _, taskID := range requestedTaskIDs {
+		if seen[taskID] {
+			continue
+		}
+		seen[taskID] = true
+		index, ok := indexByID[taskID]
+		if !ok {
+			return 0, 0, nil, nil, subflowFailure{Message: fmt.Sprintf("Task %q was not found in flow %q", taskID, flow.ID)}
+		}
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	startIndex := indexes[0]
+	endIndex := indexes[len(indexes)-1]
+	if endIndex-startIndex+1 != len(indexes) {
+		return 0, 0, nil, nil, subflowFailure{Message: "Subflow extraction requires a contiguous task selection"}
+	}
+	selectedTasks := cloneTasks(flow.Tasks[startIndex : endIndex+1])
+	selectedTaskIDs := make([]string, 0, len(selectedTasks))
+	for _, task := range selectedTasks {
+		selectedTaskIDs = append(selectedTaskIDs, task.ID)
+	}
+	return startIndex, endIndex, selectedTasks, selectedTaskIDs, nil
+}
+
+func buildExtractedFlowID(parentFlowID string, taskIDs []string) string {
+	if len(taskIDs) == 0 {
+		return slugify(parentFlowID) + "-subflow"
+	}
+	if len(taskIDs) == 1 {
+		return slugify(parentFlowID) + "-subflow-" + slugify(taskIDs[0])
+	}
+	return slugify(parentFlowID) + "-subflow-" + slugify(taskIDs[0]) + "-" + slugify(taskIDs[len(taskIDs)-1])
+}
+
+func buildExtractedFlowName(parentFlow flogoFlow, tasks []flogoTask) string {
+	base := valueOrFallback(parentFlow.Name, parentFlow.ID)
+	if len(tasks) == 0 {
+		return base + " subflow"
+	}
+	if len(tasks) == 1 {
+		return fmt.Sprintf("%s subflow (%s)", base, valueOrFallback(tasks[0].Name, tasks[0].ID))
+	}
+	return fmt.Sprintf("%s subflow (%s to %s)", base, valueOrFallback(tasks[0].Name, tasks[0].ID), valueOrFallback(tasks[len(tasks)-1].Name, tasks[len(tasks)-1].ID))
+}
+
+func inferSubflowInputs(flow flogoFlow, startIndex int, endIndex int) []string {
+	inputs := map[string]bool{}
+	produced := map[string]bool{}
+	for index := startIndex; index <= endIndex; index++ {
+		task := flow.Tasks[index]
+		for _, name := range collectFlowResolverNames(task.Input) {
+			if !produced[name] {
+				inputs[name] = true
+			}
+		}
+		for _, name := range collectFlowResolverNames(task.Settings) {
+			if !produced[name] {
+				inputs[name] = true
+			}
+		}
+		for _, name := range collectFlowResolverNames(task.Output) {
+			if !produced[name] {
+				inputs[name] = true
+			}
+		}
+		for name := range task.Output {
+			produced[name] = true
+		}
+	}
+	return sortedKeys(inputs)
+}
+
+func inferSubflowOutputs(app flogoApp, flow flogoFlow, startIndex int, endIndex int) []string {
+	produced := map[string]bool{}
+	for index := startIndex; index <= endIndex; index++ {
+		for name := range flow.Tasks[index].Output {
+			produced[name] = true
+		}
+	}
+
+	outputs := map[string]bool{}
+	for index := endIndex + 1; index < len(flow.Tasks); index++ {
+		task := flow.Tasks[index]
+		refs := append([]string{}, collectFlowResolverNames(task.Input)...)
+		refs = append(refs, collectFlowResolverNames(task.Settings)...)
+		refs = append(refs, collectFlowResolverNames(task.Output)...)
+		for _, name := range refs {
+			if produced[name] {
+				outputs[name] = true
+			}
+		}
+	}
+
+	contracts := inferFlowContracts(app)
+	for _, contract := range contracts.Contracts {
+		if contract.FlowID != flow.ID {
+			continue
+		}
+		for _, param := range contract.Outputs {
+			if produced[param.Name] {
+				outputs[param.Name] = true
+			}
+		}
+	}
+
+	return sortedKeys(outputs)
+}
+
+func buildSubflowMetadata(parentContract *flowContract, names []string, input bool) []map[string]any {
+	fields := make([]map[string]any, 0, len(names))
+	for _, name := range names {
+		field := map[string]any{
+			"name": name,
+		}
+		var params []flowParam
+		if parentContract != nil {
+			if input {
+				params = parentContract.Inputs
+			} else {
+				params = parentContract.Outputs
+			}
+		}
+		for _, param := range params {
+			if param.Name == name {
+				if param.Type != "" && param.Type != "unknown" {
+					field["type"] = param.Type
+				}
+				if param.Required {
+					field["required"] = param.Required
+				}
+				if param.Description != "" {
+					field["description"] = param.Description
+				}
+				break
+			}
+		}
+		fields = append(fields, field)
+	}
+	return fields
+}
+
+func cloneTasks(tasks []flogoTask) []flogoTask {
+	cloned := make([]flogoTask, 0, len(tasks))
+	for _, task := range tasks {
+		cloned = append(cloned, flogoTask{
+			ID:          task.ID,
+			Name:        task.Name,
+			Type:        task.Type,
+			ActivityRef: task.ActivityRef,
+			Input:       cloneStringAnyMap(task.Input),
+			Output:      cloneStringAnyMap(task.Output),
+			Settings:    cloneStringAnyMap(task.Settings),
+		})
+	}
+	return cloned
+}
+
+func cloneFlogoFlow(flow flogoFlow) flogoFlow {
+	return cloneFlogoApp(flogoApp{Resources: []flogoFlow{flow}}).Resources[0]
+}
+
+func createUniqueTaskID(flow flogoFlow, baseID string, reserved map[string]bool) string {
+	used := map[string]bool{}
+	for _, task := range flow.Tasks {
+		used[task.ID] = true
+	}
+	for key, value := range reserved {
+		if value {
+			used[key] = true
+		}
+	}
+	candidate := baseID
+	counter := 2
+	for used[candidate] {
+		candidate = fmt.Sprintf("%s_%d", baseID, counter)
+		counter++
+	}
+	return candidate
+}
+
+func applySubflowExtractionToApp(app flogoApp, parentIndex int, startIndex int, endIndex int, invocation flogoTask, extractedFlow flogoFlow, replaceExisting bool) flogoApp {
+	next := cloneFlogoApp(app)
+	parentFlow := next.Resources[parentIndex]
+	nextTasks := make([]flogoTask, 0, len(parentFlow.Tasks)-(endIndex-startIndex)+1)
+	nextTasks = append(nextTasks, cloneTasks(parentFlow.Tasks[:startIndex])...)
+	nextTasks = append(nextTasks, invocation)
+	nextTasks = append(nextTasks, cloneTasks(parentFlow.Tasks[endIndex+1:])...)
+	parentFlow.Tasks = nextTasks
+	next.Resources[parentIndex] = parentFlow
+
+	if existing, index := findFlowByID(next, extractedFlow.ID); index >= 0 {
+		_ = existing
+		if replaceExisting {
+			next.Resources[index] = extractedFlow
+		}
+	} else {
+		next.Resources = append(next.Resources, extractedFlow)
+	}
+	return next
+}
+
+func applySubflowInliningToApp(app flogoApp, parentIndex int, invocationIndex int, inlinedTasks []flogoTask, inlinedFlowID string, removeExtractedFlowIfUnused bool) flogoApp {
+	next := cloneFlogoApp(app)
+	parentFlow := next.Resources[parentIndex]
+	nextTasks := make([]flogoTask, 0, len(parentFlow.Tasks)-1+len(inlinedTasks))
+	nextTasks = append(nextTasks, cloneTasks(parentFlow.Tasks[:invocationIndex])...)
+	nextTasks = append(nextTasks, cloneTasks(inlinedTasks)...)
+	nextTasks = append(nextTasks, cloneTasks(parentFlow.Tasks[invocationIndex+1:])...)
+	parentFlow.Tasks = nextTasks
+	next.Resources[parentIndex] = parentFlow
+
+	if removeExtractedFlowIfUnused && countFlowReferences(next, inlinedFlowID) == 0 {
+		filtered := make([]flogoFlow, 0, len(next.Resources))
+		for _, flow := range next.Resources {
+			if flow.ID != inlinedFlowID {
+				filtered = append(filtered, flow)
+			}
+		}
+		next.Resources = filtered
+	}
+	return next
+}
+
+func countFlowReferences(app flogoApp, flowID string) int {
+	flowRef := "#flow:" + flowID
+	references := 0
+	for _, trigger := range app.Triggers {
+		for _, handler := range trigger.Handlers {
+			if resolveHandlerFlowRef(handler) == flowRef {
+				references++
+			}
+		}
+	}
+	for _, flow := range app.Resources {
+		for _, task := range flow.Tasks {
+			if normalizeFlowActionRef(task.ActivityRef, stringValue(task.Settings["flowURI"])) == flowRef {
+				references++
+			}
+		}
+	}
+	return references
+}
+
+func summarizeSubflowPatch(before flogoApp, after flogoApp, mode string) string {
+	resourceDelta := len(after.Resources) - len(before.Resources)
+	if mode == "extract" {
+		return fmt.Sprintf("resources %+d", resourceDelta)
+	}
+	return fmt.Sprintf("resources %+d", resourceDelta)
+}
+
+func cloneFlogoApp(app flogoApp) flogoApp {
+	clone := flogoApp{
+		Name:       app.Name,
+		Type:       app.Type,
+		AppModel:   app.AppModel,
+		Imports:    append([]flogoImport{}, app.Imports...),
+		Properties: make([]map[string]any, 0, len(app.Properties)),
+		Triggers:   make([]flogoTrigger, 0, len(app.Triggers)),
+		Resources:  make([]flogoFlow, 0, len(app.Resources)),
+	}
+
+	for _, property := range app.Properties {
+		clone.Properties = append(clone.Properties, cloneStringAnyMap(property))
+	}
+	for _, trigger := range app.Triggers {
+		nextTrigger := flogoTrigger{
+			ID:       trigger.ID,
+			Ref:      trigger.Ref,
+			Settings: cloneStringAnyMap(trigger.Settings),
+			Handlers: make([]flogoHandler, 0, len(trigger.Handlers)),
+		}
+		for _, handler := range trigger.Handlers {
+			nextTrigger.Handlers = append(nextTrigger.Handlers, flogoHandler{
+				ID:             handler.ID,
+				ActionRef:      handler.ActionRef,
+				ActionSettings: cloneStringAnyMap(handler.ActionSettings),
+				Settings:       cloneStringAnyMap(handler.Settings),
+				Input:          cloneStringAnyMap(handler.Input),
+				Output:         cloneStringAnyMap(handler.Output),
+			})
+		}
+		clone.Triggers = append(clone.Triggers, nextTrigger)
+	}
+	for _, flow := range app.Resources {
+		nextFlow := flogoFlow{
+			ID:             flow.ID,
+			Name:           flow.Name,
+			MetadataInput:  make([]map[string]any, 0, len(flow.MetadataInput)),
+			MetadataOutput: make([]map[string]any, 0, len(flow.MetadataOutput)),
+			Tasks:          make([]flogoTask, 0, len(flow.Tasks)),
+			Links:          make([]map[string]any, 0, len(flow.Links)),
+		}
+		for _, item := range flow.MetadataInput {
+			nextFlow.MetadataInput = append(nextFlow.MetadataInput, cloneStringAnyMap(item))
+		}
+		for _, item := range flow.MetadataOutput {
+			nextFlow.MetadataOutput = append(nextFlow.MetadataOutput, cloneStringAnyMap(item))
+		}
+		for _, task := range flow.Tasks {
+			nextFlow.Tasks = append(nextFlow.Tasks, flogoTask{
+				ID:          task.ID,
+				Name:        task.Name,
+				Type:        task.Type,
+				ActivityRef: task.ActivityRef,
+				Input:       cloneStringAnyMap(task.Input),
+				Output:      cloneStringAnyMap(task.Output),
+				Settings:    cloneStringAnyMap(task.Settings),
+			})
+		}
+		for _, link := range flow.Links {
+			nextFlow.Links = append(nextFlow.Links, cloneStringAnyMap(link))
+		}
+		clone.Resources = append(clone.Resources, nextFlow)
+	}
+
+	return clone
+}
+
+func cloneStringAnyMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return map[string]any{}
+	}
+	clone := make(map[string]any, len(input))
+	for key, value := range input {
+		clone[key] = cloneAny(value)
+	}
+	return clone
+}
+
+func cloneAny(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneStringAnyMap(typed)
+	case []any:
+		result := make([]any, 0, len(typed))
+		for _, item := range typed {
+			result = append(result, cloneAny(item))
+		}
+		return result
+	default:
+		return typed
+	}
+}
+
+func summarizeTriggerBindingPatch(before flogoApp, after flogoApp, triggerID string) string {
+	if len(after.Triggers) > len(before.Triggers) {
+		return fmt.Sprintf("Added trigger %q", triggerID)
+	}
+	return fmt.Sprintf("Updated trigger %q", triggerID)
+}
+
+func buildBindableAppPayload(app flogoApp) map[string]any {
+	imports := make([]any, 0, len(app.Imports))
+	for _, entry := range app.Imports {
+		record := map[string]any{
+			"alias": entry.Alias,
+			"ref":   entry.Ref,
+		}
+		if entry.Version != "" {
+			record["version"] = entry.Version
+		}
+		imports = append(imports, record)
+	}
+
+	properties := make([]any, 0, len(app.Properties))
+	for _, property := range app.Properties {
+		properties = append(properties, cloneStringAnyMap(property))
+	}
+
+	triggers := make([]any, 0, len(app.Triggers))
+	for _, trigger := range app.Triggers {
+		handlers := make([]any, 0, len(trigger.Handlers))
+		for _, handler := range trigger.Handlers {
+			action := map[string]any{
+				"ref": handler.ActionRef,
+			}
+			if len(handler.ActionSettings) > 0 {
+				action["settings"] = cloneStringAnyMap(handler.ActionSettings)
+			}
+			handlerRecord := map[string]any{
+				"settings": cloneStringAnyMap(handler.Settings),
+				"action":   action,
+			}
+			if handler.ID != "" {
+				handlerRecord["id"] = handler.ID
+			}
+			if len(handler.Input) > 0 {
+				handlerRecord["input"] = cloneStringAnyMap(handler.Input)
+			}
+			if len(handler.Output) > 0 {
+				handlerRecord["output"] = cloneStringAnyMap(handler.Output)
+			}
+			handlers = append(handlers, handlerRecord)
+		}
+		triggers = append(triggers, map[string]any{
+			"id":       trigger.ID,
+			"ref":      trigger.Ref,
+			"settings": cloneStringAnyMap(trigger.Settings),
+			"handlers": handlers,
+		})
+	}
+
+	resources := make([]any, 0, len(app.Resources))
+	for _, flow := range app.Resources {
+		tasks := make([]any, 0, len(flow.Tasks))
+		for _, task := range flow.Tasks {
+			taskRecord := map[string]any{
+				"id":          task.ID,
+				"name":        emptyToNil(task.Name),
+				"type":        emptyToNil(task.Type),
+				"activityRef": task.ActivityRef,
+				"input":       cloneStringAnyMap(task.Input),
+				"output":      cloneStringAnyMap(task.Output),
+				"settings":    cloneStringAnyMap(task.Settings),
+			}
+			tasks = append(tasks, taskRecord)
+		}
+		resources = append(resources, map[string]any{
+			"id":   flow.ID,
+			"type": "flow",
+			"data": map[string]any{
+				"name": flow.Name,
+				"metadata": map[string]any{
+					"input":  cloneAny(flow.MetadataInput),
+					"output": cloneAny(flow.MetadataOutput),
+				},
+				"tasks": tasks,
+				"links": cloneAny(flow.Links),
+			},
+		})
+	}
+
+	return map[string]any{
+		"name":       app.Name,
+		"type":       app.Type,
+		"appModel":   app.AppModel,
+		"imports":    imports,
+		"properties": properties,
+		"triggers":   triggers,
+		"resources":  resources,
+	}
+}
+
+func buildTriggerPayload(trigger flogoTrigger) map[string]any {
+	return buildBindableAppPayload(flogoApp{Triggers: []flogoTrigger{trigger}})["triggers"].([]any)[0].(map[string]any)
+}
+
+type flowUsageSummary struct {
+	HandlerRefs     []string
+	TriggerRefs     []string
+	ActionRefs      []string
+	InferredInputs  []flowParam
+	InferredOutputs []flowParam
+	UsedByCount     int
+	UsesMappings    bool
+	Diagnostics     []diagnostic
+}
+
+func buildFlowUsage(app flogoApp, flow flogoFlow) flowUsageSummary {
+	flowRef := "#flow:" + flow.ID
+	handlerRefs := []string{}
+	triggerRefs := map[string]bool{}
+	actionRefs := map[string]bool{}
+	inferredInputs := map[string]flowParam{}
+	inferredOutputs := map[string]flowParam{}
+	diagnostics := []diagnostic{}
+	flowTaskUseCount := 0
+	usesMappings := false
+
+	for _, trigger := range app.Triggers {
+		for index, handler := range trigger.Handlers {
+			if resolveHandlerFlowRef(handler) != flowRef {
+				continue
+			}
+			handlerPath := fmt.Sprintf("triggers.%s.handlers.%d", trigger.ID, index)
+			handlerRefs = append(handlerRefs, handlerPath)
+			triggerRefs[trigger.ID] = true
+			actionRefs[resolveHandlerFlowRef(handler)] = true
+
+			for key, value := range handler.Input {
+				if _, exists := inferredInputs[key]; !exists {
+					inferredInputs[key] = flowParam{Name: key, Type: inferFlowParamType(value), Required: false, Source: "mapping_inferred"}
+					diagnostics = append(diagnostics, diagnostic{
+						Code:     "flogo.flow_contract.inferred_input",
+						Message:  fmt.Sprintf("Inferred flow input %q for %q from handler input mappings.", key, flow.ID),
+						Severity: "info",
+						Path:     handlerPath + ".input." + key,
+					})
+				}
+			}
+
+			for _, name := range collectFlowResolverNames(handler.Output) {
+				usesMappings = true
+				if _, exists := inferredOutputs[name]; !exists {
+					inferredOutputs[name] = flowParam{Name: name, Type: "unknown", Required: false, Source: "mapping_inferred"}
+					diagnostics = append(diagnostics, diagnostic{
+						Code:     "flogo.flow_contract.inferred_output",
+						Message:  fmt.Sprintf("Inferred flow output %q for %q from handler output mappings.", name, flow.ID),
+						Severity: "info",
+						Path:     handlerPath + ".output",
+					})
+				}
+			}
+		}
+	}
+
+	for _, resource := range app.Resources {
+		for _, task := range resource.Tasks {
+			if normalizeFlowActionRef(task.ActivityRef, "") == flowRef {
+				actionRefs[task.ActivityRef] = true
+				flowTaskUseCount++
+			}
+			refs := append([]string{}, collectFlowResolverNames(task.Input)...)
+			refs = append(refs, collectFlowResolverNames(task.Settings)...)
+			refs = append(refs, collectFlowResolverNames(task.Output)...)
+			for _, name := range refs {
+				if name == "" {
+					continue
+				}
+				usesMappings = true
+				if _, exists := inferredInputs[name]; !exists {
+					inferredInputs[name] = flowParam{Name: name, Type: "unknown", Required: false, Source: "mapping_inferred"}
+					diagnostics = append(diagnostics, diagnostic{
+						Code:     "flogo.flow_contract.inferred_input",
+						Message:  fmt.Sprintf("Inferred flow input %q for %q from task mapping usage.", name, flow.ID),
+						Severity: "info",
+						Path:     "resources." + resource.ID + ".tasks." + task.ID,
+					})
+				}
+			}
+		}
+	}
+
+	usedByCount := len(handlerRefs) + flowTaskUseCount
+	if usedByCount == 0 {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.flow_contract.no_usage",
+			Message:  fmt.Sprintf("Flow %q has no trigger or flow-call usage in the current app graph.", flow.ID),
+			Severity: "info",
+			Path:     "resources." + flow.ID,
+		})
+	}
+
+	return flowUsageSummary{
+		HandlerRefs:     sortedStrings(handlerRefs),
+		TriggerRefs:     sortedKeys(triggerRefs),
+		ActionRefs:      sortedKeys(actionRefs),
+		InferredInputs:  mapFlowParams(inferredInputs),
+		InferredOutputs: mapFlowParams(inferredOutputs),
+		UsedByCount:     usedByCount,
+		UsesMappings:    usesMappings,
+		Diagnostics:     diagnostics,
+	}
+}
+
+func normalizeFlowMetadataParams(fields []map[string]any, source string) []flowParam {
+	result := make([]flowParam, 0, len(fields))
+	for index, field := range fields {
+		name := stringValue(field["name"])
+		if name == "" {
+			name = fmt.Sprintf("%s_%d", source, index)
+		}
+		result = append(result, flowParam{
+			Name:        name,
+			Type:        normalizeFlowParamType(stringValue(field["type"])),
+			Required:    boolValue(field["required"]),
+			Source:      source,
+			Description: stringValue(field["description"]),
+		})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+	return result
+}
+
+func normalizeFlowParamType(value string) string {
+	if normalized := normalizeExpectedFieldType(value); normalized != "" {
+		return normalized
+	}
+	if strings.EqualFold(value, "any") {
+		return "any"
+	}
+	return "unknown"
+}
+
+func inferFlowParamType(value any) string {
+	switch typed := value.(type) {
+	case []any:
+		return "array"
+	case map[string]any:
+		return "object"
+	case float64, float32, int, int32, int64:
+		return "number"
+	case bool:
+		return "boolean"
+	case string:
+		if !strings.Contains(typed, "$") {
+			return "string"
+		}
+		return "unknown"
+	default:
+		return "unknown"
+	}
+}
+
+func mergeFlowParam(existing flowParam, incoming flowParam) flowParam {
+	if existing.Name == "" {
+		return incoming
+	}
+	if flowParamTypeRank(incoming.Type) > flowParamTypeRank(existing.Type) {
+		existing.Type = incoming.Type
+	}
+	if flowParamSourceRank(incoming.Source) > flowParamSourceRank(existing.Source) {
+		existing.Source = incoming.Source
+	}
+	if !existing.Required && incoming.Required {
+		existing.Required = true
+	}
+	if existing.Description == "" {
+		existing.Description = incoming.Description
+	}
+	return existing
+}
+
+func flowParamTypeRank(value string) int {
+	switch value {
+	case "unknown":
+		return 0
+	case "any":
+		return 1
+	default:
+		return 2
+	}
+}
+
+func flowParamSourceRank(value string) int {
+	switch value {
+	case "unknown":
+		return 0
+	case "activity_inferred":
+		return 1
+	case "mapping_inferred":
+		return 2
+	case "metadata":
+		return 3
+	default:
+		return 0
+	}
+}
+
+func collectFlowResolverNames(value any) []string {
+	names := map[string]bool{}
+	collectFlowResolverNamesInto(value, names)
+	return sortedKeys(names)
+}
+
+func collectFlowResolverNamesInto(value any, names map[string]bool) {
+	switch typed := value.(type) {
+	case string:
+		for _, reference := range collectResolverReferences(typed) {
+			if strings.HasPrefix(reference, "$flow.") {
+				names[strings.TrimPrefix(reference, "$flow.")] = true
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			collectFlowResolverNamesInto(item, names)
+		}
+	case map[string]any:
+		for _, item := range typed {
+			collectFlowResolverNamesInto(item, names)
+		}
+	}
+}
+
+func mapFlowParams(values map[string]flowParam) []flowParam {
+	result := make([]flowParam, 0, len(values))
+	for _, value := range values {
+		result = append(result, value)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+	return result
+}
+
+func normalizeFlowActionRef(ref string, flowURI string) string {
+	if strings.HasPrefix(flowURI, "res://flow:") {
+		return "#flow:" + strings.TrimPrefix(flowURI, "res://flow:")
+	}
+	if ref == "" {
+		return ""
+	}
+	if ref == "#flow" || strings.HasSuffix(ref, "/flow") {
+		if strings.HasPrefix(flowURI, "res://flow:") {
+			return "#flow:" + strings.TrimPrefix(flowURI, "res://flow:")
+		}
+		return "#flow"
+	}
+	if strings.HasPrefix(ref, "flow:") {
+		return "#" + ref
+	}
+	return ref
+}
+
+func resolveHandlerFlowRef(handler flogoHandler) string {
+	return normalizeFlowActionRef(handler.ActionRef, stringValue(handler.ActionSettings["flowURI"]))
 }
 
 func metadataFieldsToContrib(fields []map[string]any, prefix string) []contribField {
@@ -2973,7 +6918,7 @@ func buildCanonicalProjection(app flogoApp, target string, resourceID string) an
 		handlers := make([]map[string]any, 0, len(trigger.Handlers))
 		for _, handler := range trigger.Handlers {
 			handlers = append(handlers, map[string]any{
-				"actionRef": handler.ActionRef,
+				"actionRef": emptyToNil(resolveHandlerFlowRef(handler)),
 				"settings":  sortMap(handler.Settings),
 			})
 		}
@@ -3078,6 +7023,7 @@ func projectFlow(flow flogoFlow) map[string]any {
 		tasks = append(tasks, map[string]any{
 			"id":          task.ID,
 			"name":        emptyToNil(task.Name),
+			"type":        emptyToNil(task.Type),
 			"activityRef": emptyToNil(task.ActivityRef),
 			"input":       sortMap(task.Input),
 			"output":      sortMap(task.Output),
@@ -3219,6 +7165,12 @@ func sortedKeys(values map[string]bool) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func sortedStrings(values []string) []string {
+	result := append([]string{}, values...)
+	sort.Strings(result)
+	return result
 }
 
 func collectResolverKinds(value any, propertyRefs map[string]bool, envRefs map[string]bool) {
@@ -3458,8 +7410,22 @@ func inferAlias(ref string) string {
 	return normalizeAlias(parts[len(parts)-1])
 }
 
+func inferAliasFromRef(ref string) string {
+	return inferAlias(ref)
+}
+
 func normalizeAlias(alias string) string {
 	return strings.TrimSpace(strings.TrimPrefix(alias, "#"))
+}
+
+func slugify(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(normalized, "-")
+	normalized = strings.Trim(normalized, "-")
+	if normalized == "" {
+		return "flow"
+	}
+	return normalized
 }
 
 func mapValue(value any) map[string]any {
@@ -3482,6 +7448,23 @@ func stringValue(value any) string {
 		return typed
 	default:
 		return ""
+	}
+}
+
+func numberValue(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int32:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	default:
+		return 0
 	}
 }
 

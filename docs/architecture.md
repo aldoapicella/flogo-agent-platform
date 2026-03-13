@@ -58,6 +58,15 @@ The Go helper binary exists to bridge into Flogo Core/Flow-native capability wit
 
 It currently supports:
 
+- runtime trace capture,
+- replay,
+- run comparison,
+- flow contract inference,
+- subflow extraction and inlining,
+- iterator synthesis,
+- retry-on-error synthesis,
+- doWhile synthesis,
+- error-path templates,
 - contribution inventory,
 - contribution catalog generation,
 - descriptor inspection,
@@ -73,7 +82,6 @@ It currently supports:
 It is expected to grow into:
 
 - programmatic Core composition,
-- runtime trace and replay,
 - contribution scaffolding and validation.
 
 ## High-level topology
@@ -111,6 +119,10 @@ Responsibilities:
 - store tasks, events, approvals, artifacts, build runs, and test runs through Prisma,
 - expose task history and run summaries,
 - expose direct app-analysis endpoints for graph, inventory, catalog, descriptor inspection, contribution evidence inspection, governance reporting, composition comparison, artifact listing, and mapping preview,
+- expose direct app-analysis endpoints for flow contract inference,
+- expose direct flow-refactor endpoints for trigger binding, subflow extraction, subflow inlining, and advanced control-flow synthesis,
+- expose direct flow-refactor endpoints for error-path templates,
+- expose direct runtime-analysis endpoints for runtime trace capture and replay,
 - expose direct app-analysis endpoints for property planning and mapping tests,
 - persist app-analysis payload JSON to Blob/Azurite-backed storage,
 - accept internal sync callbacks from the orchestrator and runner paths.
@@ -145,6 +157,16 @@ Current workflow modes:
   - `generate_smoke`
   - `run_smoke`
 - analysis-only workflow modes:
+  - `infer_flow_contracts`
+  - `bind_trigger`
+  - `extract_subflow`
+  - `inline_subflow`
+  - `add_iterator`
+  - `add_retry_policy`
+  - `add_dowhile`
+  - `add_error_path`
+  - `capture_run_trace`
+  - `replay_flow`
   - `inventory_contribs`
   - `catalog_contribs`
   - `inspect_contrib_evidence`
@@ -173,6 +195,16 @@ Responsibilities:
 Current notable behavior:
 
 - local mode executes real helper commands for:
+  - `infer_flow_contracts`
+  - `bind_trigger`
+  - `extract_subflow`
+  - `inline_subflow`
+  - `add_iterator`
+  - `add_retry_policy`
+  - `add_dowhile`
+  - `add_error_path`
+  - `capture_run_trace`
+  - `replay_flow`
   - `inventory_contribs`
   - `catalog_contribs`
   - `inspect_descriptor`
@@ -201,7 +233,7 @@ Responsibilities:
 
 Current limitation:
 
-- the operator UI is still a thin shell and does not yet expose dedicated catalog, mapping preview, replay, or contribution-authoring views.
+- the operator UI is still a thin shell and does not yet expose dedicated catalog, mapping preview, runtime-trace, replay, or contribution-authoring views.
 
 ## Shared package responsibilities
 
@@ -274,6 +306,16 @@ Stores eval fixtures and scoring helpers.
 
 Implements the current Go-side Flogo-native command surface:
 
+- `flows trace`
+- `flows replay`
+- `flows contracts`
+- `triggers bind`
+- `flows extract-subflow`
+- `flows inline-subflow`
+- `flows add-iterator`
+- `flows add-retry-policy`
+- `flows add-dowhile`
+- `flows add-error-path`
 - `inventory contribs`
 - `catalog contribs`
 - `inspect descriptor`
@@ -373,14 +415,14 @@ Persisted through Prisma today:
 
 ### Current partial persistence
 
-- app-scoped inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test artifacts are persisted through hidden synthetic analysis tasks,
+- app-scoped inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, mapping-test, runtime-trace, and replay artifacts are persisted through hidden synthetic analysis tasks,
 - those app-analysis payloads are stored in Blob/Azurite-backed JSON objects,
 - broader task artifacts outside the app-analysis slice still include logical/local URIs.
 
 ### Planned persistence growth
 
 - blob-backed workspace snapshots,
-- runtime traces and replay artifacts,
+- run-comparison artifacts,
 - richer Flogo graph projections,
 - contribution bundle artifacts.
 
@@ -389,7 +431,7 @@ Persisted through Prisma today:
 - `flogo.json` is still the canonical artifact even as the Go helper path grows.
 - The Go helper is intentionally a finite execution binary, not a new always-on service.
 - The current helper uses contribution inventory plus module-aware package discovery, evidence confidence, normalized Flogo metadata, static mapping evaluation, and known-registry inference for the Phase 1 analysis path; it is not yet a full Core/Flow-native runtime.
-- Flow-aware, runtime-aware, and extension-aware capabilities are still roadmap items.
+- Runtime trace capture, replay, and run comparison are now implemented; contribution-authoring remains a roadmap item.
 - In restricted shells on Windows, `next build` and Vitest can fail with `spawn EPERM` even when typecheck is clean.
 
 ## Reference documents

@@ -55,6 +55,19 @@ Important current `inputs` conventions:
 - `mode = "mapping_preview"` for analysis-only mapping preview work
 - `mode = "mapping_test"` for analysis-only mapping-resolution tests
 - `mode = "property_plan"` for analysis-only property/environment planning
+- `mode = "trigger_binding_plan"` for analysis-only trigger-binding planning
+- `mode = "subflow_extraction_plan"` for analysis-only subflow extraction planning
+- `mode = "subflow_inlining_plan"` for analysis-only subflow inlining planning
+- `mode = "iterator_plan"` for analysis-only iterator planning
+- `mode = "retry_policy_plan"` for analysis-only retry-policy planning
+- `mode = "dowhile_plan"` for analysis-only doWhile planning
+- `mode = "error_path_plan"` for analysis-only error-path planning
+- `mode = "run_trace_plan"` for analysis-only runtime trace preflight
+- `mode = "run_trace"` for helper-backed runtime trace execution
+- `mode = "replay_plan"` for analysis-only replay preflight
+- `mode = "replay"` for helper-backed replay execution
+- `mode = "run_comparison_plan"` for analysis-only run-comparison preflight
+- `mode = "run_comparison"` for helper-backed run comparison execution
 - `mode = "governance"` for analysis-only alias/orphan/version validation
 - `mode = "composition_compare"` for analysis-only JSON vs programmatic comparison
 
@@ -150,8 +163,26 @@ Current artifact kinds:
 - `mapping_test`
 - `property_plan`
 - `flow_contract`
+- `trigger_binding_plan`
+- `trigger_binding_result`
+- `subflow_extraction_plan`
+- `subflow_extraction_result`
+- `subflow_inlining_plan`
+- `subflow_inlining_result`
+- `iterator_plan`
+- `iterator_result`
+- `retry_policy_plan`
+- `retry_policy_result`
+- `dowhile_plan`
+- `dowhile_result`
+- `error_path_plan`
+- `error_path_result`
+- `run_trace_plan`
 - `run_trace`
+- `replay_plan`
 - `replay_report`
+- `run_comparison_plan`
+- `run_comparison`
 - `contrib_bundle`
 
 ## Flogo-native contracts
@@ -282,6 +313,111 @@ Current property-plan output includes:
 - `profileSpecificNotes`
 - `deploymentNotes`
 - `diagnostics`
+
+### Flow design contracts
+
+Important schemas:
+
+- `FlowContract`
+- `FlowContracts`
+- `FlowContractsResponse`
+- `TriggerBindingRequest`
+- `TriggerBindingResponse`
+- `SubflowExtractionRequest`
+- `SubflowExtractionPlan`
+- `SubflowExtractionResult`
+- `SubflowExtractionResponse`
+- `SubflowInliningRequest`
+- `SubflowInliningPlan`
+- `SubflowInliningResult`
+- `SubflowInliningResponse`
+- `IteratorSynthesisRequest`
+- `IteratorSynthesisPlan`
+- `IteratorSynthesisResult`
+- `IteratorSynthesisResponse`
+- `RetryPolicyRequest`
+- `RetryPolicyPlan`
+- `RetryPolicyResult`
+- `RetryPolicyResponse`
+- `DoWhileSynthesisRequest`
+- `DoWhileSynthesisPlan`
+- `DoWhileSynthesisResult`
+- `DoWhileSynthesisResponse`
+
+These describe:
+
+- metadata-first reusable flow I/O inference,
+- trigger-profile-aware flow rebinding,
+- validate-only and mutating trigger-binding plans/results,
+- explicit contiguous task-sequence extraction into new subflows,
+- validate-only and mutating subflow extraction plans/results,
+- same-app subflow invocation inlining,
+- validate-only and mutating iterator synthesis plans/results,
+- validate-only and mutating retry-policy plans/results,
+- validate-only and mutating doWhile synthesis plans/results,
+- validate-only and mutating error-path template plans/results,
+- deterministic inline task ID generation and optional unused-flow cleanup,
+- response artifact references for each design-time flow refactor step.
+
+### Runtime trace contracts
+
+Important schemas:
+
+- `RunTraceCaptureOptions`
+- `RunTraceRequest`
+- `RunTraceTaskStep`
+- `RunTraceSummary`
+- `RunTrace`
+- `RunTraceResponse`
+
+These describe:
+
+- validate-only preflight for runtime trace capture,
+- task-level execution steps in runtime order,
+- shallow task input/output snapshots,
+- optional flow-state and activity-state capture,
+- failed-trace summaries with structured diagnostics,
+- response artifact references for `run_trace_plan` and `run_trace`.
+
+### Replay contracts
+
+Important schemas:
+
+- `ReplayRequest`
+- `ReplaySummary`
+- `ReplayResult`
+- `ReplayResponse`
+
+These describe:
+
+- validate-only replay feasibility checks,
+- replay from either explicit base input or stored `run_trace` input,
+- deep-merged override application,
+- nested runtime-trace output for successful replay execution,
+- structured failed-replay summaries with diagnostics,
+- response artifact references for `replay_plan` and `replay_report`.
+
+### Run comparison contracts
+
+Important schemas:
+
+- `RunComparisonOptions`
+- `RunComparisonRequest`
+- `RunComparisonArtifactRef`
+- `RunComparisonValueDiff`
+- `RunComparisonStepDiff`
+- `RunComparisonSummaryDiff`
+- `RunComparisonResult`
+- `RunComparisonResponse`
+
+These describe:
+
+- validate-only comparison feasibility checks,
+- comparison of stored `run_trace` and `replay_report` artifacts,
+- summary-level status/input/output/error/step-count diffs,
+- task-level diffs paired by `taskId`,
+- nested value diffs for task inputs, outputs, flow state, and activity state,
+- response artifact references for `run_comparison_plan` and `run_comparison`.
 
 ## Orchestration contracts
 
@@ -429,7 +565,13 @@ Current graph-level logic includes:
 - coercion suggestion heuristics,
 - descriptor-source-aware contribution introspection,
 - richer app property and environment planning,
-- deployment-profile-aware property planning.
+- deployment-profile-aware property planning,
+- flow-contract inference,
+- trigger-binding planning and application,
+- subflow extraction and inlining for explicit contiguous linear task selections,
+- iterator synthesis,
+- retry-on-error synthesis,
+- doWhile synthesis.
 
 ## Prisma persistence schema
 
@@ -530,7 +672,13 @@ The current model is still ahead of the implementation roadmap in several places
 
 Examples:
 
-- `flow_contract`, `run_trace`, `replay_report`, and `contrib_bundle` are defined as artifact kinds, but the runtime features that produce them are not implemented yet.
+- `flow_contract` is now produced by the flow-contract inference slice.
+- `trigger_binding_plan` and `trigger_binding_result` are now produced by the trigger-binding slice.
+- `subflow_extraction_plan`, `subflow_extraction_result`, `subflow_inlining_plan`, and `subflow_inlining_result` are now produced by the subflow-refactor slice.
+- `iterator_plan`, `iterator_result`, `retry_policy_plan`, `retry_policy_result`, `dowhile_plan`, `dowhile_result`, `error_path_plan`, and `error_path_result` are now produced by the advanced control-flow synthesis slice.
+- `run_trace_plan` and `run_trace` are now produced by the direct/runtime helper-backed trace capture path.
+- `replay_plan` and `replay_report` are now produced by the direct/helper-backed replay path.
+- `contrib_bundle` remains a defined artifact kind whose producing feature is not implemented yet.
 - graph projections in Prisma exist, but the current runtime does not fully maintain them.
 - task persistence is live, but workspace snapshots and blob-backed artifact content are still planned work.
 - task persistence is live, app-analysis payload storage is live, but workspace snapshots and broader blob-backed artifact content are still planned work.

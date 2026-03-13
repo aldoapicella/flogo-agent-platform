@@ -6,12 +6,32 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import {
   analyzePropertyUsage,
+  applyErrorPathTemplate,
+  applyDoWhileSynthesis,
+  applyIteratorSynthesis,
+  applyRetryPolicy,
+  applySubflowExtraction,
+  applySubflowInlining,
   buildAppGraph,
   buildContributionInventory,
   buildContribCatalog,
   compareJsonVsProgrammatic,
+  compareRuns,
+  applyTriggerBinding,
+  inferFlowContract,
+  inferFlowContracts,
   inspectContribEvidence,
   inspectContribDescriptor,
+  planErrorPathTemplate,
+  planReplay,
+  planRunComparison,
+  planRunTrace,
+  planSubflowExtraction,
+  planSubflowInlining,
+  planDoWhileSynthesis,
+  planIteratorSynthesis,
+  planRetryPolicy,
+  planTriggerBinding,
   previewMapping,
   runMappingTest,
   suggestCoercions,
@@ -134,6 +154,114 @@ const legacyShapeApp = {
   }
 };
 
+const bindableFlowApp = {
+  name: "bindable",
+  type: "flogo:app",
+  appModel: "1.1.0",
+  imports: [
+    {
+      alias: "log",
+      ref: "github.com/project-flogo/contrib/activity/log"
+    }
+  ],
+  triggers: [],
+  resources: {
+    hello: {
+      type: "flow",
+      data: {
+        metadata: {
+          input: ["payload"],
+          output: ["message"]
+        },
+        tasks: [
+          {
+            id: "log-request",
+            name: "log-request",
+            activity: {
+              ref: "#log"
+            },
+            input: {
+              message: "received request"
+            }
+          }
+        ]
+      }
+    },
+    heartbeat: {
+      type: "flow",
+      data: {
+        metadata: {
+          input: [],
+          output: ["status"]
+        },
+        tasks: []
+      }
+    }
+  }
+};
+
+const subflowCandidateApp = {
+  name: "subflow-candidate",
+  type: "flogo:app",
+  appModel: "1.1.0",
+  imports: [
+    {
+      alias: "log",
+      ref: "github.com/project-flogo/contrib/activity/log"
+    }
+  ],
+  triggers: [],
+  resources: {
+    orchestrate: {
+      type: "flow",
+      data: {
+        metadata: {
+          input: [{ name: "payload", required: true }],
+          output: [{ name: "message" }]
+        },
+        tasks: [
+          {
+            id: "prepare",
+            name: "prepare",
+            activity: {
+              ref: "#log"
+            },
+            input: {
+              message: "$flow.payload"
+            },
+            output: {
+              prepared: "$flow.payload"
+            }
+          },
+          {
+            id: "work",
+            name: "work",
+            activity: {
+              ref: "#log"
+            },
+            input: {
+              message: "$flow.prepared"
+            },
+            output: {
+              message: "$flow.prepared"
+            }
+          },
+          {
+            id: "finish",
+            name: "finish",
+            activity: {
+              ref: "#log"
+            },
+            input: {
+              message: "$flow.message"
+            }
+          }
+        ]
+      }
+    }
+  }
+};
+
 describe("flogo graph", () => {
   const tempPaths: string[] = [];
 
@@ -206,6 +334,746 @@ describe("flogo graph", () => {
     expect(report.ok).toBe(true);
     expect(catalog.entries.some((entry) => entry.ref === "#flow:hello")).toBe(true);
     expect(catalog.entries.some((entry) => entry.ref === "#log")).toBe(true);
+  });
+
+  it("infers flow contracts from metadata and handler mappings", () => {
+    const app = structuredClone(legacyShapeApp);
+    app.triggers[0].handlers[0].input = {
+      name: "$trigger.content.name"
+    };
+    app.triggers[0].handlers[0].output = {
+      data: "$flow.message"
+    };
+
+    const contracts = inferFlowContracts(app);
+    const helloContract = contracts.contracts.find((entry) => entry.flowId === "hello");
+
+    expect(helloContract).toBeDefined();
+    expect(helloContract?.inputs.some((param) => param.name === "name")).toBe(true);
+    expect(helloContract?.outputs.some((param) => param.name === "message")).toBe(true);
+    expect(helloContract?.usage.triggerRefs).toContain("rest");
+    expect(helloContract?.evidenceLevel).toBe("metadata_plus_mapping");
+    expect(helloContract?.reusable).toBe(true);
+  });
+
+  it("returns undefined when a requested flow contract does not exist", () => {
+    expect(inferFlowContract(validApp, "missing")).toBeUndefined();
+  });
+
+  it("plans a runtime trace when required inputs are satisfied", () => {
+    const response = planRunTrace(subflowCandidateApp, {
+      flowId: "orchestrate",
+      sampleInput: {
+        payload: "hello"
+      }
+    });
+
+    expect(response.validation?.ok).toBe(true);
+    expect(response.validation?.stages[0]?.stage).toBe("runtime");
+  });
+
+  it("rejects runtime trace planning when the flow is unknown", () => {
+    expect(() =>
+      planRunTrace(subflowCandidateApp, {
+        flowId: "missing",
+        sampleInput: {}
+      })
+    ).toThrow(/Unknown flow missing/);
+  });
+
+  it("rejects runtime trace planning when required input is missing", () => {
+    expect(() =>
+      planRunTrace(subflowCandidateApp, {
+        flowId: "orchestrate",
+        sampleInput: {}
+      })
+    ).toThrow(/Run trace request is invalid/);
+  });
+
+  it("plans a replay when effective input satisfies the flow contract", () => {
+    const response = planReplay(subflowCandidateApp, {
+      flowId: "orchestrate",
+      baseInput: {
+        payload: "hello",
+        nested: {
+          count: 1
+        }
+      },
+      overrides: {
+        nested: {
+          count: 2
+        }
+      }
+    });
+
+    expect(response.result.validation?.ok).toBe(true);
+    expect(response.result.summary.effectiveInput).toEqual({
+      payload: "hello",
+      nested: {
+        count: 2
+      }
+    });
+    expect(response.result.summary.inputSource).toBe("explicit_input");
+  });
+
+  it("rejects replay planning when the flow is unknown", () => {
+    expect(() =>
+      planReplay(subflowCandidateApp, {
+        flowId: "missing",
+        baseInput: {}
+      })
+    ).toThrow(/Unknown flow missing/);
+  });
+
+  it("rejects replay planning when required input is missing after overrides are applied", () => {
+    expect(() =>
+      planReplay(subflowCandidateApp, {
+        flowId: "orchestrate",
+        baseInput: {},
+        overrides: {}
+      })
+    ).toThrow(/Replay request is invalid/);
+  });
+
+  it("plans run comparison for identical run traces", () => {
+    const left = {
+      artifactId: "left-trace",
+      kind: "run_trace" as const,
+      payload: {
+        trace: {
+          appName: "demo",
+          flowId: "orchestrate",
+          summary: {
+            flowId: "orchestrate",
+            status: "completed",
+            input: {
+              payload: "hello"
+            },
+            output: {
+              message: "hello"
+            },
+            stepCount: 1,
+            diagnostics: []
+          },
+          steps: [
+            {
+              taskId: "prepare",
+              status: "completed",
+              input: {
+                payload: "hello"
+              },
+              output: {
+                message: "hello"
+              },
+              diagnostics: []
+            }
+          ],
+          diagnostics: []
+        }
+      }
+    };
+
+    const response = planRunComparison(
+      {
+        leftArtifactId: "left-trace",
+        rightArtifactId: "right-trace"
+      },
+      left,
+      {
+        ...left,
+        artifactId: "right-trace"
+      }
+    );
+
+    expect(response.validation?.ok).toBe(true);
+    expect(response.validation?.stages[0]?.stage).toBe("runtime");
+  });
+
+  it("compares a run trace and replay report by task id", () => {
+    const response = compareRuns(
+      {
+        leftArtifactId: "trace-artifact",
+        rightArtifactId: "replay-artifact"
+      },
+      {
+        artifactId: "trace-artifact",
+        kind: "run_trace",
+        payload: {
+          trace: {
+            appName: "demo",
+            flowId: "orchestrate",
+            summary: {
+              flowId: "orchestrate",
+              status: "completed",
+              input: {
+                payload: "hello"
+              },
+              output: {
+                message: "hello"
+              },
+              stepCount: 1,
+              diagnostics: []
+            },
+            steps: [
+              {
+                taskId: "prepare",
+                status: "completed",
+                output: {
+                  message: "hello"
+                },
+                diagnostics: []
+              }
+            ],
+            diagnostics: []
+          }
+        }
+      },
+      {
+        artifactId: "replay-artifact",
+        kind: "replay_report",
+        payload: {
+          result: {
+            summary: {
+              flowId: "orchestrate",
+              status: "completed",
+              inputSource: "explicit_input",
+              baseInput: {
+                payload: "hello"
+              },
+              effectiveInput: {
+                payload: "replayed"
+              },
+              overridesApplied: true,
+              diagnostics: []
+            },
+            trace: {
+              appName: "demo",
+              flowId: "orchestrate",
+              summary: {
+                flowId: "orchestrate",
+                status: "completed",
+                input: {
+                  payload: "replayed"
+                },
+                output: {
+                  message: "replayed"
+                },
+                stepCount: 1,
+                diagnostics: []
+              },
+              steps: [
+                {
+                  taskId: "prepare",
+                  status: "completed",
+                  output: {
+                    message: "replayed"
+                  },
+                  diagnostics: []
+                }
+              ],
+              diagnostics: []
+            }
+          }
+        }
+      }
+    );
+
+    expect(response.result?.summary.outputDiff.kind).toBe("changed");
+    expect(response.result?.steps).toHaveLength(1);
+    expect(response.result?.steps[0]?.taskId).toBe("prepare");
+    expect(response.result?.steps[0]?.outputDiff?.kind).toBe("changed");
+  });
+
+  it("rejects run comparison for invalid artifact kinds", () => {
+    expect(() =>
+      planRunComparison(
+        {
+          leftArtifactId: "left",
+          rightArtifactId: "right"
+        },
+        {
+          artifactId: "left",
+          kind: "contrib_catalog" as never,
+          payload: {}
+        },
+        {
+          artifactId: "right",
+          kind: "run_trace",
+          payload: {
+            trace: {
+              appName: "demo",
+              flowId: "orchestrate",
+              summary: {
+                flowId: "orchestrate",
+                status: "completed",
+                input: {},
+                output: {},
+                stepCount: 0,
+                diagnostics: []
+              },
+              steps: [],
+              diagnostics: []
+            }
+          }
+        }
+      )
+    ).toThrow(/not a comparable runtime artifact/);
+  });
+
+  it("allows cross-flow run comparison with a warning diagnostic", () => {
+    const response = planRunComparison(
+      {
+        leftArtifactId: "left",
+        rightArtifactId: "right"
+      },
+      {
+        artifactId: "left",
+        kind: "run_trace",
+        payload: {
+          trace: {
+            appName: "demo",
+            flowId: "left-flow",
+            summary: {
+              flowId: "left-flow",
+              status: "completed",
+              input: {},
+              output: {},
+              stepCount: 0,
+              diagnostics: []
+            },
+            steps: [],
+            diagnostics: []
+          }
+        }
+      },
+      {
+        artifactId: "right",
+        kind: "run_trace",
+        payload: {
+          trace: {
+            appName: "demo",
+            flowId: "right-flow",
+            summary: {
+              flowId: "right-flow",
+              status: "completed",
+              input: {},
+              output: {},
+              stepCount: 0,
+              diagnostics: []
+            },
+            steps: [],
+            diagnostics: []
+          }
+        }
+      }
+    );
+
+    expect(response.validation?.ok).toBe(true);
+    expect(response.validation?.stages[0]?.diagnostics.some((diagnostic) => diagnostic.code === "flogo.run_comparison.flow_mismatch")).toBe(
+      true
+    );
+  });
+
+  it("plans a REST trigger binding from an inferred flow contract", () => {
+    const response = planTriggerBinding(bindableFlowApp, {
+      flowId: "hello",
+      profile: {
+        kind: "rest",
+        method: "POST",
+        path: "/hello",
+        port: 8081,
+        replyMode: "json",
+        requestMappingMode: "auto",
+        replyMappingMode: "auto"
+      }
+    });
+
+    expect(response.result.applied).toBe(false);
+    expect(response.result.plan.triggerRef).toBe("#rest");
+    expect(response.result.plan.generatedMappings.input.payload).toBe("$trigger.content");
+    expect(response.result.plan.generatedMappings.output.data).toBe("$flow.message");
+    expect(response.result.validation?.ok).toBe(true);
+  });
+
+  it("applies a channel trigger binding and injects a flow action reference", () => {
+    const response = applyTriggerBinding(bindableFlowApp, {
+      flowId: "hello",
+      profile: {
+        kind: "channel",
+        channel: "orders"
+      }
+    });
+
+    expect(response.result.applied).toBe(true);
+    expect(response.result.app?.imports.some((entry) => entry.alias === "channel")).toBe(true);
+    expect(response.result.app?.triggers.some((trigger) => trigger.ref === "#channel")).toBe(true);
+    expect(response.result.app?.triggers[0]?.handlers[0]?.action?.ref).toBe("#flow");
+    expect(response.result.app?.triggers[0]?.handlers[0]?.action?.settings?.flowURI).toBe("res://flow:hello");
+  });
+
+  it("rejects timer bindings for flows with required inputs", () => {
+    const app = structuredClone(bindableFlowApp);
+    app.resources.hello.data.metadata.input = [
+      {
+        name: "payload",
+        required: true
+      }
+    ];
+
+    expect(() =>
+      planTriggerBinding(app, {
+        flowId: "hello",
+        profile: {
+          kind: "timer",
+          runMode: "repeat",
+          repeatInterval: "10s"
+        }
+      })
+    ).toThrow(/zero required inputs/i);
+  });
+
+  it("rejects duplicate trigger bindings unless replacement is requested", () => {
+    expect(() =>
+      planTriggerBinding(legacyShapeApp, {
+        flowId: "hello",
+        profile: {
+          kind: "rest",
+          method: "GET",
+          path: "/hello",
+          port: 8080,
+          replyMode: "json",
+          requestMappingMode: "auto",
+          replyMappingMode: "auto"
+        }
+      })
+    ).toThrow(/already exists/i);
+  });
+
+  it("plans extraction of a contiguous task sequence into a subflow", () => {
+    const response = planSubflowExtraction(subflowCandidateApp, {
+      flowId: "orchestrate",
+      taskIds: ["prepare", "work"]
+    });
+
+    expect(response.result.applied).toBe(false);
+    expect(response.result.plan.parentFlowId).toBe("orchestrate");
+    expect(response.result.plan.newFlowContract.inputs.map((param) => param.name)).toContain("payload");
+    expect(response.result.plan.newFlowContract.outputs.map((param) => param.name)).toContain("message");
+    expect(response.result.plan.invocation.activityRef).toBe("#flow");
+    expect(response.result.plan.invocation.settings.flowURI).toContain("res://flow:");
+  });
+
+  it("applies subflow extraction and replaces the selected region with one invocation", () => {
+    const response = applySubflowExtraction(subflowCandidateApp, {
+      flowId: "orchestrate",
+      taskIds: ["prepare", "work"]
+    });
+
+    expect(response.result.applied).toBe(true);
+    expect(response.result.app?.resources.some((resource) => resource.id === response.result.plan.newFlowId)).toBe(true);
+    const parent = response.result.app?.resources.find((resource) => resource.id === "orchestrate");
+    expect(parent?.data.tasks.map((task) => task.id)).toEqual([response.result.plan.invocation.taskId, "finish"]);
+  });
+
+  it("rejects non-contiguous extraction selections", () => {
+    expect(() =>
+      planSubflowExtraction(subflowCandidateApp, {
+        flowId: "orchestrate",
+        taskIds: ["prepare", "finish"]
+      })
+    ).toThrow(/contiguous/i);
+  });
+
+  it("rejects extraction for linked flows in this slice", () => {
+    const app = structuredClone(subflowCandidateApp);
+    app.resources.orchestrate.data.links = [
+      {
+        from: "prepare",
+        to: "work"
+      }
+    ];
+
+    expect(() =>
+      planSubflowExtraction(app, {
+        flowId: "orchestrate",
+        taskIds: ["prepare", "work"]
+      })
+    ).toThrow(/branching/i);
+  });
+
+  it("plans and applies subflow inlining back into the parent flow", () => {
+    const extracted = applySubflowExtraction(subflowCandidateApp, {
+      flowId: "orchestrate",
+      taskIds: ["prepare", "work"]
+    });
+    const invocationTaskId = extracted.result.plan.invocation.taskId;
+
+    const plan = planSubflowInlining(extracted.result.app!, {
+      parentFlowId: "orchestrate",
+      invocationTaskId
+    });
+    expect(plan.result.plan.inlinedFlowId).toBe(extracted.result.plan.newFlowId);
+
+    const inlined = applySubflowInlining(extracted.result.app!, {
+      parentFlowId: "orchestrate",
+      invocationTaskId,
+      removeExtractedFlowIfUnused: true
+    });
+
+    const parent = inlined.result.app?.resources.find((resource) => resource.id === "orchestrate");
+    expect(parent?.data.tasks.map((task) => task.id)).toEqual([`${invocationTaskId}__prepare`, `${invocationTaskId}__work`, "finish"]);
+    expect(inlined.result.app?.resources.some((resource) => resource.id === extracted.result.plan.newFlowId)).toBe(false);
+  });
+
+  it("plans and applies iterator synthesis for a plain activity task", () => {
+    const plan = planIteratorSynthesis(subflowCandidateApp, {
+      flowId: "orchestrate",
+      taskId: "work",
+      iterateExpr: "=$flow.items",
+      validateOnly: true
+    });
+
+    expect(plan.result.plan.nextTaskType).toBe("iterator");
+    expect(plan.result.plan.updatedSettings.iterate).toBe("=$flow.items");
+
+    const applied = applyIteratorSynthesis(subflowCandidateApp, {
+      flowId: "orchestrate",
+      taskId: "work",
+      iterateExpr: "=$flow.items",
+      accumulate: true
+    });
+
+    const flow = applied.result.app?.resources.find((resource) => resource.id === "orchestrate");
+    const task = flow?.data.tasks.find((entry) => entry.id === "work");
+    expect(task?.type).toBe("iterator");
+    expect(task?.settings.iterate).toBe("=$flow.items");
+    expect(task?.settings.accumulate).toBe(true);
+  });
+
+  it("adds retryOnError to an iterator task", () => {
+    const iterated = applyIteratorSynthesis(subflowCandidateApp, {
+      flowId: "orchestrate",
+      taskId: "work",
+      iterateExpr: "=$flow.items"
+    });
+
+    const response = applyRetryPolicy(iterated.result.app!, {
+      flowId: "orchestrate",
+      taskId: "work",
+      count: 3,
+      intervalMs: 500
+    });
+
+    const flow = response.result.app?.resources.find((resource) => resource.id === "orchestrate");
+    const task = flow?.data.tasks.find((entry) => entry.id === "work");
+    expect(task?.settings.retryOnError).toEqual({ count: 3, interval: 500 });
+  });
+
+  it("plans and applies doWhile synthesis for a subflow invocation task", () => {
+    const extracted = applySubflowExtraction(subflowCandidateApp, {
+      flowId: "orchestrate",
+      taskIds: ["prepare", "work"]
+    });
+    const invocationTaskId = extracted.result.plan.invocation.taskId;
+
+    const plan = planDoWhileSynthesis(extracted.result.app!, {
+      flowId: "orchestrate",
+      taskId: invocationTaskId,
+      condition: "=$flow.keepGoing",
+      validateOnly: true
+    });
+    expect(plan.result.plan.nextTaskType).toBe("doWhile");
+
+    const applied = applyDoWhileSynthesis(extracted.result.app!, {
+      flowId: "orchestrate",
+      taskId: invocationTaskId,
+      condition: "=$flow.keepGoing",
+      delayMs: 250
+    });
+    const flow = applied.result.app?.resources.find((resource) => resource.id === "orchestrate");
+    const task = flow?.data.tasks.find((entry) => entry.id === invocationTaskId);
+    expect(task?.type).toBe("doWhile");
+    expect(task?.settings.condition).toBe("=$flow.keepGoing");
+    expect(task?.settings.delay).toBe(250);
+  });
+
+  it("rejects incompatible iterator and doWhile conversions", () => {
+    const iterated = applyIteratorSynthesis(subflowCandidateApp, {
+      flowId: "orchestrate",
+      taskId: "work",
+      iterateExpr: "=$flow.items"
+    });
+
+    expect(() =>
+      planDoWhileSynthesis(iterated.result.app!, {
+        flowId: "orchestrate",
+        taskId: "work",
+        condition: "=$flow.keepGoing"
+      })
+    ).toThrow(/iterator/i);
+  });
+
+  it("rejects duplicate retry policies unless replacement is requested", () => {
+    const retried = applyRetryPolicy(subflowCandidateApp, {
+      flowId: "orchestrate",
+      taskId: "work",
+      count: 2,
+      intervalMs: 100
+    });
+
+    expect(() =>
+      planRetryPolicy(retried.result.app!, {
+        flowId: "orchestrate",
+        taskId: "work",
+        count: 4,
+        intervalMs: 200
+      })
+    ).toThrow(/already has retryOnError/i);
+  });
+
+  it("plans and applies a log_and_continue error path for a linear flow", () => {
+    const plan = planErrorPathTemplate(subflowCandidateApp, {
+      flowId: "orchestrate",
+      taskId: "work",
+      template: "log_and_continue",
+      validateOnly: true
+    });
+
+    expect(plan.result.applied).toBe(false);
+    expect(plan.result.plan.generatedTaskId).toBe("error_log_work");
+
+    const applied = applyErrorPathTemplate(subflowCandidateApp, {
+      flowId: "orchestrate",
+      taskId: "work",
+      template: "log_and_continue"
+    });
+
+    const flow = applied.result.app?.resources.find((resource) => resource.id === "orchestrate");
+    const generatedTask = flow?.data.tasks.find((task) => task.id === "error_log_work");
+
+    expect(generatedTask?.activityRef).toBe("#log");
+    expect(generatedTask?.input.message).toBe("Task work failed");
+    expect(flow?.data.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ from: "prepare", to: "work", type: "dependency" }),
+        expect.objectContaining({ from: "work", to: "finish", type: "expression", value: "=$activity[work].error == nil" }),
+        expect.objectContaining({ from: "work", to: "error_log_work", type: "expression", value: "=$activity[work].error != nil" }),
+        expect.objectContaining({ from: "error_log_work", to: "finish", type: "dependency" })
+      ])
+    );
+  });
+
+  it("applies a log_and_stop error path and ends the failure branch at the generated log task", () => {
+    const applied = applyErrorPathTemplate(subflowCandidateApp, {
+      flowId: "orchestrate",
+      taskId: "work",
+      template: "log_and_stop",
+      logMessage: "work failed"
+    });
+
+    const flow = applied.result.app?.resources.find((resource) => resource.id === "orchestrate");
+    const generatedTask = flow?.data.tasks.find((task) => task.id === "error_log_work");
+    const outgoing = flow?.data.links.filter((link) => link.from === "error_log_work") ?? [];
+
+    expect(generatedTask?.input.message).toBe("work failed");
+    expect(flow?.data.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ from: "work", to: "finish", type: "expression", value: "=$activity[work].error == nil" }),
+        expect.objectContaining({ from: "work", to: "error_log_work", type: "expression", value: "=$activity[work].error != nil" })
+      ])
+    );
+    expect(outgoing).toEqual([]);
+  });
+
+  it("rejects log_and_continue for the last task in a flow", () => {
+    expect(() =>
+      planErrorPathTemplate(subflowCandidateApp, {
+        flowId: "orchestrate",
+        taskId: "finish",
+        template: "log_and_continue"
+      })
+    ).toThrow(/requires the task to have a successor/i);
+  });
+
+  it("rejects unsupported existing branching links for error-path templates", () => {
+    const app = structuredClone(subflowCandidateApp);
+    app.resources.orchestrate.data.links = [
+      { from: "prepare", to: "work", type: "dependency" },
+      { from: "prepare", to: "finish", type: "dependency" }
+    ];
+
+    expect(() =>
+      planErrorPathTemplate(app, {
+        flowId: "orchestrate",
+        taskId: "work",
+        template: "log_and_stop"
+      })
+    ).toThrow(/branching links/i);
+  });
+
+  it("detects existing generated error paths unless replacement is requested", () => {
+    const applied = applyErrorPathTemplate(subflowCandidateApp, {
+      flowId: "orchestrate",
+      taskId: "work",
+      template: "log_and_continue"
+    });
+
+    expect(() =>
+      planErrorPathTemplate(applied.result.app!, {
+        flowId: "orchestrate",
+        taskId: "work",
+        template: "log_and_stop"
+      })
+    ).toThrow(/already has a generated error path/i);
+
+    const replaced = applyErrorPathTemplate(applied.result.app!, {
+      flowId: "orchestrate",
+      taskId: "work",
+      template: "log_and_stop",
+      replaceExisting: true,
+      logMessage: "replacement"
+    });
+
+    const flow = replaced.result.app?.resources.find((resource) => resource.id === "orchestrate");
+    const generatedTask = flow?.data.tasks.find((task) => task.id === "error_log_work");
+    const outgoing = flow?.data.links.filter((link) => link.from === "error_log_work") ?? [];
+
+    expect(generatedTask?.input.message).toBe("replacement");
+    expect(outgoing).toEqual([]);
+  });
+
+  it("adds or reuses the log import when applying error-path templates", () => {
+    const withoutImports = structuredClone(subflowCandidateApp);
+    withoutImports.imports = [];
+
+    const applied = applyErrorPathTemplate(withoutImports, {
+      flowId: "orchestrate",
+      taskId: "work",
+      template: "log_and_stop"
+    });
+
+    expect(applied.result.app?.imports.some((entry) => entry.alias === "log")).toBe(true);
+
+    const reused = applyErrorPathTemplate(subflowCandidateApp, {
+      flowId: "orchestrate",
+      taskId: "work",
+      template: "log_and_stop"
+    });
+
+    expect(reused.result.app?.imports.filter((entry) => entry.alias === "log")).toHaveLength(1);
+  });
+
+  it("rejects tasks without activityRef for error-path templates", () => {
+    const app = structuredClone(subflowCandidateApp);
+    delete app.resources.orchestrate.data.tasks[1].activity;
+
+    expect(() =>
+      planErrorPathTemplate(app, {
+        flowId: "orchestrate",
+        taskId: "work",
+        template: "log_and_stop"
+      })
+    ).toThrow(/has no activityRef/i);
   });
 
   it("previews mapping values with sample input", () => {

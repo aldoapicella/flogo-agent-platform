@@ -40,7 +40,11 @@ The current repo supports:
 - Flogo graph parsing, structural/semantic/mapping validation, contribution cataloging, governance validation, composition comparison, mapping preview, coercion suggestions, and property analysis,
 - direct app-analysis APIs for graph, inventory, catalog, descriptor inspection, contribution evidence inspection, governance reporting, composition comparison, mapping preview, and app-scoped analysis artifacts,
 - profile-aware property planning and deterministic mapping tests,
-- a Go helper binary for contribution inventory, contribution catalog, descriptor inspection, contribution evidence inspection, governance validation, composition comparison, mapping preview, mapping test, and property planning commands.
+- flow contract inference,
+- trigger binding for REST, Timer, CLI, and Channel trigger profiles,
+- subflow extraction and inlining for explicit contiguous linear task selections,
+- advanced control-flow synthesis for iterators, retry-on-error, and doWhile,
+- a Go helper binary for contribution inventory, contribution catalog, descriptor inspection, contribution evidence inspection, governance validation, composition comparison, mapping preview, mapping test, property planning, flow contract inference, trigger binding, subflow extraction/inlining, and advanced control-flow commands.
 
 ## Flogo-native roadmap
 
@@ -142,10 +146,21 @@ The control-plane exposes `/v1` routes, including:
 - `GET /v1/projects/:projectId/apps/:appId/contribs/evidence?ref=...`
 - `GET /v1/projects/:projectId/apps/:appId/artifacts`
 - `GET /v1/projects/:projectId/apps/:appId/governance`
+- `GET /v1/projects/:projectId/apps/:appId/flows/contracts`
 - `GET /v1/projects/:projectId/apps/:appId/properties/plan`
 - `POST /v1/projects/:projectId/apps/:appId/mappings/preview`
 - `POST /v1/projects/:projectId/apps/:appId/mappings/test`
 - `POST /v1/projects/:projectId/apps/:appId/composition/compare`
+- `POST /v1/projects/:projectId/apps/:appId/triggers/bind`
+- `POST /v1/projects/:projectId/apps/:appId/flows/extract-subflow`
+- `POST /v1/projects/:projectId/apps/:appId/flows/inline-subflow`
+- `POST /v1/projects/:projectId/apps/:appId/flows/add-iterator`
+- `POST /v1/projects/:projectId/apps/:appId/flows/add-retry-policy`
+- `POST /v1/projects/:projectId/apps/:appId/flows/add-dowhile`
+- `POST /v1/projects/:projectId/apps/:appId/flows/add-error-path`
+- `POST /v1/projects/:projectId/apps/:appId/flows/trace`
+- `POST /v1/projects/:projectId/apps/:appId/flows/replay`
+- `POST /v1/projects/:projectId/apps/:appId/flows/compare-runs`
 - `GET /v1/health`
 
 Swagger is available locally at `http://localhost:3001/docs`.
@@ -183,7 +198,9 @@ Current notable gaps:
 
 - Catalog, descriptor, governance, composition-compare, and mapping-preview app-analysis artifacts are Blob/Azurite-backed; broader runtime artifacts still have mixed local or logical URI behavior.
 - Contribution inventory now exists as the evidence layer for catalog/governance/composition analysis and includes module-aware workspace/package discovery plus contribution-evidence confidence, but it still stops short of full `project-flogo/core` package introspection.
-- Contribution inventory, catalog, governance, composition comparison, mapping preview, mapping tests, coercion suggestions, and property planning now cover the intended Phase 1 static-analysis surface; the next major capability gap is Phase 2 flow-design work.
-- Go helper behavior is real for inventory/catalog/descriptor/contribution-evidence/governance/composition comparison/mapping preview/mapping test/property planning, but not yet for flow contracts, replay, or contribution scaffolding.
-- Flow-aware, runtime-aware, and extension-aware capabilities are still planned phases.
+- Contribution inventory, catalog, governance, composition comparison, mapping preview, mapping tests, coercion suggestions, and property planning now cover the intended Phase 1 static-analysis surface.
+- Phase 2 now includes flow contract inference, trigger polymorphism, subflow extraction/inlining, and advanced control-flow synthesis exposed through direct APIs and helper-backed runner/orchestration paths, including error-path templates.
+- Go helper behavior is real for runtime trace capture, replay, and run comparison, flow contracts, trigger binding, subflow extraction/inlining, iterator synthesis, retry-policy synthesis, doWhile synthesis, error-path templates, inventory/catalog/descriptor/contribution-evidence/governance/composition comparison/mapping preview/mapping test/property planning, but not yet for contribution scaffolding.
+- Phase 3 now includes helper-backed runtime trace capture, replay, and run comparison.
+- The next roadmap target is runtime-backed debugging on top of persisted `run_trace_plan` / `run_trace`, `replay_plan` / `replay_report`, and `run_comparison_plan` / `run_comparison` artifacts.
 - `next build` and Vitest can hit environment-specific `spawn EPERM` failures in restricted shells even when workspace typecheck is clean.

@@ -1,8 +1,14 @@
 import type {
   CompositionCompareRequest,
+  DoWhileSynthesisRequest,
   DeploymentProfile,
   FlogoApp,
+  IteratorSynthesisRequest,
   MappingPreviewContext,
+  RetryPolicyRequest,
+  SubflowExtractionRequest,
+  SubflowInliningRequest,
+  TriggerBindingRequest,
   TaskRequest,
   ToolResponse
 } from "@flogo-agent/contracts";
@@ -66,6 +72,34 @@ export class FlogoTools {
 
   inspectContribEvidence(raw: string | FlogoApp | unknown, refOrAlias: string): ToolResponse {
     return this.core.inspectContribEvidence(raw, refOrAlias);
+  }
+
+  inferFlowContracts(raw: string | FlogoApp | unknown): ToolResponse {
+    return this.core.inferFlowContracts(raw);
+  }
+
+  bindTrigger(raw: string | FlogoApp | unknown, request: TriggerBindingRequest, validateOnly = false): ToolResponse {
+    return this.core.bindTrigger(raw, request, validateOnly);
+  }
+
+  extractSubflow(raw: string | FlogoApp | unknown, request: SubflowExtractionRequest, validateOnly = false): ToolResponse {
+    return this.core.extractSubflow(raw, request, validateOnly);
+  }
+
+  inlineSubflow(raw: string | FlogoApp | unknown, request: SubflowInliningRequest, validateOnly = false): ToolResponse {
+    return this.core.inlineSubflow(raw, request, validateOnly);
+  }
+
+  addIterator(raw: string | FlogoApp | unknown, request: IteratorSynthesisRequest, validateOnly = false): ToolResponse {
+    return this.core.addIterator(raw, request, validateOnly);
+  }
+
+  addRetryPolicy(raw: string | FlogoApp | unknown, request: RetryPolicyRequest, validateOnly = false): ToolResponse {
+    return this.core.addRetryPolicy(raw, request, validateOnly);
+  }
+
+  addDoWhile(raw: string | FlogoApp | unknown, request: DoWhileSynthesisRequest, validateOnly = false): ToolResponse {
+    return this.core.addDoWhile(raw, request, validateOnly);
   }
 
   validateGovernance(raw: string | FlogoApp | unknown): ToolResponse {

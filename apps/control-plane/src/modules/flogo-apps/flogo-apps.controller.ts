@@ -1,4 +1,6 @@
-import { Body, Controller, Get, NotFoundException, Param, Post, Query } from "@nestjs/common";
+import { Body, ConflictException, Controller, Get, NotFoundException, Param, Post, Query, UnprocessableEntityException } from "@nestjs/common";
+
+import { ControlFlowSynthesisError, ErrorPathTemplateError, ReplayError, RunComparisonError, RunTraceError, SubflowOperationError, TriggerBindingError } from "@flogo-agent/flogo-graph";
 
 import { FlogoAppsService } from "./flogo-apps.service.js";
 
@@ -31,6 +33,85 @@ export class FlogoAppsController {
       throw new NotFoundException(`Unknown app ${appId}`);
     }
     return catalog;
+  }
+
+  @Get(":appId/flows/contracts")
+  async getFlowContracts(
+    @Param("projectId") projectId: string,
+    @Param("appId") appId: string,
+    @Query("flowId") flowId?: string
+  ) {
+    const contracts = await this.flogoAppsService.getFlowContracts(projectId, appId, flowId);
+    if (!contracts) {
+      throw new NotFoundException(flowId ? `Unknown flow ${flowId} for app ${appId}` : `Unknown app ${appId}`);
+    }
+    return contracts;
+  }
+
+  @Post(":appId/flows/trace")
+  async traceFlow(@Param("projectId") projectId: string, @Param("appId") appId: string, @Body() body: unknown) {
+    try {
+      const result = await this.flogoAppsService.traceFlow(projectId, appId, body);
+      if (!result) {
+        throw new NotFoundException(`Unknown app ${appId}`);
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof RunTraceError) {
+        if (error.status === 404) {
+          throw new NotFoundException(error.message);
+        }
+        throw new UnprocessableEntityException({
+          message: error.message,
+          diagnostics: error.diagnostics
+        });
+      }
+      throw error;
+    }
+  }
+
+  @Post(":appId/flows/replay")
+  async replayFlow(@Param("projectId") projectId: string, @Param("appId") appId: string, @Body() body: unknown) {
+    try {
+      const result = await this.flogoAppsService.replayFlow(projectId, appId, body);
+      if (!result) {
+        throw new NotFoundException(`Unknown app ${appId}`);
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof ReplayError) {
+        if (error.status === 404) {
+          throw new NotFoundException(error.message);
+        }
+        throw new UnprocessableEntityException({
+          message: error.message,
+          diagnostics: error.diagnostics
+        });
+      }
+      throw error;
+    }
+  }
+
+  @Post(":appId/flows/compare-runs")
+  async compareRuns(@Param("projectId") projectId: string, @Param("appId") appId: string, @Body() body: unknown) {
+    try {
+      const result = await this.flogoAppsService.compareRuns(projectId, appId, body);
+      if (!result) {
+        throw new NotFoundException(`Unknown app ${appId}`);
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof RunComparisonError) {
+        if (error.status === 404) {
+          throw new NotFoundException(error.message);
+        }
+        throw new UnprocessableEntityException({
+          message: error.message,
+          diagnostics: error.diagnostics
+        });
+      }
+      throw error;
+    }
   }
 
   @Get(":appId/artifacts")
@@ -115,5 +196,201 @@ export class FlogoAppsController {
       throw new NotFoundException(`Unknown app ${appId}`);
     }
     return comparison;
+  }
+
+  @Post(":appId/triggers/bind")
+  async bindTrigger(@Param("projectId") projectId: string, @Param("appId") appId: string, @Body() body: unknown) {
+    try {
+      const result = await this.flogoAppsService.bindTrigger(projectId, appId, body);
+      if (!result) {
+        throw new NotFoundException(`Unknown app ${appId}`);
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof TriggerBindingError) {
+        if (error.status === 404) {
+          throw new NotFoundException(error.message);
+        }
+        if (error.status === 409) {
+          throw new ConflictException({
+            message: error.message,
+            diagnostics: error.diagnostics
+          });
+        }
+        throw new UnprocessableEntityException({
+          message: error.message,
+          diagnostics: error.diagnostics
+        });
+      }
+      throw error;
+    }
+  }
+
+  @Post(":appId/flows/extract-subflow")
+  async extractSubflow(@Param("projectId") projectId: string, @Param("appId") appId: string, @Body() body: unknown) {
+    try {
+      const result = await this.flogoAppsService.extractSubflow(projectId, appId, body);
+      if (!result) {
+        throw new NotFoundException(`Unknown app ${appId}`);
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof SubflowOperationError) {
+        if (error.status === 404) {
+          throw new NotFoundException(error.message);
+        }
+        if (error.status === 409) {
+          throw new ConflictException({
+            message: error.message,
+            diagnostics: error.diagnostics
+          });
+        }
+        throw new UnprocessableEntityException({
+          message: error.message,
+          diagnostics: error.diagnostics
+        });
+      }
+      throw error;
+    }
+  }
+
+  @Post(":appId/flows/inline-subflow")
+  async inlineSubflow(@Param("projectId") projectId: string, @Param("appId") appId: string, @Body() body: unknown) {
+    try {
+      const result = await this.flogoAppsService.inlineSubflow(projectId, appId, body);
+      if (!result) {
+        throw new NotFoundException(`Unknown app ${appId}`);
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof SubflowOperationError) {
+        if (error.status === 404) {
+          throw new NotFoundException(error.message);
+        }
+        if (error.status === 409) {
+          throw new ConflictException({
+            message: error.message,
+            diagnostics: error.diagnostics
+          });
+        }
+        throw new UnprocessableEntityException({
+          message: error.message,
+          diagnostics: error.diagnostics
+        });
+      }
+      throw error;
+    }
+  }
+
+  @Post(":appId/flows/add-iterator")
+  async addIterator(@Param("projectId") projectId: string, @Param("appId") appId: string, @Body() body: unknown) {
+    try {
+      const result = await this.flogoAppsService.addIterator(projectId, appId, body);
+      if (!result) {
+        throw new NotFoundException(`Unknown app ${appId}`);
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof ControlFlowSynthesisError) {
+        if (error.status === 404) {
+          throw new NotFoundException(error.message);
+        }
+        if (error.status === 409) {
+          throw new ConflictException({
+            message: error.message,
+            diagnostics: error.diagnostics
+          });
+        }
+        throw new UnprocessableEntityException({
+          message: error.message,
+          diagnostics: error.diagnostics
+        });
+      }
+      throw error;
+    }
+  }
+
+  @Post(":appId/flows/add-retry-policy")
+  async addRetryPolicy(@Param("projectId") projectId: string, @Param("appId") appId: string, @Body() body: unknown) {
+    try {
+      const result = await this.flogoAppsService.addRetryPolicy(projectId, appId, body);
+      if (!result) {
+        throw new NotFoundException(`Unknown app ${appId}`);
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof ControlFlowSynthesisError) {
+        if (error.status === 404) {
+          throw new NotFoundException(error.message);
+        }
+        if (error.status === 409) {
+          throw new ConflictException({
+            message: error.message,
+            diagnostics: error.diagnostics
+          });
+        }
+        throw new UnprocessableEntityException({
+          message: error.message,
+          diagnostics: error.diagnostics
+        });
+      }
+      throw error;
+    }
+  }
+
+  @Post(":appId/flows/add-dowhile")
+  async addDoWhile(@Param("projectId") projectId: string, @Param("appId") appId: string, @Body() body: unknown) {
+    try {
+      const result = await this.flogoAppsService.addDoWhile(projectId, appId, body);
+      if (!result) {
+        throw new NotFoundException(`Unknown app ${appId}`);
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof ControlFlowSynthesisError) {
+        if (error.status === 404) {
+          throw new NotFoundException(error.message);
+        }
+        if (error.status === 409) {
+          throw new ConflictException({
+            message: error.message,
+            diagnostics: error.diagnostics
+          });
+        }
+        throw new UnprocessableEntityException({
+          message: error.message,
+          diagnostics: error.diagnostics
+        });
+      }
+      throw error;
+    }
+  }
+
+  @Post(":appId/flows/add-error-path")
+  async addErrorPath(@Param("projectId") projectId: string, @Param("appId") appId: string, @Body() body: unknown) {
+    try {
+      const result = await this.flogoAppsService.addErrorPath(projectId, appId, body);
+      if (!result) {
+        throw new NotFoundException(`Unknown app ${appId}`);
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof ErrorPathTemplateError) {
+        if (error.status === 404) {
+          throw new NotFoundException(error.message);
+        }
+        if (error.status === 409) {
+          throw new ConflictException({
+            message: error.message,
+            diagnostics: error.diagnostics
+          });
+        }
+        throw new UnprocessableEntityException({
+          message: error.message,
+          diagnostics: error.diagnostics
+        });
+      }
+      throw error;
+    }
   }
 }

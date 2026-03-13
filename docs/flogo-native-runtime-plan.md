@@ -59,7 +59,7 @@ Go owns Flogo-native helper execution inside isolated runner paths:
 - contribution introspection,
 - descriptor handling,
 - mapping preview execution,
-- future runtime trace and replay,
+- future run comparison,
 - future contrib scaffolding.
 
 ### Platform shape
@@ -215,11 +215,32 @@ Focus:
 - flow contract inference,
 - subflow extraction/inlining,
 - iterator/retry/doWhile synthesis,
-- trigger polymorphism.
+- trigger polymorphism,
+- error-path templates.
 
 Current status:
 
-- planned
+- in progress
+
+Implemented in repo:
+
+- helper-backed runtime trace capture exposed through direct APIs, persisted `run_trace_plan` / `run_trace` artifacts, and analysis-only orchestration support,
+- helper-backed replay exposed through direct APIs, persisted `replay_plan` / `replay_report` artifacts, and analysis/execution orchestration support,
+- helper-backed run comparison exposed through direct APIs, persisted `run_comparison_plan` / `run_comparison` artifacts, and analysis/execution orchestration support,
+- replay from either explicit base input or a previously stored `run_trace` artifact input,
+- deep override merging for replay inputs with deterministic preflight validation in `packages/flogo-graph`,
+- helper/runtime parity for replay request handling, structured failed-replay summaries, persisted replay artifacts, and task-id-paired run-comparison diffs across `run_trace` and `replay_report` payloads.
+
+Implemented in repo:
+
+- flow contract inference exposed through direct app-analysis APIs, helper-backed analysis commands, persisted `flow_contract` artifacts, and analysis-only orchestration support,
+- trigger polymorphism for REST, Timer, CLI, and Channel profiles through direct trigger-binding APIs, helper-backed planning, runner/orchestrator support, and persisted `trigger_binding_plan` / `trigger_binding_result` artifacts,
+- subflow extraction and inlining for explicit contiguous linear task selections through direct flow-refactor APIs, helper-backed planning, runner/orchestrator support, and persisted `subflow_extraction_plan` / `subflow_extraction_result` / `subflow_inlining_plan` / `subflow_inlining_result` artifacts,
+- iterator synthesis through direct control-flow APIs, helper-backed planning, runner/orchestrator support, and persisted `iterator_plan` / `iterator_result` artifacts,
+- retry-on-error synthesis through direct control-flow APIs, helper-backed planning, runner/orchestrator support, and persisted `retry_policy_plan` / `retry_policy_result` artifacts,
+- doWhile synthesis through direct control-flow APIs, helper-backed planning, runner/orchestrator support, and persisted `dowhile_plan` / `dowhile_result` artifacts,
+- error-path templates through direct control-flow APIs, typed-link graph rewrites, helper-backed planning, runner/orchestrator support, and persisted `error_path_plan` / `error_path_result` artifacts,
+- deterministic profile-aware auto-mapping for REST request/reply defaults, CLI args/flags defaults, Channel data mapping, and zero-required-input enforcement for Timer flows in this slice.
 
 ## Phase 3: Runtime-aware debugging
 
@@ -232,7 +253,7 @@ Focus:
 
 Current status:
 
-- planned
+- in progress
 
 ## Phase 4: Extension-aware contribution authoring
 
@@ -249,7 +270,7 @@ Current status:
 
 ## Current Implementation Baseline
 
-The current codebase already supports a narrow but real Phase 1 slice.
+The current codebase has a completed Phase 1 foundation and active Phase 2 support for flow contract inference, trigger polymorphism, subflow extraction/inlining, and advanced control-flow synthesis.
 
 ### Implemented now
 
@@ -264,25 +285,61 @@ The current codebase already supports a narrow but real Phase 1 slice.
   - `GET /v1/projects/:projectId/apps/:appId/inventory`
   - `GET /v1/projects/:projectId/apps/:appId/catalog`
   - `GET /v1/projects/:projectId/apps/:appId/descriptors?ref=...`
-  - `GET /v1/projects/:projectId/apps/:appId/contribs/evidence?ref=...`
+- `GET /v1/projects/:projectId/apps/:appId/contribs/evidence?ref=...`
+- `GET /v1/projects/:projectId/apps/:appId/flows/contracts`
+- `POST /v1/projects/:projectId/apps/:appId/flows/trace`
+- `POST /v1/projects/:projectId/apps/:appId/flows/replay`
+- `POST /v1/projects/:projectId/apps/:appId/flows/compare-runs`
+- `POST /v1/projects/:projectId/apps/:appId/flows/extract-subflow`
+- `POST /v1/projects/:projectId/apps/:appId/flows/inline-subflow`
+- `POST /v1/projects/:projectId/apps/:appId/flows/add-iterator`
+- `POST /v1/projects/:projectId/apps/:appId/flows/add-retry-policy`
+- `POST /v1/projects/:projectId/apps/:appId/flows/add-dowhile`
+- `POST /v1/projects/:projectId/apps/:appId/flows/add-error-path`
 - `GET /v1/projects/:projectId/apps/:appId/governance`
 - `GET /v1/projects/:projectId/apps/:appId/artifacts`
 - `GET /v1/projects/:projectId/apps/:appId/properties/plan`
 - `POST /v1/projects/:projectId/apps/:appId/composition/compare`
 - `POST /v1/projects/:projectId/apps/:appId/mappings/preview`
 - `POST /v1/projects/:projectId/apps/:appId/mappings/test`
+- `POST /v1/projects/:projectId/apps/:appId/triggers/bind`
 - Analysis-only planner modes:
   - `inputs.mode = "inventory"`
   - `inputs.mode = "catalog"`
 - `inputs.mode = "contrib_evidence"`
+- `inputs.mode = "flow_contracts"`
+- `inputs.mode = "trigger_binding_plan"`
+- `inputs.mode = "subflow_extraction_plan"`
+- `inputs.mode = "subflow_inlining_plan"`
+- `inputs.mode = "iterator_plan"`
+- `inputs.mode = "retry_policy_plan"`
+- `inputs.mode = "dowhile_plan"`
+- `inputs.mode = "error_path_plan"`
+- `inputs.mode = "run_trace_plan"`
+- `inputs.mode = "run_trace"`
+- `inputs.mode = "replay_plan"`
+- `inputs.mode = "replay"`
+- `inputs.mode = "run_comparison_plan"`
+- `inputs.mode = "run_comparison"`
 - `inputs.mode = "governance"`
 - `inputs.mode = "composition_compare"`
 - `inputs.mode = "mapping_preview"`
 - `inputs.mode = "mapping_test"`
 - `inputs.mode = "property_plan"`
-- Runner job kinds and execution steps for inventory, catalog, contribution evidence, governance, composition comparison, and mapping preview
+- Runner job kinds and execution steps for flow contracts, runtime trace capture, replay, run comparison, trigger binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, contribution evidence, governance, composition comparison, and mapping preview
 - Go helper commands:
-  - `inventory contribs`
+  - `flows contracts`
+  - `triggers bind`
+  - `flows extract-subflow`
+  - `flows inline-subflow`
+  - `flows add-iterator`
+  - `flows add-retry-policy`
+  - `flows add-dowhile`
+- `flows add-error-path`
+- `flows trace`
+- `flows replay`
+- `flows compare-runs`
+- `inventory contribs`
   - `catalog contribs`
   - `inspect descriptor`
 - `evidence inspect`
@@ -295,10 +352,6 @@ The current codebase already supports a narrow but real Phase 1 slice.
 ### Not implemented yet
 
 - Core-native programmatic app composition
-- flow contracts and trigger profiles
-- subflow extraction/inlining
-- iterator/retry/doWhile synthesis
-- runtime trace and replay
 - contribution scaffolding and isolated contrib build/test flows
 - deployment profile generation
 - TensorFlow or specialized activity planning
@@ -309,16 +362,16 @@ Use this section as the working tracker for future implementation slices.
 
 | Area | Scope | Status | Code reference | Next step |
 | --- | --- | --- | --- | --- |
-| Shared contracts | Inventory, descriptor, contribution-evidence, governance, composition, mapping-preview, mapping-test, and property-plan contracts | Partial | `packages/contracts/src/index.ts` | Extend for flow contracts and replay when Phase 2 starts |
-| Graph engine | Contribution inventory, catalog, evidence inspection, alias validation, governance validation, composition comparison, mapping preview, mapping tests, coercion suggestions, property planning | Partial | `packages/flogo-graph/src/index.ts` | Deepen real Core package introspection and add flow contract inference later |
-| Tool layer | Flogo core/mapping tools split | Partial | `packages/tools/src/*.ts` | Add flow/runtime/contrib tool modules |
-| Planner | Analysis-only modes and Flogo-aware step selection | Partial | `packages/agent/src/index.ts` | Add flow/runtime/contrib planners |
-| Control-plane APIs | Graph, inventory, catalog, descriptor inspection, contribution evidence inspection, governance, composition comparison, mapping preview, mapping test, property plan, app artifact listing | Partial | `apps/control-plane/src/modules/flogo-apps/*` | Add flow contract and replay APIs later |
+| Shared contracts | Inventory, descriptor, contribution-evidence, governance, composition, mapping-preview, mapping-test, property-plan, flow-contract, trigger-binding, subflow-refactor, advanced control-flow, run-trace, replay, and run-comparison contracts | Partial | `packages/contracts/src/index.ts` | Add contribution-authoring contracts |
+| Graph engine | Contribution inventory, catalog, evidence inspection, alias validation, governance validation, composition comparison, mapping preview, mapping tests, coercion suggestions, property planning, flow contract inference, trigger-binding planning/application, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, run-trace preflight validation, replay preflight validation, and run-comparison diffing | Partial | `packages/flogo-graph/src/index.ts` | Add runtime-backed debugging evidence layers on top of trace/replay/comparison |
+| Tool layer | Flogo core/mapping tools split plus flow-contract, trigger-binding, subflow-refactor, advanced control-flow dispatch, runtime trace dispatch, replay dispatch, and run-comparison dispatch | Partial | `packages/tools/src/*.ts` | Add contribution-authoring tool modules |
+| Planner | Analysis-only modes, runtime trace/replay/run-comparison planning-execution routing, and Flogo-aware step selection | Partial | `packages/agent/src/index.ts` | Add runtime-backed debugging planning |
+| Control-plane APIs | Graph, inventory, catalog, descriptor inspection, contribution evidence inspection, flow contracts, runtime trace, replay, run comparison, trigger binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, governance, composition comparison, mapping preview, mapping test, property plan, app artifact listing | Partial | `apps/control-plane/src/modules/flogo-apps/*` | Add contribution-authoring APIs later |
 | Persistence | Prisma-backed task/event/artifact state plus hidden app-analysis records and Blob-backed analysis payloads | Partial | `apps/control-plane/src/modules/agent/task-store.service.ts`, `apps/control-plane/src/modules/flogo-apps/app-analysis-storage.service.ts` | Extend Blob-backed storage beyond app-analysis artifacts |
-| Runner-worker | Inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, and property-plan execution support | Partial | `apps/runner-worker/src/services/*` | Add runtime trace and contrib job kinds |
-| Go helper | Inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, and property planning | Partial | `go-runtime/flogo-helper/main.go` | Integrate deeper Core/Flow-native logic |
+| Runner-worker | Flow-contract, runtime trace, replay, run comparison, trigger-binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, and property-plan execution support | Partial | `apps/runner-worker/src/services/*` | Add contribution-authoring job kinds |
+| Go helper | Flow-contract, runtime trace, replay, run comparison, trigger-binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, and property planning | Partial | `go-runtime/flogo-helper/main.go` | Integrate deeper Flow runtime hooks and later runtime-backed debugging behavior |
 | Web console | Basic task UI only | Planned | `apps/web-console` | Add catalog, mapping preview, and later replay views |
-| Eval coverage | Existing create/update/debug/review baseline | Partial | `packages/evals` | Add catalog/mapping and later replay/contrib cases |
+| Eval coverage | Existing create/update/debug/review baseline | Partial | `packages/evals` | Add runtime trace, replay, run-comparison, and contribution-authoring cases |
 
 ## Rules For Future Implementation Passes
 
@@ -333,15 +386,13 @@ When implementing a Flogo-native feature:
 
 ## Recommended Next Slice
 
-The next implementation slice after the current baseline should begin Phase 2 instead of spending more time on Phase 1 hardening.
+The next implementation slice after the current baseline should continue Phase 3 now that runtime trace capture, replay, and run comparison are in place.
 
 Recommended next items:
 
-1. Add flow contract inference so reusable flow I/O becomes explicit.
-2. Add trigger polymorphism built on top of inferred flow contracts.
-3. Add subflow extraction and inlining.
-4. Add iterator/retry/doWhile synthesis once flow contracts and rebinding exist.
-5. Keep the current mapping preview and mapping test surface static-analysis-backed until runtime/replay work begins in Phase 3.
+1. Add replay-driven debugging on top of captured traces, replay output, and run-comparison evidence.
+2. Keep the current mapping preview and mapping test surface static-analysis-backed until runtime-backed debugging needs to feed back into mapping diagnostics.
+3. Add contribution scaffolding once Phase 3 runtime evidence is in place.
 
 ## Source References
 

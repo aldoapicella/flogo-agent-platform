@@ -89,6 +89,207 @@ export class RunnerTools {
     });
   }
 
+  async inferFlowContracts(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "infer_flow_contracts",
+      jobKind: "flow_contracts",
+      analysisKind: "flow_contracts"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued flow-contract inference job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
+  async bindTrigger(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "bind_trigger",
+      jobKind: "trigger_binding",
+      analysisKind: "trigger_binding_plan"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued trigger-binding job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
+  async extractSubflow(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "extract_subflow",
+      jobKind: "subflow_extraction",
+      analysisKind: "subflow_extraction_plan"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued subflow-extraction job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
+  async inlineSubflow(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "inline_subflow",
+      jobKind: "subflow_inlining",
+      analysisKind: "subflow_inlining_plan"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued subflow-inlining job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
+  async addIterator(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "add_iterator",
+      jobKind: "iterator_synthesis",
+      analysisKind: "iterator_plan"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued iterator synthesis job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
+  async addRetryPolicy(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "add_retry_policy",
+      jobKind: "retry_policy_synthesis",
+      analysisKind: "retry_policy_plan"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued retry policy synthesis job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
+  async addDoWhile(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "add_dowhile",
+      jobKind: "dowhile_synthesis",
+      analysisKind: "dowhile_plan"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued doWhile synthesis job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
+  async addErrorPath(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "add_error_path",
+      jobKind: "error_path_synthesis",
+      analysisKind: "error_path_plan"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued error-path synthesis job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
+  async captureRunTrace(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const validateOnly = parsed.analysisPayload?.validateOnly === true;
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "capture_run_trace",
+      jobKind: "run_trace_capture",
+      analysisKind: validateOnly ? "run_trace_plan" : undefined
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued run-trace ${validateOnly ? "plan" : "capture"} job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
+  async replayFlow(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const validateOnly = parsed.analysisPayload?.validateOnly === true;
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "replay_flow",
+      jobKind: "flow_replay",
+      analysisKind: validateOnly ? "replay_plan" : "replay"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued replay ${validateOnly ? "plan" : "execution"} job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
+  async compareRuns(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const validateOnly = parsed.analysisPayload?.validateOnly === true;
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "compare_runs",
+      jobKind: "run_comparison",
+      analysisKind: validateOnly ? "run_comparison_plan" : "run_comparison"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued run comparison ${validateOnly ? "plan" : "analysis"} job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
   async previewMapping(spec: unknown): Promise<ToolResponse> {
     const parsed = RunnerJobSpecSchema.parse(spec);
     const result = await this.dispatcher.dispatch({ ...parsed, stepType: "preview_mapping", jobKind: "mapping_preview" });

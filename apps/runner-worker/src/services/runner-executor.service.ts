@@ -12,11 +12,22 @@ import {
   type ContribCatalog,
   type ContribDescriptor,
   type ContribDescriptorResponse,
+  type ErrorPathTemplateResponse,
+  type FlowContractsResponse,
+  type RunComparisonResponse,
+  type ReplayResponse,
+  type RunTraceResponse,
+  type IteratorSynthesisResponse,
   type MappingTestResponse,
   type Diagnostic,
+  type DoWhileSynthesisResponse,
   type GovernanceReport,
   type MappingPreviewResult,
   type PropertyPlanResponse,
+  type RetryPolicyResponse,
+  type SubflowExtractionResponse,
+  type SubflowInliningResponse,
+  type TriggerBindingResponse,
   type RunnerJobResult,
   type RunnerJobSpec,
   type RunnerJobState,
@@ -61,6 +72,34 @@ function createCommand(spec: RunnerJobSpec): string[] {
       return ["echo", `logs:${spec.taskId}`];
     case "run_smoke":
       return ["echo", `smoke:${spec.appPath}`];
+    case "infer_flow_contracts":
+      return createHelperCommand(
+        "flows",
+        "contracts",
+        "--app",
+        spec.appPath,
+        ...(typeof spec.analysisPayload?.flowId === "string" ? ["--flow", String(spec.analysisPayload.flowId)] : [])
+      );
+    case "bind_trigger":
+      return createHelperCommand("triggers", "bind", "--app", spec.appPath);
+    case "extract_subflow":
+      return createHelperCommand("flows", "extract-subflow", "--app", spec.appPath);
+    case "inline_subflow":
+      return createHelperCommand("flows", "inline-subflow", "--app", spec.appPath);
+    case "add_iterator":
+      return createHelperCommand("flows", "add-iterator", "--app", spec.appPath);
+    case "add_retry_policy":
+      return createHelperCommand("flows", "add-retry-policy", "--app", spec.appPath);
+    case "add_dowhile":
+      return createHelperCommand("flows", "add-dowhile", "--app", spec.appPath);
+    case "add_error_path":
+      return createHelperCommand("flows", "add-error-path", "--app", spec.appPath);
+    case "capture_run_trace":
+      return createHelperCommand("flows", "trace", "--app", spec.appPath);
+    case "replay_flow":
+      return createHelperCommand("flows", "replay", "--app", spec.appPath);
+    case "compare_runs":
+      return createHelperCommand("flows", "compare-runs", "--app", spec.appPath);
     case "inventory_contribs":
       return createHelperCommand("inventory", "contribs", "--app", spec.appPath);
     case "catalog_contribs":
@@ -124,6 +163,17 @@ function parseJsonResponse<T>(value: unknown): T {
 
 function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
   return (
+    stepType === "infer_flow_contracts" ||
+    stepType === "bind_trigger" ||
+    stepType === "extract_subflow" ||
+    stepType === "inline_subflow" ||
+    stepType === "add_iterator" ||
+    stepType === "add_retry_policy" ||
+    stepType === "add_dowhile" ||
+    stepType === "add_error_path" ||
+    stepType === "capture_run_trace" ||
+    stepType === "replay_flow" ||
+    stepType === "compare_runs" ||
     stepType === "inventory_contribs" ||
     stepType === "catalog_contribs" ||
     stepType === "inspect_descriptor" ||
@@ -152,7 +202,20 @@ function createAnalysisArtifact(
 }
 
 async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
-  if (spec.stepType !== "preview_mapping" && spec.stepType !== "test_mapping") {
+  if (
+    spec.stepType !== "preview_mapping" &&
+    spec.stepType !== "test_mapping" &&
+    spec.stepType !== "bind_trigger" &&
+    spec.stepType !== "extract_subflow" &&
+    spec.stepType !== "inline_subflow" &&
+    spec.stepType !== "add_iterator" &&
+    spec.stepType !== "add_retry_policy" &&
+    spec.stepType !== "add_dowhile" &&
+    spec.stepType !== "add_error_path" &&
+    spec.stepType !== "capture_run_trace" &&
+    spec.stepType !== "replay_flow" &&
+    spec.stepType !== "compare_runs"
+  ) {
     return {
       command: createCommand(spec)
     };
@@ -189,6 +252,130 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     };
   }
 
+  if (spec.stepType === "bind_trigger") {
+    const profilePath = path.join(tempDir, "trigger-profile.json");
+    await fs.writeFile(profilePath, JSON.stringify((spec.analysisPayload?.profile as Record<string, unknown> | undefined) ?? {}, null, 2), "utf8");
+    return {
+      command: createHelperCommand(
+        "triggers",
+        "bind",
+        "--app",
+        spec.appPath,
+        "--flow",
+        String(spec.analysisPayload?.flowId ?? ""),
+        "--profile",
+        profilePath,
+        ...(spec.analysisPayload?.validateOnly === false ? [] : ["--validate-only"]),
+        ...(spec.analysisPayload?.replaceExisting === true ? ["--replace-existing"] : []),
+        ...(typeof spec.analysisPayload?.handlerName === "string" ? ["--handler-name", String(spec.analysisPayload.handlerName)] : []),
+        ...(typeof spec.analysisPayload?.triggerId === "string" ? ["--trigger-id", String(spec.analysisPayload.triggerId)] : []),
+        ...(typeof spec.analysisPayload?.triggerName === "string" ? ["--trigger-name", String(spec.analysisPayload.triggerName)] : [])
+      ),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "extract_subflow") {
+    const requestPath = path.join(tempDir, "subflow-extraction-request.json");
+    await fs.writeFile(requestPath, JSON.stringify(spec.analysisPayload ?? {}, null, 2), "utf8");
+    return {
+      command: createHelperCommand("flows", "extract-subflow", "--app", spec.appPath, "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "inline_subflow") {
+    const requestPath = path.join(tempDir, "subflow-inlining-request.json");
+    await fs.writeFile(requestPath, JSON.stringify(spec.analysisPayload ?? {}, null, 2), "utf8");
+    return {
+      command: createHelperCommand("flows", "inline-subflow", "--app", spec.appPath, "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "add_iterator") {
+    const requestPath = path.join(tempDir, "iterator-request.json");
+    await fs.writeFile(requestPath, JSON.stringify(spec.analysisPayload ?? {}, null, 2), "utf8");
+    return {
+      command: createHelperCommand("flows", "add-iterator", "--app", spec.appPath, "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "add_retry_policy") {
+    const requestPath = path.join(tempDir, "retry-policy-request.json");
+    await fs.writeFile(requestPath, JSON.stringify(spec.analysisPayload ?? {}, null, 2), "utf8");
+    return {
+      command: createHelperCommand("flows", "add-retry-policy", "--app", spec.appPath, "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "add_dowhile") {
+    const requestPath = path.join(tempDir, "dowhile-request.json");
+    await fs.writeFile(requestPath, JSON.stringify(spec.analysisPayload ?? {}, null, 2), "utf8");
+    return {
+      command: createHelperCommand("flows", "add-dowhile", "--app", spec.appPath, "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "add_error_path") {
+    const requestPath = path.join(tempDir, "error-path-request.json");
+    await fs.writeFile(requestPath, JSON.stringify(spec.analysisPayload ?? {}, null, 2), "utf8");
+    return {
+      command: createHelperCommand("flows", "add-error-path", "--app", spec.appPath, "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "capture_run_trace") {
+    const requestPath = path.join(tempDir, "run-trace-request.json");
+    await fs.writeFile(requestPath, JSON.stringify(spec.analysisPayload ?? {}, null, 2), "utf8");
+    return {
+      command: createHelperCommand("flows", "trace", "--app", spec.appPath, "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "replay_flow") {
+    const requestPath = path.join(tempDir, "replay-request.json");
+    await fs.writeFile(requestPath, JSON.stringify(spec.analysisPayload ?? {}, null, 2), "utf8");
+    return {
+      command: createHelperCommand("flows", "replay", "--app", spec.appPath, "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "compare_runs") {
+    const requestPath = path.join(tempDir, "compare-runs-request.json");
+    await fs.writeFile(requestPath, JSON.stringify(spec.analysisPayload ?? {}, null, 2), "utf8");
+    return {
+      command: createHelperCommand("flows", "compare-runs", "--app", spec.appPath, "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
   return {
     command: createHelperCommand("preview", "mapping", "--app", spec.appPath, "--node", spec.targetNodeId ?? "", "--input", inputPath),
     cleanup: async () => {
@@ -206,6 +393,171 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
           inventory,
           diagnostics
         })
+      ];
+    }
+
+    if (spec.stepType === "infer_flow_contracts") {
+      const response = JSON.parse(stdout) as FlowContractsResponse;
+      return [
+        createAnalysisArtifact(spec, "flow_contract", `flow-contracts${spec.analysisPayload?.flowId ? `-${String(spec.analysisPayload.flowId)}` : ""}`, {
+          contracts: response.contracts,
+          diagnostics
+        })
+      ];
+    }
+
+    if (spec.stepType === "bind_trigger") {
+      const response = JSON.parse(stdout) as TriggerBindingResponse;
+      return [
+        createAnalysisArtifact(
+          spec,
+          response.result.applied ? "trigger_binding_result" : "trigger_binding_plan",
+          `trigger-binding-${String(spec.analysisPayload?.flowId ?? "flow")}`,
+          {
+            result: response.result,
+            diagnostics
+          }
+        )
+      ];
+    }
+
+    if (spec.stepType === "extract_subflow") {
+      const response = JSON.parse(stdout) as SubflowExtractionResponse;
+      return [
+        createAnalysisArtifact(
+          spec,
+          response.result.applied ? "subflow_extraction_result" : "subflow_extraction_plan",
+          `subflow-extraction-${String(spec.analysisPayload?.flowId ?? "flow")}`,
+          {
+            result: response.result,
+            diagnostics
+          }
+        )
+      ];
+    }
+
+    if (spec.stepType === "inline_subflow") {
+      const response = JSON.parse(stdout) as SubflowInliningResponse;
+      return [
+        createAnalysisArtifact(
+          spec,
+          response.result.applied ? "subflow_inlining_result" : "subflow_inlining_plan",
+          `subflow-inlining-${String(spec.analysisPayload?.parentFlowId ?? "flow")}`,
+          {
+            result: response.result,
+            diagnostics
+          }
+        )
+      ];
+    }
+
+    if (spec.stepType === "add_iterator") {
+      const response = JSON.parse(stdout) as IteratorSynthesisResponse;
+      return [
+        createAnalysisArtifact(
+          spec,
+          response.result.applied ? "iterator_result" : "iterator_plan",
+          `iterator-${String(spec.analysisPayload?.taskId ?? "task")}`,
+          {
+            result: response.result,
+            diagnostics
+          }
+        )
+      ];
+    }
+
+    if (spec.stepType === "add_retry_policy") {
+      const response = JSON.parse(stdout) as RetryPolicyResponse;
+      return [
+        createAnalysisArtifact(
+          spec,
+          response.result.applied ? "retry_policy_result" : "retry_policy_plan",
+          `retry-policy-${String(spec.analysisPayload?.taskId ?? "task")}`,
+          {
+            result: response.result,
+            diagnostics
+          }
+        )
+      ];
+    }
+
+    if (spec.stepType === "add_dowhile") {
+      const response = JSON.parse(stdout) as DoWhileSynthesisResponse;
+      return [
+        createAnalysisArtifact(
+          spec,
+          response.result.applied ? "dowhile_result" : "dowhile_plan",
+          `dowhile-${String(spec.analysisPayload?.taskId ?? "task")}`,
+          {
+            result: response.result,
+            diagnostics
+          }
+        )
+      ];
+    }
+
+    if (spec.stepType === "add_error_path") {
+      const response = JSON.parse(stdout) as ErrorPathTemplateResponse;
+      return [
+        createAnalysisArtifact(
+          spec,
+          response.result.applied ? "error_path_result" : "error_path_plan",
+          `error-path-${String(spec.analysisPayload?.taskId ?? "task")}`,
+          {
+            result: response.result,
+            diagnostics
+          }
+        )
+      ];
+    }
+
+    if (spec.stepType === "capture_run_trace") {
+      const response = JSON.parse(stdout) as RunTraceResponse;
+      const validateOnly = spec.analysisPayload?.validateOnly === true || !response.trace;
+      return [
+        createAnalysisArtifact(
+          spec,
+          validateOnly ? "run_trace_plan" : "run_trace",
+          `run-trace-${String(spec.analysisPayload?.flowId ?? "flow")}`,
+          {
+            trace: response.trace,
+            validation: response.validation,
+            diagnostics
+          }
+        )
+      ];
+    }
+
+    if (spec.stepType === "replay_flow") {
+      const response = JSON.parse(stdout) as ReplayResponse;
+      const validateOnly = spec.analysisPayload?.validateOnly === true || !response.result.trace;
+      return [
+        createAnalysisArtifact(
+          spec,
+          validateOnly ? "replay_plan" : "replay_report",
+          `replay-${String(spec.analysisPayload?.flowId ?? "flow")}`,
+          {
+            result: response.result,
+            diagnostics
+          }
+        )
+      ];
+    }
+
+    if (spec.stepType === "compare_runs") {
+      const response = JSON.parse(stdout) as RunComparisonResponse;
+      const validateOnly = spec.analysisPayload?.validateOnly === true || !response.result;
+      return [
+        createAnalysisArtifact(
+          spec,
+          validateOnly ? "run_comparison_plan" : "run_comparison",
+          `run-comparison-${String(spec.analysisPayload?.leftArtifactId ?? "left")}-${String(spec.analysisPayload?.rightArtifactId ?? "right")}`,
+          {
+            result: response.result,
+            validation: response.validation,
+            diagnostics
+          }
+        )
       ];
     }
 

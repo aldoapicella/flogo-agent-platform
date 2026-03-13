@@ -46,8 +46,26 @@ export const ArtifactTypeSchema = z.enum([
   "governance_report",
   "composition_compare",
   "flow_contract",
+  "trigger_binding_plan",
+  "trigger_binding_result",
+  "subflow_extraction_plan",
+  "subflow_extraction_result",
+  "subflow_inlining_plan",
+  "subflow_inlining_result",
+  "iterator_plan",
+  "iterator_result",
+  "retry_policy_plan",
+  "retry_policy_result",
+  "dowhile_plan",
+  "dowhile_result",
+  "error_path_plan",
+  "error_path_result",
+  "run_trace_plan",
   "run_trace",
+  "replay_plan",
   "replay_report",
+  "run_comparison_plan",
+  "run_comparison",
   "contrib_bundle"
 ]);
 export type ArtifactType = z.infer<typeof ArtifactTypeSchema>;
@@ -238,6 +256,7 @@ export type FlogoProperty = z.infer<typeof FlogoPropertySchema>;
 export const FlogoTaskSchema = z.object({
   id: z.string(),
   name: z.string().optional(),
+  type: z.string().optional(),
   activityRef: z.string().optional(),
   input: z.record(z.string(), z.unknown()).default({}),
   output: z.record(z.string(), z.unknown()).default({}),
@@ -245,8 +264,29 @@ export const FlogoTaskSchema = z.object({
 });
 export type FlogoTask = z.infer<typeof FlogoTaskSchema>;
 
+export const FlogoLinkSchema = z
+  .object({
+    id: z.string().optional(),
+    from: z.string(),
+    to: z.string(),
+    type: z.enum(["dependency", "expression"]).default("dependency"),
+    value: z.string().optional()
+  })
+  .passthrough()
+  .superRefine((value, ctx) => {
+    if (value.type === "expression" && (!value.value || value.value.trim().length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Expression links require a non-empty value",
+        path: ["value"]
+      });
+    }
+  });
+export type FlogoLink = z.infer<typeof FlogoLinkSchema>;
+
 export const FlogoFlowSchema = z.object({
   id: z.string(),
+  type: z.string().default("flow"),
   data: z.object({
     name: z.string().optional(),
     metadata: z
@@ -256,9 +296,9 @@ export const FlogoFlowSchema = z.object({
       })
       .default({ input: [], output: [] }),
     tasks: z.array(FlogoTaskSchema).default([]),
-    links: z.array(z.record(z.string(), z.unknown())).default([])
+    links: z.array(FlogoLinkSchema).default([])
   }).passthrough()
-});
+}).passthrough();
 export type FlogoFlow = z.infer<typeof FlogoFlowSchema>;
 
 export const FlogoHandlerSchema = z.object({
@@ -287,6 +327,7 @@ export const FlogoAppSchema = z.object({
   description: z.string().optional(),
   imports: z.array(FlogoImportSchema).default([]),
   properties: z.array(FlogoPropertySchema).default([]),
+  channels: z.array(z.string()).default([]),
   triggers: z.array(FlogoTriggerSchema).default([]),
   resources: z.array(FlogoFlowSchema).default([])
 }).passthrough();
@@ -542,6 +583,565 @@ export const PropertyPlanResponseSchema = z.object({
 });
 export type PropertyPlanResponse = z.infer<typeof PropertyPlanResponseSchema>;
 
+export const FlowParamSchema = z.object({
+  name: z.string(),
+  type: z.enum(["string", "number", "boolean", "object", "array", "any", "unknown"]).default("unknown"),
+  required: z.boolean().default(false),
+  source: z.enum(["metadata", "mapping_inferred", "activity_inferred", "unknown"]).default("unknown"),
+  description: z.string().optional()
+});
+export type FlowParam = z.infer<typeof FlowParamSchema>;
+
+export const FlowUsageSchema = z.object({
+  flowId: z.string(),
+  handlerRefs: z.array(z.string()).default([]),
+  triggerRefs: z.array(z.string()).default([]),
+  actionRefs: z.array(z.string()).default([]),
+  usedByCount: z.number().int().nonnegative().default(0)
+});
+export type FlowUsage = z.infer<typeof FlowUsageSchema>;
+
+export const FlowContractSchema = z.object({
+  flowId: z.string(),
+  name: z.string(),
+  resourceRef: z.string(),
+  inputs: z.array(FlowParamSchema).default([]),
+  outputs: z.array(FlowParamSchema).default([]),
+  reusable: z.boolean().default(false),
+  usage: FlowUsageSchema,
+  diagnostics: z.array(DiagnosticSchema).default([]),
+  evidenceLevel: z.enum(["metadata_only", "metadata_plus_usage", "metadata_plus_mapping"]).default("metadata_only")
+});
+export type FlowContract = z.infer<typeof FlowContractSchema>;
+
+export const FlowContractsSchema = z.object({
+  appName: z.string(),
+  contracts: z.array(FlowContractSchema).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([])
+});
+export type FlowContracts = z.infer<typeof FlowContractsSchema>;
+
+export const FlowContractsResponseSchema = z.object({
+  contracts: FlowContractsSchema,
+  artifact: ArtifactRefSchema.optional()
+});
+export type FlowContractsResponse = z.infer<typeof FlowContractsResponseSchema>;
+
+export const RunTraceCaptureOptionsSchema = z.object({
+  includeFlowState: z.boolean().default(true),
+  includeActivityOutputs: z.boolean().default(true),
+  includeTaskInputs: z.boolean().default(true),
+  includeTaskOutputs: z.boolean().default(true)
+});
+export type RunTraceCaptureOptions = z.infer<typeof RunTraceCaptureOptionsSchema>;
+
+export const RunTraceRequestSchema = z.object({
+  flowId: z.string(),
+  sampleInput: z.record(z.string(), z.unknown()).default({}),
+  capture: RunTraceCaptureOptionsSchema.default({}),
+  validateOnly: z.boolean().default(false)
+});
+export type RunTraceRequest = z.infer<typeof RunTraceRequestSchema>;
+
+export const RunTraceTaskStepSchema = z.object({
+  taskId: z.string(),
+  taskName: z.string().optional(),
+  activityRef: z.string().optional(),
+  type: z.string().optional(),
+  status: z.enum(["completed", "failed", "skipped"]),
+  input: z.record(z.string(), z.unknown()).optional(),
+  output: z.record(z.string(), z.unknown()).optional(),
+  flowState: z.record(z.string(), z.unknown()).optional(),
+  activityState: z.record(z.string(), z.unknown()).optional(),
+  error: z.string().optional(),
+  startedAt: z.string().optional(),
+  finishedAt: z.string().optional(),
+  diagnostics: z.array(DiagnosticSchema).default([])
+});
+export type RunTraceTaskStep = z.infer<typeof RunTraceTaskStepSchema>;
+
+export const RunTraceSummarySchema = z.object({
+  flowId: z.string(),
+  status: z.enum(["completed", "failed"]),
+  input: z.record(z.string(), z.unknown()).default({}),
+  output: z.record(z.string(), z.unknown()).optional(),
+  error: z.string().optional(),
+  stepCount: z.number().int().nonnegative(),
+  diagnostics: z.array(DiagnosticSchema).default([])
+});
+export type RunTraceSummary = z.infer<typeof RunTraceSummarySchema>;
+
+export const RunTraceSchema = z.object({
+  appName: z.string(),
+  flowId: z.string(),
+  summary: RunTraceSummarySchema,
+  steps: z.array(RunTraceTaskStepSchema).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([])
+});
+export type RunTrace = z.infer<typeof RunTraceSchema>;
+
+export const RunTraceResponseSchema = z.object({
+  trace: RunTraceSchema.optional(),
+  artifact: ArtifactRefSchema.optional(),
+  validation: ValidationReportSchema.optional()
+});
+export type RunTraceResponse = z.infer<typeof RunTraceResponseSchema>;
+
+export const ReplayRequestSchema = z
+  .object({
+    flowId: z.string(),
+    traceArtifactId: z.string().optional(),
+    baseInput: z.record(z.string(), z.unknown()).optional(),
+    overrides: z.record(z.string(), z.unknown()).default({}),
+    capture: RunTraceCaptureOptionsSchema.default({}),
+    validateOnly: z.boolean().default(false)
+  })
+  .superRefine((value, ctx) => {
+    if (value.traceArtifactId && value.baseInput) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide either traceArtifactId or baseInput, not both",
+        path: ["traceArtifactId"]
+      });
+    }
+
+    if (!value.traceArtifactId && !value.baseInput) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Replay requests require either traceArtifactId or baseInput",
+        path: ["baseInput"]
+      });
+    }
+  });
+export type ReplayRequest = z.infer<typeof ReplayRequestSchema>;
+
+export const ReplaySummarySchema = z.object({
+  flowId: z.string(),
+  status: z.enum(["completed", "failed"]),
+  inputSource: z.enum(["trace_artifact", "explicit_input"]),
+  baseInput: z.record(z.string(), z.unknown()).default({}),
+  effectiveInput: z.record(z.string(), z.unknown()).default({}),
+  overridesApplied: z.boolean(),
+  diagnostics: z.array(DiagnosticSchema).default([])
+});
+export type ReplaySummary = z.infer<typeof ReplaySummarySchema>;
+
+export const ReplayResultSchema = z.object({
+  summary: ReplaySummarySchema,
+  trace: RunTraceSchema.optional(),
+  validation: ValidationReportSchema.optional()
+});
+export type ReplayResult = z.infer<typeof ReplayResultSchema>;
+
+export const ReplayResponseSchema = z.object({
+  result: ReplayResultSchema,
+  artifact: ArtifactRefSchema.optional()
+});
+export type ReplayResponse = z.infer<typeof ReplayResponseSchema>;
+
+export const RunComparisonOptionsSchema = z.object({
+  includeStepInputs: z.boolean().default(true),
+  includeStepOutputs: z.boolean().default(true),
+  includeFlowState: z.boolean().default(true),
+  includeActivityState: z.boolean().default(true),
+  includeDiagnostics: z.boolean().default(true)
+});
+export type RunComparisonOptions = z.infer<typeof RunComparisonOptionsSchema>;
+
+export const ComparableRunArtifactKindSchema = z.enum(["run_trace", "replay_report"]);
+export type ComparableRunArtifactKind = z.infer<typeof ComparableRunArtifactKindSchema>;
+
+export const RunComparisonRequestSchema = z.object({
+  leftArtifactId: z.string(),
+  rightArtifactId: z.string(),
+  compare: RunComparisonOptionsSchema.default({}),
+  validateOnly: z.boolean().default(false)
+});
+export type RunComparisonRequest = z.infer<typeof RunComparisonRequestSchema>;
+
+export const RunComparisonArtifactRefSchema = z.object({
+  artifactId: z.string(),
+  kind: ComparableRunArtifactKindSchema,
+  summaryStatus: z.enum(["completed", "failed"]),
+  flowId: z.string()
+});
+export type RunComparisonArtifactRef = z.infer<typeof RunComparisonArtifactRefSchema>;
+
+export const RunComparisonValueDiffSchema = z.object({
+  kind: z.enum(["same", "changed", "added", "removed"]),
+  left: z.unknown().optional(),
+  right: z.unknown().optional()
+});
+export type RunComparisonValueDiff = z.infer<typeof RunComparisonValueDiffSchema>;
+
+export const RunComparisonStepDiffSchema = z.object({
+  taskId: z.string(),
+  leftStatus: z.enum(["completed", "failed", "skipped"]).optional(),
+  rightStatus: z.enum(["completed", "failed", "skipped"]).optional(),
+  inputDiff: RunComparisonValueDiffSchema.optional(),
+  outputDiff: RunComparisonValueDiffSchema.optional(),
+  flowStateDiff: RunComparisonValueDiffSchema.optional(),
+  activityStateDiff: RunComparisonValueDiffSchema.optional(),
+  diagnosticDiffs: z.array(DiagnosticSchema).default([]),
+  changeKind: z.enum(["same", "changed", "added", "removed"])
+});
+export type RunComparisonStepDiff = z.infer<typeof RunComparisonStepDiffSchema>;
+
+export const RunComparisonSummaryDiffSchema = z.object({
+  statusChanged: z.boolean(),
+  inputDiff: RunComparisonValueDiffSchema,
+  outputDiff: RunComparisonValueDiffSchema,
+  errorDiff: RunComparisonValueDiffSchema,
+  stepCountDiff: RunComparisonValueDiffSchema,
+  diagnosticDiffs: z.array(DiagnosticSchema).default([])
+});
+export type RunComparisonSummaryDiff = z.infer<typeof RunComparisonSummaryDiffSchema>;
+
+export const RunComparisonResultSchema = z.object({
+  left: RunComparisonArtifactRefSchema,
+  right: RunComparisonArtifactRefSchema,
+  summary: RunComparisonSummaryDiffSchema,
+  steps: z.array(RunComparisonStepDiffSchema).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([])
+});
+export type RunComparisonResult = z.infer<typeof RunComparisonResultSchema>;
+
+export const RunComparisonResponseSchema = z.object({
+  result: RunComparisonResultSchema.optional(),
+  artifact: ArtifactRefSchema.optional(),
+  validation: ValidationReportSchema.optional()
+});
+export type RunComparisonResponse = z.infer<typeof RunComparisonResponseSchema>;
+
+export const TriggerProfileKindSchema = z.enum(["rest", "timer", "cli", "channel"]);
+export type TriggerProfileKind = z.infer<typeof TriggerProfileKindSchema>;
+
+export const RestTriggerProfileSchema = z.object({
+  kind: z.literal("rest"),
+  method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+  path: z.string(),
+  port: z.number().int().positive(),
+  replyMode: z.enum(["json", "raw", "status_only"]).default("json"),
+  requestMappingMode: z.enum(["auto", "explicit"]).default("auto"),
+  replyMappingMode: z.enum(["auto", "explicit"]).default("auto")
+});
+export type RestTriggerProfile = z.infer<typeof RestTriggerProfileSchema>;
+
+export const TimerTriggerProfileSchema = z.object({
+  kind: z.literal("timer"),
+  runMode: z.enum(["once_immediate", "once_delay", "repeat", "repeat_delay"]),
+  startDelay: z.string().optional(),
+  repeatInterval: z.string().optional()
+});
+export type TimerTriggerProfile = z.infer<typeof TimerTriggerProfileSchema>;
+
+export const CliTriggerProfileSchema = z.object({
+  kind: z.literal("cli"),
+  singleCmd: z.boolean().default(true),
+  commandName: z.string(),
+  usage: z.string().optional(),
+  short: z.string().optional(),
+  long: z.string().optional(),
+  flags: z.array(z.string()).default([])
+});
+export type CliTriggerProfile = z.infer<typeof CliTriggerProfileSchema>;
+
+export const ChannelTriggerProfileSchema = z.object({
+  kind: z.literal("channel"),
+  channel: z.string()
+});
+export type ChannelTriggerProfile = z.infer<typeof ChannelTriggerProfileSchema>;
+
+export const TriggerProfileSchema = z.discriminatedUnion("kind", [
+  RestTriggerProfileSchema,
+  TimerTriggerProfileSchema,
+  CliTriggerProfileSchema,
+  ChannelTriggerProfileSchema
+]);
+export type TriggerProfile = z.infer<typeof TriggerProfileSchema>;
+
+export const TriggerBindingMappingsSchema = z.object({
+  input: z.record(z.string(), z.unknown()).default({}),
+  output: z.record(z.string(), z.unknown()).default({})
+});
+export type TriggerBindingMappings = z.infer<typeof TriggerBindingMappingsSchema>;
+
+export const TriggerBindingRequestSchema = z.object({
+  flowId: z.string(),
+  profile: TriggerProfileSchema,
+  validateOnly: z.boolean().default(false),
+  replaceExisting: z.boolean().default(false),
+  handlerName: z.string().optional(),
+  triggerId: z.string().optional(),
+  triggerName: z.string().optional()
+});
+export type TriggerBindingRequest = z.infer<typeof TriggerBindingRequestSchema>;
+
+export const TriggerBindingPlanSchema = z.object({
+  flowId: z.string(),
+  profile: TriggerProfileSchema,
+  triggerRef: z.string(),
+  triggerId: z.string(),
+  handlerName: z.string(),
+  generatedMappings: TriggerBindingMappingsSchema,
+  trigger: FlogoTriggerSchema,
+  diagnostics: z.array(DiagnosticSchema).default([]),
+  warnings: z.array(DiagnosticSchema).default([])
+});
+export type TriggerBindingPlan = z.infer<typeof TriggerBindingPlanSchema>;
+
+export const TriggerBindingResultSchema = z.object({
+  applied: z.boolean(),
+  plan: TriggerBindingPlanSchema,
+  patchSummary: z.string(),
+  validation: ValidationReportSchema.optional(),
+  app: FlogoAppSchema.optional(),
+  artifact: ArtifactRefSchema.optional()
+});
+export type TriggerBindingResult = z.infer<typeof TriggerBindingResultSchema>;
+
+export const TriggerBindingResponseSchema = z.object({
+  result: TriggerBindingResultSchema
+});
+export type TriggerBindingResponse = z.infer<typeof TriggerBindingResponseSchema>;
+
+export const SubflowSelectionSchema = z.object({
+  flowId: z.string(),
+  taskIds: z.array(z.string()).min(1),
+  contiguous: z.boolean().default(true),
+  selectionMode: z.literal("explicit").default("explicit")
+});
+export type SubflowSelection = z.infer<typeof SubflowSelectionSchema>;
+
+export const SubflowInvocationSchema = z.object({
+  parentFlowId: z.string(),
+  taskId: z.string(),
+  activityRef: z.string(),
+  input: z.record(z.string(), z.unknown()).default({}),
+  output: z.record(z.string(), z.unknown()).default({}),
+  settings: z.record(z.string(), z.unknown()).default({})
+});
+export type SubflowInvocation = z.infer<typeof SubflowInvocationSchema>;
+
+export const SubflowExtractionRequestSchema = z.object({
+  flowId: z.string(),
+  taskIds: z.array(z.string()).min(1),
+  newFlowId: z.string().optional(),
+  newFlowName: z.string().optional(),
+  validateOnly: z.boolean().default(false),
+  replaceExisting: z.boolean().default(false)
+});
+export type SubflowExtractionRequest = z.infer<typeof SubflowExtractionRequestSchema>;
+
+export const SubflowExtractionPlanSchema = z.object({
+  parentFlowId: z.string(),
+  newFlowId: z.string(),
+  newFlowName: z.string(),
+  selectedTaskIds: z.array(z.string()).min(1),
+  newFlowContract: FlowContractSchema,
+  invocation: SubflowInvocationSchema,
+  diagnostics: z.array(DiagnosticSchema).default([]),
+  warnings: z.array(DiagnosticSchema).default([])
+});
+export type SubflowExtractionPlan = z.infer<typeof SubflowExtractionPlanSchema>;
+
+export const SubflowExtractionResultSchema = z.object({
+  applied: z.boolean(),
+  plan: SubflowExtractionPlanSchema,
+  patchSummary: z.string(),
+  validation: ValidationReportSchema.optional(),
+  app: FlogoAppSchema.optional(),
+  artifact: ArtifactRefSchema.optional()
+});
+export type SubflowExtractionResult = z.infer<typeof SubflowExtractionResultSchema>;
+
+export const SubflowExtractionResponseSchema = z.object({
+  result: SubflowExtractionResultSchema
+});
+export type SubflowExtractionResponse = z.infer<typeof SubflowExtractionResponseSchema>;
+
+export const SubflowInliningRequestSchema = z.object({
+  parentFlowId: z.string(),
+  invocationTaskId: z.string(),
+  validateOnly: z.boolean().default(false),
+  removeExtractedFlowIfUnused: z.boolean().default(false)
+});
+export type SubflowInliningRequest = z.infer<typeof SubflowInliningRequestSchema>;
+
+export const SubflowInliningPlanSchema = z.object({
+  parentFlowId: z.string(),
+  invocationTaskId: z.string(),
+  inlinedFlowId: z.string(),
+  generatedTaskIds: z.array(z.string()).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([]),
+  warnings: z.array(DiagnosticSchema).default([])
+});
+export type SubflowInliningPlan = z.infer<typeof SubflowInliningPlanSchema>;
+
+export const SubflowInliningResultSchema = z.object({
+  applied: z.boolean(),
+  plan: SubflowInliningPlanSchema,
+  patchSummary: z.string(),
+  validation: ValidationReportSchema.optional(),
+  app: FlogoAppSchema.optional(),
+  artifact: ArtifactRefSchema.optional()
+});
+export type SubflowInliningResult = z.infer<typeof SubflowInliningResultSchema>;
+
+export const SubflowInliningResponseSchema = z.object({
+  result: SubflowInliningResultSchema
+});
+export type SubflowInliningResponse = z.infer<typeof SubflowInliningResponseSchema>;
+
+export const IteratorSynthesisRequestSchema = z.object({
+  flowId: z.string(),
+  taskId: z.string(),
+  iterateExpr: z.string().min(1),
+  accumulate: z.boolean().optional(),
+  validateOnly: z.boolean().default(false),
+  replaceExisting: z.boolean().default(false)
+});
+export type IteratorSynthesisRequest = z.infer<typeof IteratorSynthesisRequestSchema>;
+
+export const IteratorSynthesisPlanSchema = z.object({
+  flowId: z.string(),
+  taskId: z.string(),
+  nextTaskType: z.literal("iterator"),
+  updatedSettings: z.record(z.string(), z.unknown()).default({}),
+  diagnostics: z.array(DiagnosticSchema).default([]),
+  warnings: z.array(DiagnosticSchema).default([])
+});
+export type IteratorSynthesisPlan = z.infer<typeof IteratorSynthesisPlanSchema>;
+
+export const IteratorSynthesisResultSchema = z.object({
+  applied: z.boolean(),
+  plan: IteratorSynthesisPlanSchema,
+  patchSummary: z.string(),
+  validation: ValidationReportSchema.optional(),
+  app: FlogoAppSchema.optional(),
+  artifact: ArtifactRefSchema.optional()
+});
+export type IteratorSynthesisResult = z.infer<typeof IteratorSynthesisResultSchema>;
+
+export const IteratorSynthesisResponseSchema = z.object({
+  result: IteratorSynthesisResultSchema
+});
+export type IteratorSynthesisResponse = z.infer<typeof IteratorSynthesisResponseSchema>;
+
+export const RetryPolicyRequestSchema = z.object({
+  flowId: z.string(),
+  taskId: z.string(),
+  count: z.number().int().positive(),
+  intervalMs: z.number().int().nonnegative(),
+  validateOnly: z.boolean().default(false),
+  replaceExisting: z.boolean().default(false)
+});
+export type RetryPolicyRequest = z.infer<typeof RetryPolicyRequestSchema>;
+
+export const RetryPolicyPlanSchema = z.object({
+  flowId: z.string(),
+  taskId: z.string(),
+  retryOnError: z.object({
+    count: z.number().int().positive(),
+    interval: z.number().int().nonnegative()
+  }),
+  diagnostics: z.array(DiagnosticSchema).default([]),
+  warnings: z.array(DiagnosticSchema).default([])
+});
+export type RetryPolicyPlan = z.infer<typeof RetryPolicyPlanSchema>;
+
+export const RetryPolicyResultSchema = z.object({
+  applied: z.boolean(),
+  plan: RetryPolicyPlanSchema,
+  patchSummary: z.string(),
+  validation: ValidationReportSchema.optional(),
+  app: FlogoAppSchema.optional(),
+  artifact: ArtifactRefSchema.optional()
+});
+export type RetryPolicyResult = z.infer<typeof RetryPolicyResultSchema>;
+
+export const RetryPolicyResponseSchema = z.object({
+  result: RetryPolicyResultSchema
+});
+export type RetryPolicyResponse = z.infer<typeof RetryPolicyResponseSchema>;
+
+export const DoWhileSynthesisRequestSchema = z.object({
+  flowId: z.string(),
+  taskId: z.string(),
+  condition: z.string().min(1),
+  delayMs: z.number().int().nonnegative().optional(),
+  accumulate: z.boolean().optional(),
+  validateOnly: z.boolean().default(false),
+  replaceExisting: z.boolean().default(false)
+});
+export type DoWhileSynthesisRequest = z.infer<typeof DoWhileSynthesisRequestSchema>;
+
+export const DoWhileSynthesisPlanSchema = z.object({
+  flowId: z.string(),
+  taskId: z.string(),
+  nextTaskType: z.literal("doWhile"),
+  updatedSettings: z.record(z.string(), z.unknown()).default({}),
+  diagnostics: z.array(DiagnosticSchema).default([]),
+  warnings: z.array(DiagnosticSchema).default([])
+});
+export type DoWhileSynthesisPlan = z.infer<typeof DoWhileSynthesisPlanSchema>;
+
+export const DoWhileSynthesisResultSchema = z.object({
+  applied: z.boolean(),
+  plan: DoWhileSynthesisPlanSchema,
+  patchSummary: z.string(),
+  validation: ValidationReportSchema.optional(),
+  app: FlogoAppSchema.optional(),
+  artifact: ArtifactRefSchema.optional()
+});
+export type DoWhileSynthesisResult = z.infer<typeof DoWhileSynthesisResultSchema>;
+
+export const DoWhileSynthesisResponseSchema = z.object({
+  result: DoWhileSynthesisResultSchema
+});
+export type DoWhileSynthesisResponse = z.infer<typeof DoWhileSynthesisResponseSchema>;
+
+export const ErrorPathTemplateKindSchema = z.enum(["log_and_continue", "log_and_stop"]);
+export type ErrorPathTemplateKind = z.infer<typeof ErrorPathTemplateKindSchema>;
+
+export const ErrorPathTemplateRequestSchema = z.object({
+  flowId: z.string(),
+  taskId: z.string(),
+  template: ErrorPathTemplateKindSchema,
+  validateOnly: z.boolean().default(false),
+  replaceExisting: z.boolean().default(false),
+  logMessage: z.string().optional(),
+  generatedTaskPrefix: z.string().optional()
+});
+export type ErrorPathTemplateRequest = z.infer<typeof ErrorPathTemplateRequestSchema>;
+
+export const ErrorPathTemplatePlanSchema = z.object({
+  flowId: z.string(),
+  taskId: z.string(),
+  template: ErrorPathTemplateKindSchema,
+  generatedTaskId: z.string(),
+  addedImport: z.boolean().default(false),
+  generatedLinks: z.array(FlogoLinkSchema).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([]),
+  warnings: z.array(DiagnosticSchema).default([])
+});
+export type ErrorPathTemplatePlan = z.infer<typeof ErrorPathTemplatePlanSchema>;
+
+export const ErrorPathTemplateResultSchema = z.object({
+  applied: z.boolean(),
+  plan: ErrorPathTemplatePlanSchema,
+  patchSummary: z.string(),
+  validation: ValidationReportSchema.optional(),
+  app: FlogoAppSchema.optional(),
+  artifact: ArtifactRefSchema.optional()
+});
+export type ErrorPathTemplateResult = z.infer<typeof ErrorPathTemplateResultSchema>;
+
+export const ErrorPathTemplateResponseSchema = z.object({
+  result: ErrorPathTemplateResultSchema
+});
+export type ErrorPathTemplateResponse = z.infer<typeof ErrorPathTemplateResponseSchema>;
+
 export const MappingTestSpecSchema = z.object({
   nodeId: z.string(),
   sampleInput: MappingPreviewContextSchema.default({}),
@@ -694,6 +1294,17 @@ export const RunnerStepTypeSchema = z.enum([
   "collect_logs",
   "generate_smoke",
   "run_smoke",
+  "infer_flow_contracts",
+  "bind_trigger",
+  "extract_subflow",
+  "inline_subflow",
+  "add_iterator",
+  "add_retry_policy",
+  "add_dowhile",
+  "add_error_path",
+  "capture_run_trace",
+  "replay_flow",
+  "compare_runs",
   "inventory_contribs",
   "catalog_contribs",
   "inspect_descriptor",
@@ -711,6 +1322,17 @@ export const RunnerJobKindSchema = z.enum([
   "smoke_test",
   "custom_contrib",
   "eval",
+  "flow_contracts",
+  "trigger_binding",
+  "subflow_extraction",
+  "subflow_inlining",
+  "iterator_synthesis",
+  "retry_policy_synthesis",
+  "dowhile_synthesis",
+  "error_path_synthesis",
+  "run_trace_capture",
+  "flow_replay",
+  "run_comparison",
   "inventory",
   "catalog",
   "contrib_evidence",
@@ -723,6 +1345,19 @@ export const RunnerJobKindSchema = z.enum([
 export type RunnerJobKind = z.infer<typeof RunnerJobKindSchema>;
 
 export const AnalysisKindSchema = z.enum([
+  "flow_contracts",
+  "trigger_binding_plan",
+  "subflow_extraction_plan",
+  "subflow_inlining_plan",
+  "iterator_plan",
+  "retry_policy_plan",
+  "dowhile_plan",
+  "error_path_plan",
+  "run_trace_plan",
+  "replay_plan",
+  "replay",
+  "run_comparison_plan",
+  "run_comparison",
   "inventory",
   "catalog",
   "descriptor",

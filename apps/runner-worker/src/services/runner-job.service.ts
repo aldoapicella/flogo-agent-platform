@@ -136,6 +136,28 @@ export class RunnerJobService {
         return process.env.RUNNER_CATALOG_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
       case "inventory":
         return process.env.RUNNER_INVENTORY_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
+      case "flow_contracts":
+        return process.env.RUNNER_FLOW_CONTRACT_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
+      case "trigger_binding":
+        return process.env.RUNNER_TRIGGER_BINDING_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
+      case "subflow_extraction":
+        return process.env.RUNNER_SUBFLOW_EXTRACTION_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
+      case "subflow_inlining":
+        return process.env.RUNNER_SUBFLOW_INLINING_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
+      case "iterator_synthesis":
+        return process.env.RUNNER_ITERATOR_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
+      case "retry_policy_synthesis":
+        return process.env.RUNNER_RETRY_POLICY_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
+      case "dowhile_synthesis":
+        return process.env.RUNNER_DOWHILE_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
+      case "error_path_synthesis":
+        return process.env.RUNNER_ERROR_PATH_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
+      case "run_trace_capture":
+        return process.env.RUNNER_RUN_TRACE_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
+      case "flow_replay":
+        return process.env.RUNNER_REPLAY_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
+      case "run_comparison":
+        return process.env.RUNNER_RUN_COMPARISON_JOB_TEMPLATE_NAME ?? process.env.RUNNER_BUILD_JOB_TEMPLATE_NAME ?? process.env.RUNNER_JOB_TEMPLATE_NAME ?? "flogo-build-job";
       case "contrib_evidence":
         return (
           process.env.RUNNER_CONTRIB_EVIDENCE_JOB_TEMPLATE_NAME ??

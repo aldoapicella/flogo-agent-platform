@@ -183,7 +183,7 @@ Check:
 
 - contribution catalog and mapping preview are implemented,
 - deeper Core-native composition is not yet implemented,
-- flow contracts, replay, and contribution scaffolding are still roadmap items.
+- flow contracts, runtime trace capture, replay, and run comparison are now implemented; contribution scaffolding is still a roadmap item.
 
 ### Storage
 
@@ -197,12 +197,12 @@ Check:
 
 ### UI
 
-- operator UI is intentionally thin and does not yet expose dedicated catalog/mapping/replay dashboards.
+- operator UI is intentionally thin and does not yet expose dedicated catalog/mapping/runtime-trace/replay dashboards.
 
 ## Recommended next operational milestones
 
 1. Add OpenTelemetry trace propagation across control-plane, orchestrator, and runner-worker.
 2. Move more artifact payloads to Blob/Azurite-backed storage.
-3. Add richer Flogo-native runtime outputs such as run traces and replay artifacts.
-4. Add UI views for app catalog, mapping preview, and later replay/contrib workflows.
+3. Add replay-driven debugging on top of persisted trace/replay/run-comparison artifacts.
+4. Add UI views for app catalog, mapping preview, runtime trace, and later replay/comparison/contrib workflows.
 5. Expand eval coverage for catalog/mapping-specific workflows.
