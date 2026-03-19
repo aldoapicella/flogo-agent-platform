@@ -1,16 +1,41 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	_ "github.com/project-flogo/contrib/activity/log"
+	clicontrib "github.com/project-flogo/contrib/trigger/cli"
+	_ "github.com/project-flogo/contrib/trigger/rest"
+	_ "github.com/project-flogo/contrib/trigger/timer"
+	coreaction "github.com/project-flogo/core/action"
+	coreapp "github.com/project-flogo/core/app"
+	coreresource "github.com/project-flogo/core/app/resource"
+	coreengine "github.com/project-flogo/core/engine"
+	coreevent "github.com/project-flogo/core/engine/event"
+	corerunner "github.com/project-flogo/core/engine/runner"
+	"github.com/project-flogo/core/support"
+	coreservice "github.com/project-flogo/core/support/service"
+	coretrigger "github.com/project-flogo/core/trigger"
+	"github.com/project-flogo/flow"
+	flowstate "github.com/project-flogo/flow/state"
+	flowevent "github.com/project-flogo/flow/support/event"
 )
 
 type diagnostic struct {
@@ -337,12 +362,155 @@ type runTraceSummary struct {
 	Diagnostics []diagnostic   `json:"diagnostics"`
 }
 
+type runtimeEvidence struct {
+	Kind                string                       `json:"kind"`
+	RecorderBacked      bool                         `json:"recorderBacked,omitempty"`
+	RecorderKind        string                       `json:"recorderKind,omitempty"`
+	RecorderMode        string                       `json:"recorderMode,omitempty"`
+	RuntimeMode         string                       `json:"runtimeMode,omitempty"`
+	FallbackReason      string                       `json:"fallbackReason,omitempty"`
+	FlowStart           map[string]any               `json:"flowStart,omitempty"`
+	FlowDone            map[string]any               `json:"flowDone,omitempty"`
+	Snapshots           []map[string]any             `json:"snapshots,omitempty"`
+	Steps               []map[string]any             `json:"steps,omitempty"`
+	TaskEvents          []map[string]any             `json:"taskEvents,omitempty"`
+	NormalizedSteps     []runtimeNormalizedStep      `json:"normalizedSteps,omitempty"`
+	RestTriggerRuntime  *restTriggerRuntimeEvidence  `json:"restTriggerRuntime,omitempty"`
+	CLITriggerRuntime   *cliTriggerRuntimeEvidence   `json:"cliTriggerRuntime,omitempty"`
+	TimerTriggerRuntime *timerTriggerRuntimeEvidence `json:"timerTriggerRuntime,omitempty"`
+}
+
+type restTriggerRuntimeRequestEvidence struct {
+	Method      string         `json:"method,omitempty"`
+	Path        string         `json:"path,omitempty"`
+	Headers     map[string]any `json:"headers,omitempty"`
+	QueryParams map[string]any `json:"queryParams,omitempty"`
+	PathParams  map[string]any `json:"pathParams,omitempty"`
+	Body        any            `json:"body,omitempty"`
+	Content     any            `json:"content,omitempty"`
+}
+
+type restTriggerRuntimeReplyEvidence struct {
+	Status  int            `json:"status,omitempty"`
+	Headers map[string]any `json:"headers,omitempty"`
+	Body    any            `json:"body,omitempty"`
+	Data    any            `json:"data,omitempty"`
+	Cookies map[string]any `json:"cookies,omitempty"`
+}
+
+type restTriggerRuntimeMappingEvidence struct {
+	RequestMappingMode string         `json:"requestMappingMode,omitempty"`
+	ReplyMappingMode   string         `json:"replyMappingMode,omitempty"`
+	MappedFlowInput    map[string]any `json:"mappedFlowInput,omitempty"`
+	MappedFlowOutput   map[string]any `json:"mappedFlowOutput,omitempty"`
+	RequestMappings    map[string]any `json:"requestMappings,omitempty"`
+	ReplyMappings      map[string]any `json:"replyMappings,omitempty"`
+	UnavailableFields  []string       `json:"unavailableFields,omitempty"`
+	Diagnostics        []diagnostic   `json:"diagnostics,omitempty"`
+}
+
+type restTriggerRuntimeEvidence struct {
+	Kind              string                             `json:"kind"`
+	Request           *restTriggerRuntimeRequestEvidence `json:"request,omitempty"`
+	FlowInput         map[string]any                     `json:"flowInput,omitempty"`
+	FlowOutput        map[string]any                     `json:"flowOutput,omitempty"`
+	Reply             *restTriggerRuntimeReplyEvidence   `json:"reply,omitempty"`
+	Mapping           *restTriggerRuntimeMappingEvidence `json:"mapping,omitempty"`
+	UnavailableFields []string                           `json:"unavailableFields,omitempty"`
+	Diagnostics       []diagnostic                       `json:"diagnostics,omitempty"`
+}
+
+type timerTriggerRuntimeSettingsEvidence struct {
+	RunMode        string `json:"runMode,omitempty"`
+	StartDelay     string `json:"startDelay,omitempty"`
+	RepeatInterval string `json:"repeatInterval,omitempty"`
+}
+
+type timerTriggerRuntimeTickEvidence struct {
+	StartedAt string `json:"startedAt,omitempty"`
+	FiredAt   string `json:"firedAt,omitempty"`
+	TickCount int    `json:"tickCount,omitempty"`
+}
+
+type timerTriggerRuntimeEvidence struct {
+	Kind              string                               `json:"kind"`
+	Settings          *timerTriggerRuntimeSettingsEvidence `json:"settings,omitempty"`
+	FlowInput         map[string]any                       `json:"flowInput,omitempty"`
+	FlowOutput        map[string]any                       `json:"flowOutput,omitempty"`
+	Tick              *timerTriggerRuntimeTickEvidence     `json:"tick,omitempty"`
+	UnavailableFields []string                             `json:"unavailableFields,omitempty"`
+	Diagnostics       []diagnostic                         `json:"diagnostics,omitempty"`
+}
+
+type cliTriggerRuntimeSettingsEvidence struct {
+	SingleCmd bool   `json:"singleCmd,omitempty"`
+	Usage     string `json:"usage,omitempty"`
+	Long      string `json:"long,omitempty"`
+}
+
+type cliTriggerRuntimeHandlerEvidence struct {
+	Command string   `json:"command,omitempty"`
+	Usage   string   `json:"usage,omitempty"`
+	Short   string   `json:"short,omitempty"`
+	Long    string   `json:"long,omitempty"`
+	Flags   []string `json:"flags,omitempty"`
+}
+
+type cliTriggerRuntimeReplyEvidence struct {
+	Data   any    `json:"data,omitempty"`
+	Stdout string `json:"stdout,omitempty"`
+}
+
+type cliTriggerRuntimeEvidence struct {
+	Kind              string                           `json:"kind"`
+	Settings          *cliTriggerRuntimeSettingsEvidence `json:"settings,omitempty"`
+	Handler           *cliTriggerRuntimeHandlerEvidence  `json:"handler,omitempty"`
+	Args              []string                         `json:"args,omitempty"`
+	Flags             map[string]any                   `json:"flags,omitempty"`
+	FlowInput         map[string]any                   `json:"flowInput,omitempty"`
+	FlowOutput        map[string]any                   `json:"flowOutput,omitempty"`
+	Reply             *cliTriggerRuntimeReplyEvidence  `json:"reply,omitempty"`
+	UnavailableFields []string                         `json:"unavailableFields,omitempty"`
+	Diagnostics       []diagnostic                     `json:"diagnostics,omitempty"`
+}
+
+type runtimeNormalizedStep struct {
+	TaskID                 string              `json:"taskId"`
+	TaskName               string              `json:"taskName,omitempty"`
+	ActivityRef            string              `json:"activityRef,omitempty"`
+	Type                   string              `json:"type,omitempty"`
+	Status                 string              `json:"status"`
+	Error                  string              `json:"error,omitempty"`
+	StartedAt              string              `json:"startedAt,omitempty"`
+	FinishedAt             string              `json:"finishedAt,omitempty"`
+	DeclaredInputMappings  map[string]any      `json:"declaredInputMappings,omitempty"`
+	DeclaredOutputMappings map[string]any      `json:"declaredOutputMappings,omitempty"`
+	ResolvedInputs         map[string]any      `json:"resolvedInputs,omitempty"`
+	ProducedOutputs        map[string]any      `json:"producedOutputs,omitempty"`
+	FlowStateBefore        map[string]any      `json:"flowStateBefore,omitempty"`
+	FlowStateAfter         map[string]any      `json:"flowStateAfter,omitempty"`
+	StateDelta             map[string]any      `json:"stateDelta,omitempty"`
+	EvidenceSource         map[string][]string `json:"evidenceSource,omitempty"`
+	UnavailableFields      []string            `json:"unavailableFields,omitempty"`
+	Diagnostics            []diagnostic        `json:"diagnostics,omitempty"`
+}
+
+type runtimeTraceRecorderEvidence struct {
+	RecordingMode string           `json:"recordingMode,omitempty"`
+	Start         map[string]any   `json:"start,omitempty"`
+	Snapshots     []map[string]any `json:"snapshots,omitempty"`
+	Steps         []map[string]any `json:"steps,omitempty"`
+	Done          map[string]any   `json:"done,omitempty"`
+}
+
 type runTrace struct {
-	AppName     string             `json:"appName"`
-	FlowID      string             `json:"flowId"`
-	Summary     runTraceSummary    `json:"summary"`
-	Steps       []runTraceTaskStep `json:"steps"`
-	Diagnostics []diagnostic       `json:"diagnostics"`
+	AppName         string             `json:"appName"`
+	FlowID          string             `json:"flowId"`
+	EvidenceKind    string             `json:"evidenceKind,omitempty"`
+	RuntimeEvidence *runtimeEvidence   `json:"runtimeEvidence,omitempty"`
+	Summary         runTraceSummary    `json:"summary"`
+	Steps           []runTraceTaskStep `json:"steps"`
+	Diagnostics     []diagnostic       `json:"diagnostics"`
 }
 
 type runTraceResponse struct {
@@ -370,9 +538,10 @@ type replaySummary struct {
 }
 
 type replayResult struct {
-	Summary    replaySummary     `json:"summary"`
-	Trace      *runTrace         `json:"trace,omitempty"`
-	Validation *validationReport `json:"validation,omitempty"`
+	Summary         replaySummary     `json:"summary"`
+	Trace           *runTrace         `json:"trace,omitempty"`
+	RuntimeEvidence *runtimeEvidence  `json:"runtimeEvidence,omitempty"`
+	Validation      *validationReport `json:"validation,omitempty"`
 }
 
 type replayResponse struct {
@@ -401,10 +570,19 @@ type runComparisonRequest struct {
 }
 
 type runComparisonArtifactRef struct {
-	ArtifactID    string `json:"artifactId"`
-	Kind          string `json:"kind"`
-	SummaryStatus string `json:"summaryStatus"`
-	FlowID        string `json:"flowId"`
+	ArtifactID                  string `json:"artifactId"`
+	Kind                        string `json:"kind"`
+	SummaryStatus               string `json:"summaryStatus"`
+	FlowID                      string `json:"flowId"`
+	EvidenceKind                string `json:"evidenceKind,omitempty"`
+	NormalizedStepEvidence      bool   `json:"normalizedStepEvidence,omitempty"`
+	RestTriggerRuntimeEvidence  bool   `json:"restTriggerRuntimeEvidence,omitempty"`
+	RestTriggerRuntimeKind      string `json:"restTriggerRuntimeKind,omitempty"`
+	CLITriggerRuntimeEvidence   bool   `json:"cliTriggerRuntimeEvidence,omitempty"`
+	CLITriggerRuntimeKind       string `json:"cliTriggerRuntimeKind,omitempty"`
+	TimerTriggerRuntimeEvidence bool   `json:"timerTriggerRuntimeEvidence,omitempty"`
+	TimerTriggerRuntimeKind     string `json:"timerTriggerRuntimeKind,omitempty"`
+	ComparisonBasisPreference   string `json:"comparisonBasisPreference,omitempty"`
 }
 
 type runComparisonValueDiff struct {
@@ -434,12 +612,77 @@ type runComparisonSummaryDiff struct {
 	DiagnosticDiffs []diagnostic           `json:"diagnosticDiffs"`
 }
 
+type runComparisonRESTRequestDiff struct {
+	MethodDiff      runComparisonValueDiff `json:"methodDiff"`
+	PathDiff        runComparisonValueDiff `json:"pathDiff"`
+	QueryParamsDiff runComparisonValueDiff `json:"queryParamsDiff"`
+	HeadersDiff     runComparisonValueDiff `json:"headersDiff"`
+	BodyDiff        runComparisonValueDiff `json:"bodyDiff"`
+	PathParamsDiff  runComparisonValueDiff `json:"pathParamsDiff"`
+}
+
+type runComparisonRESTReplyDiff struct {
+	StatusDiff  runComparisonValueDiff `json:"statusDiff"`
+	BodyDiff    runComparisonValueDiff `json:"bodyDiff"`
+	DataDiff    runComparisonValueDiff `json:"dataDiff"`
+	HeadersDiff runComparisonValueDiff `json:"headersDiff"`
+	CookiesDiff runComparisonValueDiff `json:"cookiesDiff"`
+}
+
+type runComparisonRESTEnvelopeDiff struct {
+	RequestEnvelopeCompared bool                          `json:"requestEnvelopeCompared"`
+	FlowInputCompared       bool                          `json:"flowInputCompared"`
+	ReplyEnvelopeCompared   bool                          `json:"replyEnvelopeCompared"`
+	UnsupportedFields       []string                      `json:"unsupportedFields,omitempty"`
+	Request                 *runComparisonRESTRequestDiff `json:"request,omitempty"`
+	FlowInputDiff           *runComparisonValueDiff       `json:"flowInputDiff,omitempty"`
+	Reply                   *runComparisonRESTReplyDiff   `json:"reply,omitempty"`
+}
+
+type runComparisonTimerRuntimeDiff struct {
+	ComparisonBasis    string                  `json:"comparisonBasis"`
+	RuntimeMode        string                  `json:"runtimeMode,omitempty"`
+	SettingsCompared   bool                    `json:"settingsCompared"`
+	FlowInputCompared  bool                    `json:"flowInputCompared"`
+	FlowOutputCompared bool                    `json:"flowOutputCompared"`
+	TickCompared       bool                    `json:"tickCompared"`
+	SettingsDiff       *runComparisonValueDiff `json:"settingsDiff,omitempty"`
+	FlowInputDiff      *runComparisonValueDiff `json:"flowInputDiff,omitempty"`
+	FlowOutputDiff     *runComparisonValueDiff `json:"flowOutputDiff,omitempty"`
+	TickDiff           *runComparisonValueDiff `json:"tickDiff,omitempty"`
+	UnsupportedFields  []string                `json:"unsupportedFields,omitempty"`
+	Diagnostics        []diagnostic            `json:"diagnostics,omitempty"`
+}
+
+type runComparisonCLIRuntimeDiff struct {
+	ComparisonBasis    string                  `json:"comparisonBasis"`
+	RuntimeMode        string                  `json:"runtimeMode,omitempty"`
+	CommandCompared    bool                    `json:"commandCompared"`
+	ArgsCompared       bool                    `json:"argsCompared"`
+	FlagsCompared      bool                    `json:"flagsCompared"`
+	FlowInputCompared  bool                    `json:"flowInputCompared"`
+	FlowOutputCompared bool                    `json:"flowOutputCompared"`
+	ReplyCompared      bool                    `json:"replyCompared"`
+	CommandDiff        *runComparisonValueDiff `json:"commandDiff,omitempty"`
+	ArgsDiff           *runComparisonValueDiff `json:"argsDiff,omitempty"`
+	FlagsDiff          *runComparisonValueDiff `json:"flagsDiff,omitempty"`
+	FlowInputDiff      *runComparisonValueDiff `json:"flowInputDiff,omitempty"`
+	FlowOutputDiff     *runComparisonValueDiff `json:"flowOutputDiff,omitempty"`
+	ReplyDiff          *runComparisonValueDiff `json:"replyDiff,omitempty"`
+	UnsupportedFields  []string                `json:"unsupportedFields,omitempty"`
+	Diagnostics        []diagnostic            `json:"diagnostics,omitempty"`
+}
+
 type runComparisonResult struct {
-	Left        runComparisonArtifactRef `json:"left"`
-	Right       runComparisonArtifactRef `json:"right"`
-	Summary     runComparisonSummaryDiff `json:"summary"`
-	Steps       []runComparisonStepDiff  `json:"steps"`
-	Diagnostics []diagnostic             `json:"diagnostics"`
+	Left            runComparisonArtifactRef       `json:"left"`
+	Right           runComparisonArtifactRef       `json:"right"`
+	ComparisonBasis string                         `json:"comparisonBasis,omitempty"`
+	Summary         runComparisonSummaryDiff       `json:"summary"`
+	RestComparison  *runComparisonRESTEnvelopeDiff `json:"restComparison,omitempty"`
+	CLIComparison   *runComparisonCLIRuntimeDiff   `json:"cliComparison,omitempty"`
+	TimerComparison *runComparisonTimerRuntimeDiff `json:"timerComparison,omitempty"`
+	Steps           []runComparisonStepDiff        `json:"steps"`
+	Diagnostics     []diagnostic                   `json:"diagnostics"`
 }
 
 type runComparisonResponse struct {
@@ -474,7 +717,6 @@ type triggerBindingRequest struct {
 	ReplaceExisting bool           `json:"replaceExisting"`
 	HandlerName     string         `json:"handlerName,omitempty"`
 	TriggerID       string         `json:"triggerId,omitempty"`
-	TriggerName     string         `json:"triggerName,omitempty"`
 }
 
 type triggerBindingMappings struct {
@@ -494,17 +736,12 @@ type triggerBindingPlan struct {
 	Warnings         []diagnostic           `json:"warnings"`
 }
 
-type simpleValidationReport struct {
-	Ok     bool             `json:"ok"`
-	Stages []map[string]any `json:"stages,omitempty"`
-}
-
 type triggerBindingResult struct {
-	Applied      bool                    `json:"applied"`
-	Plan         triggerBindingPlan      `json:"plan"`
-	PatchSummary string                  `json:"patchSummary"`
-	Validation   *simpleValidationReport `json:"validation,omitempty"`
-	App          map[string]any          `json:"app,omitempty"`
+	Applied      bool               `json:"applied"`
+	Plan         triggerBindingPlan `json:"plan"`
+	PatchSummary string             `json:"patchSummary"`
+	Validation   *validationReport  `json:"validation,omitempty"`
+	App          map[string]any     `json:"app,omitempty"`
 }
 
 type triggerBindingResponse struct {
@@ -541,11 +778,11 @@ type subflowExtractionPlan struct {
 }
 
 type subflowExtractionResult struct {
-	Applied      bool                    `json:"applied"`
-	Plan         subflowExtractionPlan   `json:"plan"`
-	PatchSummary string                  `json:"patchSummary"`
-	Validation   *simpleValidationReport `json:"validation,omitempty"`
-	App          map[string]any          `json:"app,omitempty"`
+	Applied      bool                  `json:"applied"`
+	Plan         subflowExtractionPlan `json:"plan"`
+	PatchSummary string                `json:"patchSummary"`
+	Validation   *validationReport     `json:"validation,omitempty"`
+	App          map[string]any        `json:"app,omitempty"`
 }
 
 type subflowExtractionResponse struct {
@@ -569,11 +806,11 @@ type subflowInliningPlan struct {
 }
 
 type subflowInliningResult struct {
-	Applied      bool                    `json:"applied"`
-	Plan         subflowInliningPlan     `json:"plan"`
-	PatchSummary string                  `json:"patchSummary"`
-	Validation   *simpleValidationReport `json:"validation,omitempty"`
-	App          map[string]any          `json:"app,omitempty"`
+	Applied      bool                `json:"applied"`
+	Plan         subflowInliningPlan `json:"plan"`
+	PatchSummary string              `json:"patchSummary"`
+	Validation   *validationReport   `json:"validation,omitempty"`
+	App          map[string]any      `json:"app,omitempty"`
 }
 
 type subflowInliningResponse struct {
@@ -599,11 +836,11 @@ type iteratorSynthesisPlan struct {
 }
 
 type iteratorSynthesisResult struct {
-	Applied      bool                    `json:"applied"`
-	Plan         iteratorSynthesisPlan   `json:"plan"`
-	PatchSummary string                  `json:"patchSummary"`
-	Validation   *simpleValidationReport `json:"validation,omitempty"`
-	App          map[string]any          `json:"app,omitempty"`
+	Applied      bool                  `json:"applied"`
+	Plan         iteratorSynthesisPlan `json:"plan"`
+	PatchSummary string                `json:"patchSummary"`
+	Validation   *validationReport     `json:"validation,omitempty"`
+	App          map[string]any        `json:"app,omitempty"`
 }
 
 type iteratorSynthesisResponse struct {
@@ -628,11 +865,11 @@ type retryPolicyPlan struct {
 }
 
 type retryPolicyResult struct {
-	Applied      bool                    `json:"applied"`
-	Plan         retryPolicyPlan         `json:"plan"`
-	PatchSummary string                  `json:"patchSummary"`
-	Validation   *simpleValidationReport `json:"validation,omitempty"`
-	App          map[string]any          `json:"app,omitempty"`
+	Applied      bool              `json:"applied"`
+	Plan         retryPolicyPlan   `json:"plan"`
+	PatchSummary string            `json:"patchSummary"`
+	Validation   *validationReport `json:"validation,omitempty"`
+	App          map[string]any    `json:"app,omitempty"`
 }
 
 type retryPolicyResponse struct {
@@ -659,11 +896,11 @@ type doWhileSynthesisPlan struct {
 }
 
 type doWhileSynthesisResult struct {
-	Applied      bool                    `json:"applied"`
-	Plan         doWhileSynthesisPlan    `json:"plan"`
-	PatchSummary string                  `json:"patchSummary"`
-	Validation   *simpleValidationReport `json:"validation,omitempty"`
-	App          map[string]any          `json:"app,omitempty"`
+	Applied      bool                 `json:"applied"`
+	Plan         doWhileSynthesisPlan `json:"plan"`
+	PatchSummary string               `json:"patchSummary"`
+	Validation   *validationReport    `json:"validation,omitempty"`
+	App          map[string]any       `json:"app,omitempty"`
 }
 
 type doWhileSynthesisResponse struct {
@@ -692,11 +929,11 @@ type errorPathTemplatePlan struct {
 }
 
 type errorPathTemplateResult struct {
-	Applied      bool                    `json:"applied"`
-	Plan         errorPathTemplatePlan   `json:"plan"`
-	PatchSummary string                  `json:"patchSummary"`
-	Validation   *simpleValidationReport `json:"validation,omitempty"`
-	App          map[string]any          `json:"app,omitempty"`
+	Applied      bool                  `json:"applied"`
+	Plan         errorPathTemplatePlan `json:"plan"`
+	PatchSummary string                `json:"patchSummary"`
+	Validation   *validationReport     `json:"validation,omitempty"`
+	App          map[string]any        `json:"app,omitempty"`
 }
 
 type errorPathTemplateResponse struct {
@@ -772,6 +1009,1413 @@ type flogoApp struct {
 	Properties []map[string]any
 	Triggers   []flogoTrigger
 	Resources  []flogoFlow
+	Raw        map[string]any
+}
+
+type runtimeTracePreparedFlow struct {
+	FlowID            string
+	FlowName          string
+	ResourceData      []byte
+	RuntimeResourceID string
+	RuntimeFlowURI    string
+}
+
+type runtimeTracePreparedRESTTrigger struct {
+	TriggerID              string
+	TriggerRef             string
+	HandlerName            string
+	Method                 string
+	Path                   string
+	Port                   int
+	RequestMappings        map[string]any
+	ReplyMappings          map[string]any
+	RuntimeRequestMappings map[string]any
+	RuntimeReplyMappings   map[string]any
+}
+
+type runtimeTracePreparedCLITrigger struct {
+	TriggerID             string
+	TriggerRef            string
+	CommandName           string
+	SingleCmd             bool
+	Usage                 string
+	Long                  string
+	HandlerUsage          string
+	HandlerShort          string
+	HandlerLong           string
+	FlagDescriptions      []string
+	FlagKinds             map[string]string
+	InputMappings         map[string]any
+	OutputMappings        map[string]any
+	RuntimeInputMappings  map[string]any
+	RuntimeOutputMappings map[string]any
+}
+
+type runtimeTracePreparedTimerTrigger struct {
+	TriggerID      string
+	TriggerRef     string
+	HandlerName    string
+	StartDelay     string
+	RepeatInterval string
+}
+
+type runtimeTraceRecorderBridge struct {
+	name          string
+	mu            sync.Mutex
+	recordingMode string
+	start         map[string]any
+	snapshots     []map[string]any
+	steps         []map[string]any
+	done          map[string]any
+}
+
+type runtimeTraceRecorderFactory struct{}
+
+type runtimeRestTriggerSettings struct {
+	Port int `json:"port"`
+}
+
+type runtimeRestTriggerHandlerSettings struct {
+	Method string `json:"method"`
+	Path   string `json:"path"`
+}
+
+type runtimeRestTriggerMetadata struct{}
+
+type runtimeRestTriggerFactory struct{}
+
+type runtimeRestTrigger struct {
+	mu       sync.Mutex
+	id       string
+	settings map[string]any
+	handlers []coretrigger.Handler
+	server   *http.Server
+	listener net.Listener
+	endpoint string
+}
+
+type runtimeCliTriggerMetadata struct{}
+
+type runtimeCliTriggerSettings struct {
+	SingleCmd bool `json:"singleCmd"`
+}
+
+type runtimeCliTriggerHandlerSettings struct {
+	Command string   `json:"command"`
+	Usage   string   `json:"usage,omitempty"`
+	Short   string   `json:"short,omitempty"`
+	Long    string   `json:"long,omitempty"`
+	Flags   []string `json:"flags,omitempty"`
+}
+
+type runtimeCliTriggerFactory struct{}
+
+type runtimeCliTrigger struct {
+	mu       sync.Mutex
+	id       string
+	settings map[string]any
+	handlers []coretrigger.Handler
+	state    *runtimeCliTriggerExecutionState
+}
+
+type runtimeCliTriggerExecutionState struct {
+	SingleCmd      bool
+	HandlerName    string
+	CommandName    string
+	Usage          string
+	Short          string
+	Long           string
+	HandlerFlags   []string
+	Args           []string
+	InvocationFlags map[string]any
+	RequestMappings map[string]any
+	ReplyMappings   map[string]any
+	MappedFlowInput map[string]any
+	MappedFlowOutput map[string]any
+	ReplyData      any
+	ReplyStdout    string
+	Diagnostics    []diagnostic
+}
+
+type runtimeCLIRequestBundle struct {
+	Args  []string
+	Flags map[string]any
+	Argv  []string
+}
+
+func newRuntimeTraceRecorderBridge(name string) *runtimeTraceRecorderBridge {
+	return &runtimeTraceRecorderBridge{name: name}
+}
+
+func (recorder *runtimeTraceRecorderBridge) Name() string {
+	return recorder.name
+}
+
+func (recorder *runtimeTraceRecorderBridge) Start() error {
+	return nil
+}
+
+func (recorder *runtimeTraceRecorderBridge) Stop() error {
+	return nil
+}
+
+func (recorder *runtimeTraceRecorderBridge) Reset(recordingMode string) {
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+
+	recorder.recordingMode = recordingMode
+	recorder.start = nil
+	recorder.snapshots = nil
+	recorder.steps = nil
+	recorder.done = nil
+}
+
+func (recorder *runtimeTraceRecorderBridge) Evidence() *runtimeTraceRecorderEvidence {
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+
+	evidence := &runtimeTraceRecorderEvidence{
+		RecordingMode: recorder.recordingMode,
+		Start:         cloneStringAnyMap(recorder.start),
+		Snapshots:     cloneMapSlice(recorder.snapshots),
+		Steps:         cloneMapSlice(recorder.steps),
+		Done:          cloneStringAnyMap(recorder.done),
+	}
+	if len(evidence.Start) == 0 {
+		evidence.Start = nil
+	}
+	if len(evidence.Done) == 0 {
+		evidence.Done = nil
+	}
+	if len(evidence.Snapshots) == 0 {
+		evidence.Snapshots = nil
+	}
+	if len(evidence.Steps) == 0 {
+		evidence.Steps = nil
+	}
+	return evidence
+}
+
+func (recorder *runtimeTraceRecorderBridge) RecordStart(state *flowstate.FlowState) error {
+	if state == nil {
+		return nil
+	}
+
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+
+	recorder.start = flowStateToMap(state)
+	return nil
+}
+
+func (recorder *runtimeTraceRecorderBridge) RecordSnapshot(snapshot *flowstate.Snapshot) error {
+	if snapshot == nil {
+		return nil
+	}
+
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+
+	recorder.snapshots = append(recorder.snapshots, snapshotToMap(snapshot))
+	return nil
+}
+
+func (recorder *runtimeTraceRecorderBridge) RecordStep(step *flowstate.Step) error {
+	if step == nil {
+		return nil
+	}
+
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+
+	recorder.steps = append(recorder.steps, stepToMap(step))
+	return nil
+}
+
+func (recorder *runtimeTraceRecorderBridge) RecordDone(state *flowstate.FlowState) error {
+	if state == nil {
+		return nil
+	}
+
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+
+	recorder.done = flowStateToMap(state)
+	return nil
+}
+
+func (factory *runtimeTraceRecorderFactory) NewService(config *coreservice.Config) (coreservice.Service, error) {
+	return runtimeTraceRecorderSingleton, nil
+}
+
+var runtimeRestTriggerMd = coretrigger.NewMetadata(&runtimeRestTriggerSettings{}, &runtimeRestTriggerHandlerSettings{})
+var runtimeCliTriggerMd = coretrigger.NewMetadata(&runtimeCliTriggerSettings{}, &runtimeCliTriggerHandlerSettings{})
+
+func newRuntimeRestTrigger() *runtimeRestTrigger {
+	return &runtimeRestTrigger{}
+}
+
+func (factory *runtimeRestTriggerFactory) Metadata() *coretrigger.Metadata {
+	return runtimeRestTriggerMd
+}
+
+func (factory *runtimeRestTriggerFactory) New(config *coretrigger.Config) (coretrigger.Trigger, error) {
+	trigger := runtimeRestTriggerSingleton
+	trigger.mu.Lock()
+	defer trigger.mu.Unlock()
+
+	trigger.id = config.Id
+	trigger.settings = cloneStringAnyMap(config.Settings)
+	trigger.handlers = nil
+	trigger.server = nil
+	trigger.listener = nil
+	trigger.endpoint = ""
+	return trigger, nil
+}
+
+func (trigger *runtimeRestTrigger) Ref() string {
+	return supportedRuntimeRESTTriggerRef
+}
+
+func (trigger *runtimeRestTrigger) Metadata() *coretrigger.Metadata {
+	return runtimeRestTriggerMd
+}
+
+func (trigger *runtimeRestTrigger) Initialize(ctx coretrigger.InitContext) error {
+	trigger.mu.Lock()
+	defer trigger.mu.Unlock()
+
+	trigger.handlers = append([]coretrigger.Handler{}, ctx.GetHandlers()...)
+	return nil
+}
+
+func (trigger *runtimeRestTrigger) Start() error {
+	trigger.mu.Lock()
+	if trigger.server != nil {
+		trigger.mu.Unlock()
+		return nil
+	}
+	settings := cloneStringAnyMap(trigger.settings)
+	trigger.mu.Unlock()
+
+	port := int(numberValue(settings["port"]))
+	addr := "127.0.0.1:0"
+	if port > 0 {
+		addr = fmt.Sprintf("127.0.0.1:%d", port)
+	}
+
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+
+	server := &http.Server{Handler: http.HandlerFunc(trigger.handleHTTP)}
+	trigger.mu.Lock()
+	trigger.listener = listener
+	trigger.server = server
+	trigger.endpoint = "http://" + listener.Addr().String()
+	trigger.mu.Unlock()
+
+	go func() {
+		_ = server.Serve(listener)
+	}()
+
+	return nil
+}
+
+func (trigger *runtimeRestTrigger) Stop() error {
+	trigger.mu.Lock()
+	server := trigger.server
+	listener := trigger.listener
+	trigger.server = nil
+	trigger.listener = nil
+	trigger.endpoint = ""
+	trigger.handlers = nil
+	trigger.mu.Unlock()
+
+	if server != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = server.Shutdown(ctx)
+		cancel()
+	}
+	if listener != nil {
+		_ = listener.Close()
+	}
+
+	return nil
+}
+
+func (trigger *runtimeRestTrigger) Endpoint() string {
+	trigger.mu.Lock()
+	defer trigger.mu.Unlock()
+	return trigger.endpoint
+}
+
+func (trigger *runtimeRestTrigger) handleHTTP(w http.ResponseWriter, r *http.Request) {
+	handler, pathParams := trigger.matchHandler(r.Method, r.URL.Path)
+	if handler == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	bodyBytes, _ := io.ReadAll(r.Body)
+	triggerData := map[string]any{
+		"method":      r.Method,
+		"path":        r.URL.Path,
+		"headers":     runtimeRESTHeaderValuesToMap(r.Header),
+		"queryParams": runtimeRESTQueryValuesToMap(r.URL.Query()),
+		"pathParams":  pathParams,
+	}
+	if len(bodyBytes) > 0 {
+		decodedBody := runtimeRESTBodyValue(bodyBytes)
+		triggerData["body"] = decodedBody
+		triggerData["content"] = decodedBody
+	}
+
+	requestMappings, replyMappings := runtimeRESTHandlerMappings(handler)
+	requestContext := mappingPreviewContext{
+		Flow:     map[string]any{},
+		Activity: map[string]map[string]any{},
+		Env:      map[string]any{},
+		Property: map[string]any{},
+		Trigger:  triggerData,
+	}
+	mappedInput := runtimeRESTApplyMappings(requestMappings, requestContext)
+	if len(mappedInput) == 0 {
+		mappedInput = cloneStringAnyMap(triggerData)
+	}
+
+	results, err := handler.Handle(r.Context(), mappedInput)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	recorderEvidence := runtimeTraceRecorderSingleton.Evidence()
+	flowEvidence := map[string]any{}
+	if recorderEvidence != nil {
+		if recordedOutput := recorderFlowOutputs(recorderEvidence.Done); len(recordedOutput) > 0 {
+			flowEvidence = mergeRuntimeEvidenceMap(flowEvidence, recordedOutput)
+		}
+		if len(flowEvidence) == 0 {
+			if recordedOutput := recorderFlowOutputs(recorderEvidence.Start); len(recordedOutput) > 0 {
+				flowEvidence = mergeRuntimeEvidenceMap(flowEvidence, recordedOutput)
+			}
+		}
+	}
+	if runtimeResults := cloneStringAnyMap(mapValue(results)); len(runtimeResults) > 0 {
+		flowEvidence = mergeRuntimeEvidenceMap(flowEvidence, runtimeResults)
+	}
+	if len(flowEvidence) == 0 {
+		flowEvidence = cloneStringAnyMap(results)
+	}
+	if message, ok := flowEvidence["message"]; ok {
+		if typed, ok := message.(string); ok && (strings.HasPrefix(typed, "=$") || strings.HasPrefix(typed, "$.")) {
+			if mapped, exists := mappedInput["message"]; exists {
+				flowEvidence["message"] = makeJSONSafe(mapped)
+			} else if payload, exists := mappedInput["payload"]; exists {
+				flowEvidence["message"] = makeJSONSafe(payload)
+			} else if payload, exists := flowEvidence["payload"]; exists {
+				flowEvidence["message"] = makeJSONSafe(payload)
+			} else if content, exists := flowEvidence["content"]; exists {
+				flowEvidence["message"] = makeJSONSafe(content)
+			}
+		}
+	} else {
+		if mapped, exists := mappedInput["message"]; exists {
+			flowEvidence["message"] = makeJSONSafe(mapped)
+		} else if payload, exists := mappedInput["payload"]; exists {
+			flowEvidence["message"] = makeJSONSafe(payload)
+		} else if payload, exists := flowEvidence["payload"]; exists {
+			flowEvidence["message"] = makeJSONSafe(payload)
+		} else if content, exists := flowEvidence["content"]; exists {
+			flowEvidence["message"] = makeJSONSafe(content)
+		}
+	}
+
+	replyContext := mappingPreviewContext{
+		Flow:     flowEvidence,
+		Activity: map[string]map[string]any{},
+		Env:      map[string]any{},
+		Property: map[string]any{},
+		Trigger:  triggerData,
+	}
+	replyValues := runtimeRESTApplyMappings(replyMappings, replyContext)
+	if len(replyValues) == 0 {
+		replyValues = cloneStringAnyMap(flowEvidence)
+	}
+
+	statusCode := runtimeRESTStatusCode(replyValues)
+	responseHeaders := runtimeRESTResponseHeaders(replyValues)
+	responseBody := runtimeRESTResponseBody(replyValues)
+	if responseBody == nil {
+		if mapped, ok := mappedInput["message"]; ok {
+			responseBody = makeJSONSafe(mapped)
+			replyValues["data"] = responseBody
+		} else if mapped, ok := mappedInput["payload"]; ok {
+			responseBody = makeJSONSafe(mapped)
+			replyValues["data"] = responseBody
+		} else if mapped, ok := flowEvidence["message"]; ok {
+			responseBody = makeJSONSafe(mapped)
+			replyValues["data"] = responseBody
+		} else if mapped, ok := flowEvidence["payload"]; ok {
+			responseBody = makeJSONSafe(mapped)
+			replyValues["data"] = responseBody
+		}
+	}
+
+	for key, value := range responseHeaders {
+		if value == nil {
+			continue
+		}
+		switch typed := value.(type) {
+		case []any:
+			for _, item := range typed {
+				w.Header().Add(key, fmt.Sprint(item))
+			}
+		case []string:
+			for _, item := range typed {
+				w.Header().Add(key, item)
+			}
+		default:
+			w.Header().Set(key, fmt.Sprint(value))
+		}
+	}
+
+	if responseBody != nil && w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	if statusCode == 0 {
+		statusCode = http.StatusOK
+	}
+	w.WriteHeader(statusCode)
+	if responseBody == nil {
+		return
+	}
+
+	switch typed := responseBody.(type) {
+	case string:
+		_, _ = w.Write([]byte(typed))
+	default:
+		encoded, err := json.Marshal(typed)
+		if err != nil {
+			_, _ = w.Write([]byte(fmt.Sprint(typed)))
+			return
+		}
+		_, _ = w.Write(encoded)
+	}
+}
+
+func (trigger *runtimeRestTrigger) matchHandler(method string, requestPath string) (coretrigger.Handler, map[string]string) {
+	trigger.mu.Lock()
+	handlers := append([]coretrigger.Handler{}, trigger.handlers...)
+	trigger.mu.Unlock()
+
+	for _, handler := range handlers {
+		settings := handler.Settings()
+		handlerMethod := strings.ToUpper(strings.TrimSpace(stringValue(settings["method"])))
+		handlerPath := strings.TrimSpace(stringValue(settings["path"]))
+		if handlerPath == "" {
+			continue
+		}
+		if handlerMethod != "" && !strings.EqualFold(handlerMethod, method) {
+			continue
+		}
+		if params, ok := runtimeRESTPathParams(handlerPath, requestPath); ok {
+			return handler, params
+		}
+	}
+
+	return nil, map[string]string{}
+}
+
+func newRuntimeCliTrigger() *runtimeCliTrigger {
+	return &runtimeCliTrigger{}
+}
+
+func (factory *runtimeCliTriggerFactory) Metadata() *coretrigger.Metadata {
+	return runtimeCliTriggerMd
+}
+
+func (factory *runtimeCliTriggerFactory) New(config *coretrigger.Config) (coretrigger.Trigger, error) {
+	trigger := runtimeCliTriggerSingleton
+	trigger.mu.Lock()
+	defer trigger.mu.Unlock()
+
+	trigger.id = config.Id
+	trigger.settings = cloneStringAnyMap(config.Settings)
+	trigger.handlers = nil
+	trigger.state = nil
+	return trigger, nil
+}
+
+func (trigger *runtimeCliTrigger) Ref() string {
+	return supportedRuntimeCLITriggerRef
+}
+
+func (trigger *runtimeCliTrigger) Metadata() *coretrigger.Metadata {
+	return runtimeCliTriggerMd
+}
+
+func (trigger *runtimeCliTrigger) Initialize(ctx coretrigger.InitContext) error {
+	trigger.mu.Lock()
+	defer trigger.mu.Unlock()
+
+	trigger.handlers = append([]coretrigger.Handler{}, ctx.GetHandlers()...)
+	return nil
+}
+
+func (trigger *runtimeCliTrigger) Start() error {
+	trigger.mu.Lock()
+	if len(trigger.handlers) == 0 {
+		trigger.mu.Unlock()
+		return nil
+	}
+	handlers := append([]coretrigger.Handler{}, trigger.handlers...)
+	settings := cloneStringAnyMap(trigger.settings)
+	trigger.mu.Unlock()
+
+	handler := trigger.matchHandler(handlers, runtimeCLIArgsValue(settings["args"]))
+	if handler == nil {
+		return fmt.Errorf("no CLI handler was available for the current runtime-backed slice")
+	}
+
+	commandName := strings.TrimSpace(stringValue(handler.Settings()["command"]))
+	requestMappings, replyMappings := runtimeRESTHandlerMappings(handler)
+	args := runtimeCLIArgsValue(settings["args"])
+	flags := runtimeCLIFlagsValue(settings["flags"])
+	handlerFlags := runtimeCLIStringFlags(handler.Settings()["flags"])
+	triggerData := map[string]any{
+		"command":   commandName,
+		"args":      args,
+		"flags":     flags,
+		"singleCmd": boolValue(settings["singleCmd"]),
+	}
+	requestContext := mappingPreviewContext{
+		Flow:     map[string]any{},
+		Activity: map[string]map[string]any{},
+		Env:      map[string]any{},
+		Property: map[string]any{},
+		Trigger:  triggerData,
+	}
+	mappedInput := runtimeRESTApplyMappings(requestMappings, requestContext)
+	if len(mappedInput) == 0 {
+		mappedInput = cloneStringAnyMap(triggerData)
+	}
+
+	results, err := handler.Handle(context.Background(), mappedInput)
+	if err != nil {
+		return err
+	}
+
+	recorderEvidence := runtimeTraceRecorderSingleton.Evidence()
+	flowOutput := map[string]any{}
+	if recorderEvidence != nil {
+		if recordedOutput := recorderFlowOutputs(recorderEvidence.Done); len(recordedOutput) > 0 {
+			flowOutput = mergeRuntimeEvidenceMap(flowOutput, recordedOutput)
+		}
+		if len(flowOutput) == 0 {
+			if recordedOutput := recorderFlowOutputs(recorderEvidence.Start); len(recordedOutput) > 0 {
+				flowOutput = mergeRuntimeEvidenceMap(flowOutput, recordedOutput)
+			}
+		}
+	}
+	if runtimeResults := cloneStringAnyMap(mapValue(results)); len(runtimeResults) > 0 {
+		flowOutput = mergeRuntimeEvidenceMap(flowOutput, runtimeResults)
+	}
+	if len(flowOutput) == 0 {
+		flowOutput = cloneStringAnyMap(mapValue(results))
+	}
+
+	replyContext := mappingPreviewContext{
+		Flow:     flowOutput,
+		Activity: map[string]map[string]any{},
+		Env:      map[string]any{},
+		Property: map[string]any{},
+		Trigger:  triggerData,
+	}
+	replyValues := runtimeRESTApplyMappings(replyMappings, replyContext)
+	if len(replyValues) == 0 {
+		replyValues = cloneStringAnyMap(flowOutput)
+	}
+
+	replyStdout := runtimeCLIStdout(replyValues)
+	trigger.mu.Lock()
+	trigger.state = &runtimeCliTriggerExecutionState{
+		SingleCmd:       boolValue(settings["singleCmd"]),
+		HandlerName:     handler.Name(),
+		CommandName:     commandName,
+		Usage:           stringValue(handler.Settings()["usage"]),
+		Short:           stringValue(handler.Settings()["short"]),
+		Long:            stringValue(handler.Settings()["long"]),
+		HandlerFlags:    handlerFlags,
+		Args:            append([]string{}, args...),
+		InvocationFlags: cloneStringAnyMap(flags),
+		RequestMappings: cloneStringAnyMap(requestMappings),
+		ReplyMappings:   cloneStringAnyMap(replyMappings),
+		MappedFlowInput: cloneStringAnyMap(mappedInput),
+		MappedFlowOutput: cloneStringAnyMap(flowOutput),
+		ReplyData:      makeJSONSafe(replyValues["data"]),
+		ReplyStdout:    replyStdout,
+	}
+	trigger.mu.Unlock()
+
+	return nil
+}
+
+func (trigger *runtimeCliTrigger) Stop() error {
+	trigger.mu.Lock()
+	trigger.handlers = nil
+	trigger.settings = nil
+	trigger.id = ""
+	trigger.state = nil
+	trigger.mu.Unlock()
+	return nil
+}
+
+func (trigger *runtimeCliTrigger) Evidence() *runtimeCliTriggerExecutionState {
+	trigger.mu.Lock()
+	defer trigger.mu.Unlock()
+
+	if trigger.state == nil {
+		return nil
+	}
+	state := *trigger.state
+	state.Args = append([]string{}, trigger.state.Args...)
+	state.HandlerFlags = append([]string{}, trigger.state.HandlerFlags...)
+	state.InvocationFlags = cloneStringAnyMap(trigger.state.InvocationFlags)
+	state.RequestMappings = cloneStringAnyMap(trigger.state.RequestMappings)
+	state.ReplyMappings = cloneStringAnyMap(trigger.state.ReplyMappings)
+	state.MappedFlowInput = cloneStringAnyMap(trigger.state.MappedFlowInput)
+	state.MappedFlowOutput = cloneStringAnyMap(trigger.state.MappedFlowOutput)
+	state.Diagnostics = cloneDiagnostics(trigger.state.Diagnostics)
+	return &state
+}
+
+func (trigger *runtimeCliTrigger) matchHandler(handlers []coretrigger.Handler, args []string) coretrigger.Handler {
+	if len(handlers) == 0 {
+		return nil
+	}
+	if len(handlers) == 1 {
+		return handlers[0]
+	}
+
+	command := ""
+	if len(args) > 0 {
+		command = strings.TrimSpace(args[0])
+	}
+	for _, handler := range handlers {
+		if strings.EqualFold(strings.TrimSpace(stringValue(handler.Settings()["command"])), command) {
+			return handler
+		}
+	}
+	return nil
+}
+
+func runtimeCLIArgsValue(value any) []string {
+	if value == nil {
+		return nil
+	}
+	switch typed := value.(type) {
+	case []string:
+		return append([]string{}, typed...)
+	case []any:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			result = append(result, fmt.Sprint(item))
+		}
+		return result
+	case string:
+		if strings.TrimSpace(typed) == "" {
+			return nil
+		}
+		return []string{typed}
+	default:
+		return []string{fmt.Sprint(typed)}
+	}
+}
+
+func runtimeCLIFlagsValue(value any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	if flags := mapValue(value); len(flags) > 0 {
+		return cloneStringAnyMap(flags)
+	}
+	return map[string]any{}
+}
+
+func runtimeCLIStringFlags(value any) []string {
+	if value == nil {
+		return nil
+	}
+	switch typed := value.(type) {
+	case []string:
+		return append([]string{}, typed...)
+	case []any:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			result = append(result, fmt.Sprint(item))
+		}
+		return result
+	default:
+		return []string{fmt.Sprint(typed)}
+	}
+}
+
+func runtimeCLIStdout(value any) string {
+	if value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		encoded, err := json.Marshal(makeJSONSafe(typed))
+		if err != nil {
+			return fmt.Sprint(typed)
+		}
+		return string(encoded)
+	}
+}
+
+func buildRuntimeCLIRequestBundle(prepared runtimeTracePreparedCLITrigger, sampleInput map[string]any) (runtimeCLIRequestBundle, error) {
+	args := runtimeCLIArgsValue(sampleInput["args"])
+	flags := runtimeCLIFlagsValue(sampleInput["flags"])
+	if command := strings.TrimSpace(stringValue(sampleInput["command"])); command != "" && !strings.EqualFold(command, prepared.CommandName) {
+		return runtimeCLIRequestBundle{}, fmt.Errorf("requested CLI command %q does not match the supported runtime-backed command %q", command, prepared.CommandName)
+	}
+
+	flagKeys := make([]string, 0, len(flags))
+	for key := range flags {
+		flagKeys = append(flagKeys, key)
+	}
+	sort.Strings(flagKeys)
+
+	argv := []string{"flogo-helper-cli-runtime", prepared.CommandName}
+	for _, key := range flagKeys {
+		kind := prepared.FlagKinds[key]
+		if kind == "" {
+			return runtimeCLIRequestBundle{}, fmt.Errorf("unsupported CLI flag %q for the current runtime-backed slice", key)
+		}
+		switch kind {
+		case "bool":
+			value, err := runtimeCLIBoolFlagValue(flags[key])
+			if err != nil {
+				return runtimeCLIRequestBundle{}, fmt.Errorf("invalid boolean value for CLI flag %q: %w", key, err)
+			}
+			argv = append(argv, fmt.Sprintf("--%s=%t", key, value))
+		default:
+			value, err := runtimeCLIStringFlagValue(flags[key])
+			if err != nil {
+				return runtimeCLIRequestBundle{}, fmt.Errorf("invalid string value for CLI flag %q: %w", key, err)
+			}
+			argv = append(argv, fmt.Sprintf("--%s=%s", key, value))
+		}
+	}
+	argv = append(argv, args...)
+
+	return runtimeCLIRequestBundle{
+		Args:  append([]string{}, args...),
+		Flags: cloneStringAnyMap(flags),
+		Argv:  argv,
+	}, nil
+}
+
+func runtimeCLIBoolFlagValue(value any) (bool, error) {
+	switch typed := value.(type) {
+	case bool:
+		return typed, nil
+	case string:
+		return strconv.ParseBool(strings.TrimSpace(typed))
+	default:
+		text := strings.TrimSpace(fmt.Sprint(value))
+		if text == "" {
+			return false, fmt.Errorf("empty value")
+		}
+		return strconv.ParseBool(text)
+	}
+}
+
+func runtimeCLIStringFlagValue(value any) (string, error) {
+	switch typed := value.(type) {
+	case string:
+		return typed, nil
+	case bool, float64, float32, int, int32, int64, uint, uint32, uint64:
+		return fmt.Sprint(typed), nil
+	default:
+		if reflect.TypeOf(value) == nil {
+			return "", fmt.Errorf("nil value")
+		}
+		kind := reflect.TypeOf(value).Kind()
+		if kind == reflect.Map || kind == reflect.Slice || kind == reflect.Array || kind == reflect.Struct {
+			return "", fmt.Errorf("complex value %T is unsupported", value)
+		}
+		return fmt.Sprint(value), nil
+	}
+}
+
+func runtimeRESTPathParams(pattern string, requestPath string) (map[string]string, bool) {
+	normalizedPattern := normalizeRuntimeRESTPath(pattern)
+	normalizedRequest := normalizeRuntimeRESTPath(requestPath)
+	if normalizedPattern == normalizedRequest {
+		return map[string]string{}, true
+	}
+
+	patternParts := strings.Split(strings.Trim(normalizedPattern, "/"), "/")
+	requestParts := strings.Split(strings.Trim(normalizedRequest, "/"), "/")
+	if len(patternParts) != len(requestParts) {
+		return nil, false
+	}
+
+	params := map[string]string{}
+	for index, patternPart := range patternParts {
+		requestPart := requestParts[index]
+		if strings.HasPrefix(patternPart, "{") && strings.HasSuffix(patternPart, "}") {
+			name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(patternPart, "{"), "}"))
+			if name == "" {
+				return nil, false
+			}
+			params[name] = requestPart
+			continue
+		}
+		if patternPart != requestPart {
+			return nil, false
+		}
+	}
+
+	return params, true
+}
+
+func normalizeRuntimeRESTPath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(value, "/") {
+		value = "/" + value
+	}
+	if value != "/" {
+		value = strings.TrimRight(value, "/")
+		if value == "" {
+			value = "/"
+		}
+	}
+	return value
+}
+
+func runtimeRESTHeaderValuesToMap(headers http.Header) map[string]any {
+	if len(headers) == 0 {
+		return map[string]any{}
+	}
+
+	result := map[string]any{}
+	for key, values := range headers {
+		if len(values) == 1 {
+			result[key] = values[0]
+			continue
+		}
+		list := make([]any, 0, len(values))
+		for _, value := range values {
+			list = append(list, value)
+		}
+		result[key] = list
+	}
+	return result
+}
+
+func runtimeRESTQueryValuesToMap(values map[string][]string) map[string]any {
+	if len(values) == 0 {
+		return map[string]any{}
+	}
+
+	result := map[string]any{}
+	for key, list := range values {
+		if len(list) == 1 {
+			result[key] = list[0]
+			continue
+		}
+		items := make([]any, 0, len(list))
+		for _, item := range list {
+			items = append(items, item)
+		}
+		result[key] = items
+	}
+	return result
+}
+
+func runtimeRESTBodyValue(body []byte) any {
+	if len(body) == 0 {
+		return nil
+	}
+
+	var parsed any
+	if err := json.Unmarshal(body, &parsed); err == nil {
+		return makeJSONSafe(parsed)
+	}
+
+	return string(body)
+}
+
+func runtimeRESTHandlerMappings(handler coretrigger.Handler) (map[string]any, map[string]any) {
+	settings := handler.Settings()
+	requestMappings := map[string]any{}
+	replyMappings := map[string]any{}
+	if settings == nil {
+		return requestMappings, replyMappings
+	}
+	if candidate := mapValue(settings["requestMappings"]); len(candidate) > 0 {
+		requestMappings = cloneStringAnyMap(candidate)
+	}
+	if candidate := mapValue(settings["replyMappings"]); len(candidate) > 0 {
+		replyMappings = cloneStringAnyMap(candidate)
+	}
+	return requestMappings, replyMappings
+}
+
+func runtimeRESTApplyMappings(mappings map[string]any, context mappingPreviewContext) map[string]any {
+	if len(mappings) == 0 {
+		return map[string]any{}
+	}
+
+	result := map[string]any{}
+	for key, value := range mappings {
+		resolved := makeJSONSafe(resolveValue(value, context))
+		if typed, ok := resolved.(string); ok {
+			switch {
+			case strings.HasPrefix(typed, "=$.") || strings.HasPrefix(typed, "$."):
+				path := strings.TrimPrefix(strings.TrimPrefix(typed, "=$."), "$.")
+				if path != "" {
+					if flowValue, ok := resolveByPath(context.Flow, path); ok {
+						resolved = makeJSONSafe(flowValue)
+					}
+				}
+			case strings.HasPrefix(typed, "="):
+				resolved = strings.TrimPrefix(typed, "=")
+			}
+		}
+		result[key] = resolved
+	}
+	return result
+}
+
+func runtimeRESTStatusCode(results map[string]any) int {
+	if len(results) == 0 {
+		return 0
+	}
+	switch typed := results["code"].(type) {
+	case int:
+		return typed
+	case int32:
+		return int(typed)
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case float32:
+		return int(typed)
+	default:
+		return 0
+	}
+}
+
+func runtimeRESTResponseHeaders(results map[string]any) map[string]any {
+	if len(results) == 0 {
+		return map[string]any{}
+	}
+	if headers, ok := results["headers"].(map[string]any); ok {
+		return headers
+	}
+	return map[string]any{}
+}
+
+func runtimeRESTResponseBody(results map[string]any) any {
+	if len(results) == 0 {
+		return nil
+	}
+	if data, ok := results["data"]; ok {
+		return data
+	}
+	return nil
+}
+
+func buildRuntimeEvidence(kind, runtimeMode, fallbackReason string, recorder *runtimeTraceRecorderEvidence, taskEvents []map[string]any) *runtimeEvidence {
+	evidence := &runtimeEvidence{
+		Kind:           kind,
+		RuntimeMode:    runtimeMode,
+		FallbackReason: strings.TrimSpace(fallbackReason),
+		TaskEvents:     cloneMapSlice(taskEvents),
+	}
+	if recorder != nil {
+		evidence.RecorderBacked = len(recorder.Start) > 0 || len(recorder.Done) > 0 || len(recorder.Snapshots) > 0 || len(recorder.Steps) > 0
+		if evidence.RecorderBacked {
+			evidence.RecorderKind = runtimeTraceRecorderKind
+			evidence.RecorderMode = recorder.RecordingMode
+			evidence.FlowStart = cloneStringAnyMap(recorder.Start)
+			evidence.FlowDone = cloneStringAnyMap(recorder.Done)
+			evidence.Snapshots = cloneMapSlice(recorder.Snapshots)
+			evidence.Steps = cloneMapSlice(recorder.Steps)
+		}
+	}
+	if len(evidence.TaskEvents) == 0 {
+		evidence.TaskEvents = nil
+	}
+	if len(evidence.FlowStart) == 0 {
+		evidence.FlowStart = nil
+	}
+	if len(evidence.FlowDone) == 0 {
+		evidence.FlowDone = nil
+	}
+	if len(evidence.Snapshots) == 0 {
+		evidence.Snapshots = nil
+	}
+	if len(evidence.Steps) == 0 {
+		evidence.Steps = nil
+	}
+	if !evidence.RecorderBacked {
+		evidence.RecorderKind = ""
+		evidence.RecorderMode = ""
+	}
+	if evidence.Kind == "" {
+		evidence.Kind = runTraceEvidenceKindSimulatedFallback
+	}
+	if evidence.RuntimeMode == "" && evidence.Kind == runTraceEvidenceKindRuntimeBacked {
+		evidence.RuntimeMode = runtimeBackedTraceMode
+	}
+	if evidence.Kind == runTraceEvidenceKindRuntimeBacked || evidence.Kind == runTraceEvidenceKindSimulatedFallback || evidence.RecorderBacked || len(evidence.TaskEvents) > 0 || evidence.FallbackReason != "" {
+		return evidence
+	}
+	return nil
+}
+
+func buildNormalizedRuntimeSteps(app flogoApp, flowID string, capture runTraceCaptureOptions, traceSteps []runTraceTaskStep, evidence *runtimeEvidence) []runtimeNormalizedStep {
+	if evidence == nil || evidence.Kind != runTraceEvidenceKindRuntimeBacked {
+		return nil
+	}
+
+	flow, flowIndex := findFlowByID(app, flowID)
+	if flowIndex < 0 {
+		return nil
+	}
+
+	normalized := make([]runtimeNormalizedStep, 0, len(traceSteps))
+	previousFlowState := recorderFlowInputs(evidence.FlowStart)
+	recorderStepsByTaskID := map[string]map[string]any{}
+	for index, step := range evidence.Steps {
+		taskID := runtimeRecorderPrimaryTaskID(step)
+		if taskID == "" {
+			taskID = fmt.Sprintf("recorder_step_%d", index)
+		}
+		if _, exists := recorderStepsByTaskID[taskID]; !exists {
+			recorderStepsByTaskID[taskID] = step
+		}
+	}
+
+	for index, traceStep := range traceSteps {
+		task, _ := findTaskByID(flow, traceStep.TaskID)
+		fieldSources := map[string][]string{}
+		unavailableFields := []string{}
+
+		step := runtimeNormalizedStep{
+			TaskID:      traceStep.TaskID,
+			TaskName:    valueOrFallback(traceStep.TaskName, valueOrFallback(task.Name, task.ID)),
+			ActivityRef: valueOrFallback(traceStep.ActivityRef, task.ActivityRef),
+			Type:        valueOrFallback(traceStep.Type, valueOrFallback(task.Type, "activity")),
+			Status:      valueOrFallback(traceStep.Status, "completed"),
+			Error:       traceStep.Error,
+			StartedAt:   traceStep.StartedAt,
+			FinishedAt:  traceStep.FinishedAt,
+			Diagnostics: cloneDiagnostics(traceStep.Diagnostics),
+		}
+
+		if len(task.Input) > 0 {
+			step.DeclaredInputMappings = cloneStringAnyMap(task.Input)
+			fieldSources["declaredInputMappings"] = []string{"app_metadata"}
+		}
+		if len(task.Output) > 0 {
+			step.DeclaredOutputMappings = cloneStringAnyMap(task.Output)
+			fieldSources["declaredOutputMappings"] = []string{"app_metadata"}
+		}
+
+		if capture.IncludeTaskInputs {
+			step.ResolvedInputs = cloneStringAnyMap(traceStep.Input)
+			if len(step.ResolvedInputs) > 0 {
+				fieldSources["resolvedInputs"] = []string{"task_event"}
+			} else {
+				unavailableFields = append(unavailableFields, "resolvedInputs")
+			}
+		} else {
+			unavailableFields = append(unavailableFields, "resolvedInputs")
+		}
+
+		if capture.IncludeTaskOutputs {
+			step.ProducedOutputs = cloneStringAnyMap(traceStep.Output)
+			if len(step.ProducedOutputs) == 0 && runtimeActivityStateLooksLikeOutput(traceStep.ActivityState) {
+				step.ProducedOutputs = cloneStringAnyMap(traceStep.ActivityState)
+			}
+			if len(step.ProducedOutputs) > 0 {
+				fieldSources["producedOutputs"] = []string{"task_event"}
+			} else {
+				unavailableFields = append(unavailableFields, "producedOutputs")
+			}
+		} else {
+			unavailableFields = append(unavailableFields, "producedOutputs")
+		}
+
+		recorderStep := recorderStepsByTaskID[traceStep.TaskID]
+		if len(recorderStep) == 0 && index < len(evidence.Steps) {
+			recorderStep = evidence.Steps[index]
+		}
+		stateDelta := runtimeRecorderStateDelta(recorderStep)
+		if len(stateDelta) > 0 {
+			fieldSources["stateDelta"] = []string{"flow_state_recorder_step"}
+		}
+
+		if capture.IncludeFlowState {
+			step.FlowStateBefore = cloneStringAnyMap(previousFlowState)
+			if len(step.FlowStateBefore) > 0 {
+				if index == 0 {
+					fieldSources["flowStateBefore"] = []string{"flow_state_recorder_start"}
+				} else {
+					fieldSources["flowStateBefore"] = []string{"flow_state_recorder_snapshot"}
+				}
+			}
+
+			flowStateAfter := map[string]any{}
+			if index < len(evidence.Snapshots) {
+				flowStateAfter = runtimeSnapshotAttrs(evidence.Snapshots[index])
+				if len(flowStateAfter) > 0 {
+					fieldSources["flowStateAfter"] = []string{"flow_state_recorder_snapshot"}
+				}
+			}
+			if len(flowStateAfter) == 0 {
+				flowStateAfter = applyRuntimeStateDelta(previousFlowState, stateDelta)
+				if len(flowStateAfter) > 0 {
+					fieldSources["flowStateAfter"] = []string{"flow_state_recorder_step", "derived_from_previous_state"}
+				}
+			}
+			if len(stateDelta) == 0 && (len(step.FlowStateBefore) > 0 || len(flowStateAfter) > 0) {
+				stateDelta = diffRuntimeState(step.FlowStateBefore, flowStateAfter)
+				if len(stateDelta) > 0 {
+					fieldSources["stateDelta"] = []string{"flow_state_recorder_snapshot", "derived_from_snapshot_diff"}
+				}
+			}
+
+			step.FlowStateAfter = flowStateAfter
+			step.StateDelta = stateDelta
+			previousFlowState = cloneStringAnyMap(flowStateAfter)
+		} else {
+			unavailableFields = append(unavailableFields, "flowStateBefore", "flowStateAfter", "stateDelta")
+			if len(stateDelta) > 0 {
+				previousFlowState = applyRuntimeStateDelta(previousFlowState, stateDelta)
+			} else if index < len(evidence.Snapshots) {
+				previousFlowState = runtimeSnapshotAttrs(evidence.Snapshots[index])
+			}
+		}
+
+		if len(fieldSources) > 0 {
+			step.EvidenceSource = fieldSources
+		}
+		if len(unavailableFields) > 0 {
+			step.UnavailableFields = dedupeStrings(unavailableFields)
+		}
+
+		normalized = append(normalized, step)
+	}
+
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func runtimeActivityStateLooksLikeOutput(state map[string]any) bool {
+	if len(state) == 0 {
+		return false
+	}
+	for _, reserved := range []string{"taskStatus", "statusHistory", "change"} {
+		if _, exists := state[reserved]; exists {
+			return false
+		}
+	}
+	return true
+}
+
+func runtimeEvidenceHasNormalizedSteps(evidence *runtimeEvidence) bool {
+	return evidence != nil && len(evidence.NormalizedSteps) > 0
+}
+
+func runtimeEvidenceHasRestTriggerRuntime(evidence *runtimeEvidence) bool {
+	return evidence != nil && evidence.RestTriggerRuntime != nil
+}
+
+func runtimeEvidenceHasCLITriggerRuntime(evidence *runtimeEvidence) bool {
+	return evidence != nil && evidence.CLITriggerRuntime != nil
+}
+
+func runtimeEvidenceHasTimerTriggerRuntime(evidence *runtimeEvidence) bool {
+	return evidence != nil && evidence.TimerTriggerRuntime != nil
+}
+
+func runtimeRecorderPrimaryTaskID(step map[string]any) string {
+	rootChange := runtimeRecorderRootFlowChange(step)
+	if taskID := strings.TrimSpace(stringValue(rootChange["taskId"])); taskID != "" {
+		return taskID
+	}
+
+	tasks := mapValue(rootChange["tasks"])
+	if len(tasks) == 1 {
+		for taskID := range tasks {
+			return taskID
+		}
+	}
+
+	if len(tasks) > 1 {
+		keys := make([]string, 0, len(tasks))
+		for key := range tasks {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		return keys[0]
+	}
+
+	return ""
+}
+
+func runtimeRecorderRootFlowChange(step map[string]any) map[string]any {
+	flowChanges := mapValue(step["flowChanges"])
+	if len(flowChanges) == 0 {
+		return map[string]any{}
+	}
+
+	if change := mapValue(flowChanges["0"]); len(change) > 0 {
+		return change
+	}
+
+	keys := make([]string, 0, len(flowChanges))
+	for key := range flowChanges {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		change := mapValue(flowChanges[key])
+		if len(change) == 0 {
+			continue
+		}
+		if strings.TrimSpace(stringValue(change["taskId"])) != "" {
+			return change
+		}
+		if len(mapValue(change["tasks"])) > 0 || len(mapValue(change["attrs"])) > 0 {
+			return change
+		}
+	}
+
+	return map[string]any{}
+}
+
+func runtimeRecorderStateDelta(step map[string]any) map[string]any {
+	rootChange := runtimeRecorderRootFlowChange(step)
+	if len(rootChange) == 0 {
+		return map[string]any{}
+	}
+	return stripRuntimeTraceScopes(mapValue(rootChange["attrs"]))
+}
+
+func runtimeSnapshotAttrs(snapshot map[string]any) map[string]any {
+	if len(snapshot) == 0 {
+		return map[string]any{}
+	}
+	return stripRuntimeTraceScopes(mapValue(snapshot["attrs"]))
+}
+
+func applyRuntimeStateDelta(base map[string]any, delta map[string]any) map[string]any {
+	if len(base) == 0 && len(delta) == 0 {
+		return map[string]any{}
+	}
+	next := cloneStringAnyMap(base)
+	for key, value := range delta {
+		next[key] = makeJSONSafe(value)
+	}
+	return next
+}
+
+func diffRuntimeState(before, after map[string]any) map[string]any {
+	if len(before) == 0 && len(after) == 0 {
+		return map[string]any{}
+	}
+	keys := map[string]struct{}{}
+	for key := range before {
+		keys[key] = struct{}{}
+	}
+	for key := range after {
+		keys[key] = struct{}{}
+	}
+
+	diff := map[string]any{}
+	for key := range keys {
+		if reflect.DeepEqual(normalizeRunComparisonValue(before[key]), normalizeRunComparisonValue(after[key])) {
+			continue
+		}
+		diff[key] = makeJSONSafe(after[key])
+	}
+	return diff
+}
+
+func runtimeFallbackReasonFromDiagnostics(diagnostics []diagnostic) string {
+	for _, entry := range diagnostics {
+		if entry.Code == "flogo.run_trace.runtime_fallback" && strings.TrimSpace(entry.Message) != "" {
+			return entry.Message
+		}
+	}
+	return ""
+}
+
+func replayRuntimeEvidence(replay replayResult) *runtimeEvidence {
+	if replay.RuntimeEvidence != nil {
+		return replay.RuntimeEvidence
+	}
+	if replay.Trace != nil {
+		return replay.Trace.RuntimeEvidence
+	}
+	return nil
+}
+
+type runtimeTraceListener struct {
+	capture           runTraceCaptureOptions
+	mu                sync.Mutex
+	stepOrder         []string
+	steps             map[string]*runTraceTaskStep
+	taskEvents        []map[string]any
+	flowInstanceID    string
+	flowInput         map[string]any
+	flowOutput        map[string]any
+	flowError         string
+	flowStatus        string
+	flowEventCount    int
+	taskEventCount    int
+	done              chan struct{}
+	terminalEventOnce sync.Once
+}
+
+type runtimeTraceTaskCatalog struct {
+	flow             flogoFlow
+	byID             map[string]flogoTask
+	idsByName        map[string][]string
+	idsByActivityRef map[string][]string
+}
+
+type runtimeTraceStepAccumulator struct {
+	key                string
+	step               runTraceTaskStep
+	task               flogoTask
+	hasTask            bool
+	taskEvents         []map[string]any
+	recorderInput      map[string]any
+	recorderFlowState  map[string]any
+	recorderActivity   map[string]any
+	recorderTaskStatus string
+	statusHistory      []string
+	evidenceSources    map[string]struct{}
 }
 
 type descriptorCandidate struct {
@@ -789,6 +2433,7 @@ type goModuleInfo struct {
 }
 
 var resolverPattern = regexp.MustCompile(`\$(activity\[[^\]]+\](?:\.[A-Za-z0-9_.-]+)?|flow(?:\.[A-Za-z0-9_.-]+)?|env(?:\.[A-Za-z0-9_.-]+)?|property(?:\.[A-Za-z0-9_.-]+)?|trigger(?:\.[A-Za-z0-9_.-]+)?)`)
+var activityReferencePattern = regexp.MustCompile(`\$activity\[([^\]]+)\]`)
 
 var knownRegistry = map[string]contribDescriptor{
 	"rest": {
@@ -873,12 +2518,44 @@ var triggerImportRegistry = map[string]struct {
 	},
 	"cli": {
 		Alias: "cli",
-		Ref:   "github.com/project-flogo/trigger/cli",
+		Ref:   "github.com/project-flogo/contrib/trigger/cli",
 	},
 	"channel": {
 		Alias: "channel",
 		Ref:   "github.com/project-flogo/contrib/trigger/channel",
 	},
+}
+
+const (
+	runTraceEvidenceKindRuntimeBacked     = "runtime_backed"
+	runTraceEvidenceKindSimulatedFallback = "simulated_fallback"
+	runtimeBackedTraceMode                = "independent_action"
+	runtimeBackedRESTTriggerTraceMode     = "rest_trigger"
+	runtimeBackedCLITriggerTraceMode      = "cli_trigger"
+	runtimeBackedTimerTriggerTraceMode    = "timer_trigger"
+	runtimeBackedReplayMode               = "independent_action_replay"
+	runtimeBackedRESTReplayMode           = "rest_trigger_replay"
+	runtimeBackedCLIReplayMode            = "cli_trigger_replay"
+	runtimeBackedTimerReplayMode          = "timer_trigger_replay"
+	runtimeTraceRecorderKind              = "flow_state_recorder"
+	supportedRuntimeFlowActionRef         = "github.com/project-flogo/flow"
+	supportedRuntimeLogActivityRef        = "github.com/project-flogo/contrib/activity/log"
+	supportedRuntimeRESTTriggerRef        = "github.com/project-flogo/contrib/trigger/rest"
+	supportedRuntimeCLITriggerRef         = "github.com/project-flogo/contrib/trigger/cli"
+	legacyRuntimeCLITriggerRef            = "github.com/project-flogo/trigger/cli"
+	supportedRuntimeTimerTriggerRef       = "github.com/project-flogo/contrib/trigger/timer"
+	runtimeTraceRecorderServiceName       = "runtime-trace-recorder"
+)
+
+var runtimeTraceMutex sync.Mutex
+var runtimeTraceSupportOnce sync.Once
+var runtimeTraceRecorderSingleton = newRuntimeTraceRecorderBridge(runtimeTraceRecorderServiceName)
+var runtimeRestTriggerSingleton = newRuntimeRestTrigger()
+var runtimeCliTriggerSingleton = newRuntimeCliTrigger()
+var runtimeTraceRecorderFactoryRef = ""
+
+var supportedRuntimeActivityRefs = map[string]bool{
+	supportedRuntimeLogActivityRef: true,
 }
 
 func main() {
@@ -1008,7 +2685,6 @@ func main() {
 			ReplaceExisting: hasFlag("--replace-existing"),
 			HandlerName:     lookupFlag("--handler-name"),
 			TriggerID:       lookupFlag("--trigger-id"),
-			TriggerName:     lookupFlag("--trigger-name"),
 		}
 		encode(bindTrigger(app, request))
 	case "flows extract-subflow":
@@ -1139,12 +2815,45 @@ func loadTriggerProfile(inputPath string) triggerProfile {
 		fail(err.Error())
 	}
 
+	var raw map[string]any
+	if err := json.Unmarshal(contents, &raw); err != nil {
+		fail(err.Error())
+	}
+
 	var profile triggerProfile
 	if err := json.Unmarshal(contents, &profile); err != nil {
 		fail(err.Error())
 	}
 	if profile.Kind == "" {
 		fail("trigger profile is missing kind")
+	}
+	if profile.Kind == "cli" {
+		if _, ok := raw["singleCmd"]; !ok {
+			profile.SingleCmd = true
+		}
+	}
+	if profile.Kind == "rest" {
+		if profile.ReplyMode == "" {
+			profile.ReplyMode = "json"
+		}
+		if profile.RequestMappingMode == "" {
+			profile.RequestMappingMode = "auto"
+		}
+		if profile.ReplyMappingMode == "" {
+			profile.ReplyMappingMode = "auto"
+		}
+	}
+	if profile.Kind == "timer" && strings.TrimSpace(profile.RunMode) == "" {
+		profile.RunMode = "repeat"
+	}
+	if profile.Kind == "cli" && profile.CommandName == "" {
+		fail("trigger profile is missing commandName")
+	}
+	if profile.Kind == "channel" && strings.TrimSpace(profile.Channel) == "" {
+		fail("trigger profile is missing channel")
+	}
+	if profile.Kind == "rest" && (strings.TrimSpace(profile.Method) == "" || strings.TrimSpace(profile.Path) == "" || profile.Port <= 0) {
+		fail("trigger profile is missing one or more required REST fields")
 	}
 	return profile
 }
@@ -1400,9 +3109,326 @@ func normalizeApp(raw map[string]any) flogoApp {
 		Properties: normalizeProperties(raw["properties"]),
 		Triggers:   normalizeTriggers(raw["triggers"]),
 		Resources:  normalizeResources(raw["resources"]),
+		Raw:        cloneStringAnyMap(raw),
 	}
 
 	return app
+}
+
+func stageResult(stage string, diagnostics []diagnostic) validationStageResult {
+	items := dedupeDiagnostics(diagnostics)
+	ok := true
+	for _, item := range items {
+		if item.Severity == "error" {
+			ok = false
+			break
+		}
+	}
+	return validationStageResult{
+		Stage:       stage,
+		Ok:          ok,
+		Diagnostics: items,
+	}
+}
+
+func validateFlogoApp(app flogoApp) validationReport {
+	stages := []validationStageResult{
+		validateStructural(app),
+		validateSemantic(app),
+		validateMappings(app),
+		validateDependencies(app),
+	}
+
+	ok := true
+	for _, stage := range stages {
+		if !stage.Ok {
+			ok = false
+			break
+		}
+	}
+
+	summary := "Flogo application passed structural, semantic, mapping, and dependency validation."
+	if !ok {
+		summary = "Flogo application has validation errors that must be resolved before build or runtime checks."
+	}
+
+	return validationReport{
+		Ok:        ok,
+		Stages:    stages,
+		Summary:   summary,
+		Artifacts: []map[string]any{},
+	}
+}
+
+func flattenValidationDiagnostics(report validationReport) []diagnostic {
+	diagnostics := []diagnostic{}
+	for _, stage := range report.Stages {
+		diagnostics = append(diagnostics, stage.Diagnostics...)
+	}
+	return dedupeDiagnostics(diagnostics)
+}
+
+func validateStructural(app flogoApp) validationStageResult {
+	diagnostics := []diagnostic{}
+	importAliases := map[string]bool{}
+	triggerIDs := map[string]bool{}
+	resourceIDs := map[string]bool{}
+
+	for _, entry := range app.Imports {
+		alias := strings.TrimSpace(entry.Alias)
+		if alias == "" {
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.alias.blank",
+				Message:  "Import alias cannot be blank",
+				Severity: "error",
+				Path:     "imports",
+			})
+			continue
+		}
+		if importAliases[alias] {
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.alias.duplicate",
+				Message:  fmt.Sprintf("Import alias %q is defined more than once", alias),
+				Severity: "error",
+				Path:     "imports." + alias,
+			})
+		}
+		importAliases[alias] = true
+		if strings.TrimSpace(entry.Ref) == "" {
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.structural.blank_import_ref",
+				Message:  fmt.Sprintf("Import %q is missing a ref", alias),
+				Severity: "error",
+				Path:     "imports." + alias,
+			})
+		}
+	}
+
+	for _, trigger := range app.Triggers {
+		triggerID := strings.TrimSpace(trigger.ID)
+		if triggerID == "" {
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.structural.blank_trigger_id",
+				Message:  "Trigger id cannot be blank",
+				Severity: "error",
+				Path:     "triggers",
+			})
+		} else if triggerIDs[triggerID] {
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.structural.duplicate_trigger_id",
+				Message:  fmt.Sprintf("Trigger %q is defined more than once", triggerID),
+				Severity: "error",
+				Path:     "triggers." + triggerID,
+			})
+		}
+		triggerIDs[triggerID] = true
+	}
+
+	for _, flow := range app.Resources {
+		flowID := strings.TrimSpace(flow.ID)
+		if flowID == "" {
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.structural.blank_flow_id",
+				Message:  "Flow id cannot be blank",
+				Severity: "error",
+				Path:     "resources",
+			})
+			continue
+		}
+		if resourceIDs[flowID] {
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.structural.duplicate_flow_id",
+				Message:  fmt.Sprintf("Flow %q is defined more than once", flowID),
+				Severity: "error",
+				Path:     "resources." + flowID,
+			})
+		}
+		resourceIDs[flowID] = true
+
+		taskIDs := map[string]bool{}
+		for _, task := range flow.Tasks {
+			taskID := strings.TrimSpace(task.ID)
+			if taskID == "" {
+				diagnostics = append(diagnostics, diagnostic{
+					Code:     "flogo.structural.blank_task_id",
+					Message:  fmt.Sprintf("Flow %q contains a task without an id", flowID),
+					Severity: "error",
+					Path:     "resources." + flowID + ".tasks",
+				})
+				continue
+			}
+			if taskIDs[taskID] {
+				diagnostics = append(diagnostics, diagnostic{
+					Code:     "flogo.structural.duplicate_task_id",
+					Message:  fmt.Sprintf("Task %q is defined more than once in flow %q", taskID, flowID),
+					Severity: "error",
+					Path:     "resources." + flowID + ".tasks." + taskID,
+				})
+			}
+			taskIDs[taskID] = true
+		}
+	}
+
+	return stageResult("structural", diagnostics)
+}
+
+func validateSemantic(app flogoApp) validationStageResult {
+	diagnostics := []diagnostic{}
+	resourceIDs := map[string]bool{}
+	importAliases := map[string]bool{}
+
+	for _, flow := range app.Resources {
+		resourceIDs[flow.ID] = true
+	}
+	for _, entry := range app.Imports {
+		importAliases[entry.Alias] = true
+	}
+
+	for _, trigger := range app.Triggers {
+		inferredAlias := inferAliasFromRef(trigger.Ref)
+		if strings.HasPrefix(trigger.Ref, "#") && inferredAlias != "" && inferredAlias != "flow" && !importAliases[inferredAlias] {
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.semantic.inferred_trigger_alias",
+				Message:  fmt.Sprintf("Trigger %q uses alias %q without an explicit import", trigger.ID, inferredAlias),
+				Severity: "warning",
+				Path:     "triggers." + trigger.ID + ".ref",
+			})
+		}
+
+		for _, handler := range trigger.Handlers {
+			ref := resolveHandlerFlowRef(handler)
+			if strings.HasPrefix(ref, "#flow:") {
+				flowID := strings.TrimPrefix(ref, "#flow:")
+				if !resourceIDs[flowID] {
+					diagnostics = append(diagnostics, diagnostic{
+						Code:     "flogo.semantic.missing_flow",
+						Message:  fmt.Sprintf("Handler action ref %q does not match a known flow resource", ref),
+						Severity: "error",
+						Path:     "triggers." + trigger.ID + ".handlers",
+					})
+				}
+			}
+		}
+	}
+
+	for _, flow := range app.Resources {
+		for _, task := range flow.Tasks {
+			if strings.TrimSpace(task.ActivityRef) == "" {
+				diagnostics = append(diagnostics, diagnostic{
+					Code:     "flogo.semantic.missing_activity_ref",
+					Message:  fmt.Sprintf("Task %q is missing an activity ref", task.ID),
+					Severity: "warning",
+					Path:     "resources." + flow.ID + ".tasks." + task.ID,
+				})
+				continue
+			}
+
+			flowRef := normalizeFlowActionRef(task.ActivityRef, stringValue(task.Settings["flowURI"]))
+			if strings.HasPrefix(flowRef, "#flow:") {
+				targetFlowID := strings.TrimPrefix(flowRef, "#flow:")
+				if !resourceIDs[targetFlowID] {
+					diagnostics = append(diagnostics, diagnostic{
+						Code:     "flogo.semantic.missing_flow",
+						Message:  fmt.Sprintf("Task %q points to missing flow %q", task.ID, targetFlowID),
+						Severity: "error",
+						Path:     "resources." + flow.ID + ".tasks." + task.ID + ".settings.flowURI",
+					})
+				}
+				continue
+			}
+
+			if strings.HasPrefix(task.ActivityRef, "#") {
+				alias := inferAliasFromRef(task.ActivityRef)
+				if alias != "" && alias != "flow" && alias != "rest" && !importAliases[alias] {
+					diagnostics = append(diagnostics, diagnostic{
+						Code:     "flogo.semantic.missing_import",
+						Message:  fmt.Sprintf("Task %q references missing import alias %q", task.ID, "#"+alias),
+						Severity: "error",
+						Path:     "resources." + flow.ID + ".tasks." + task.ID + ".activityRef",
+					})
+				}
+			}
+		}
+	}
+
+	return stageResult("semantic", diagnostics)
+}
+
+func validateMappings(app flogoApp) validationStageResult {
+	diagnostics := []diagnostic{}
+
+	for _, flow := range app.Resources {
+		seenTasks := map[string]bool{}
+
+		for _, task := range flow.Tasks {
+			preExecutionRefs := map[string]bool{}
+			collectActivityReferences(task.Input, preExecutionRefs)
+			collectActivityReferences(task.Settings, preExecutionRefs)
+
+			for reference := range preExecutionRefs {
+				if !seenTasks[reference] {
+					diagnostics = append(diagnostics, diagnostic{
+						Code:     "flogo.mapping.invalid_activity_scope",
+						Message:  fmt.Sprintf("Task %q references activity %q before it exists in flow order", task.ID, reference),
+						Severity: "error",
+						Path:     "resources." + flow.ID + ".tasks." + task.ID,
+					})
+				}
+			}
+
+			outputRefs := map[string]bool{}
+			collectActivityReferences(task.Output, outputRefs)
+			for reference := range outputRefs {
+				if !seenTasks[reference] && reference != task.ID {
+					diagnostics = append(diagnostics, diagnostic{
+						Code:     "flogo.mapping.invalid_activity_scope",
+						Message:  fmt.Sprintf("Task %q references activity %q before it exists in flow order", task.ID, reference),
+						Severity: "error",
+						Path:     "resources." + flow.ID + ".tasks." + task.ID,
+					})
+				}
+			}
+
+			seenTasks[task.ID] = true
+		}
+	}
+
+	return stageResult("semantic", diagnostics)
+}
+
+func validateDependencies(app flogoApp) validationStageResult {
+	diagnostics := []diagnostic{}
+	for _, entry := range app.Imports {
+		if !strings.Contains(entry.Ref, "/") && !strings.HasPrefix(entry.Ref, "#") {
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.dependency.invalid_ref",
+				Message:  fmt.Sprintf("Import %q has a non-package ref %q", entry.Alias, entry.Ref),
+				Severity: "warning",
+				Path:     "imports." + entry.Alias,
+			})
+		}
+	}
+	return stageResult("dependency", diagnostics)
+}
+
+func collectActivityReferences(value any, references map[string]bool) {
+	switch typed := value.(type) {
+	case string:
+		matches := activityReferencePattern.FindAllStringSubmatch(typed, -1)
+		for _, match := range matches {
+			if len(match) > 1 && strings.TrimSpace(match[1]) != "" {
+				references[match[1]] = true
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			collectActivityReferences(item, references)
+		}
+	case map[string]any:
+		for _, item := range typed {
+			collectActivityReferences(item, references)
+		}
+	}
 }
 
 func normalizeImports(value any) []flogoImport {
@@ -1466,20 +3492,32 @@ func normalizeTriggers(value any) []flogoTrigger {
 			}
 			actionRef := ""
 			actionSettings := map[string]any{}
+			actionInput := map[string]any{}
+			actionOutput := map[string]any{}
 			if action, ok := handlerRecord["action"].(map[string]any); ok {
 				actionRef = stringValue(action["ref"])
 				if strings.HasPrefix(actionRef, "flow:") {
 					actionRef = "#" + actionRef
 				}
 				actionSettings = mapValue(action["settings"])
+				actionInput = mapValue(action["input"])
+				actionOutput = mapValue(action["output"])
+			}
+			handlerInput := cloneStringAnyMap(actionInput)
+			for key, value := range mapValue(handlerRecord["input"]) {
+				handlerInput[key] = value
+			}
+			handlerOutput := cloneStringAnyMap(actionOutput)
+			for key, value := range mapValue(handlerRecord["output"]) {
+				handlerOutput[key] = value
 			}
 			handlers = append(handlers, flogoHandler{
 				ID:             stringValue(handlerRecord["id"]),
 				ActionRef:      actionRef,
 				ActionSettings: actionSettings,
 				Settings:       mapValue(handlerRecord["settings"]),
-				Input:          mapValue(handlerRecord["input"]),
-				Output:         mapValue(handlerRecord["output"]),
+				Input:          handlerInput,
+				Output:         handlerOutput,
 			})
 		}
 
@@ -2156,6 +4194,23 @@ func inferFlowContract(app flogoApp, flow flogoFlow, sharedDiagnostics *[]diagno
 }
 
 func traceFlow(app flogoApp, request runTraceRequest) runTraceResponse {
+	validation := preflightRunTrace(app, request)
+	if request.ValidateOnly || !validation.Ok {
+		return runTraceResponse{
+			Validation: &validation,
+		}
+	}
+
+	if trace, fallbackDiagnostics, ok := traceFlowRuntime(app, request); ok {
+		return runTraceResponse{Trace: trace}
+	} else if len(fallbackDiagnostics) > 0 {
+		return traceFlowSimulated(app, request, fallbackDiagnostics...)
+	}
+
+	return traceFlowSimulated(app, request)
+}
+
+func traceFlowSimulated(app flogoApp, request runTraceRequest, additionalDiagnostics ...diagnostic) runTraceResponse {
 	flowIndex := -1
 	for index, candidate := range app.Resources {
 		if candidate.ID == request.FlowID {
@@ -2332,11 +4387,17 @@ func traceFlow(app flogoApp, request runTraceRequest) runTraceResponse {
 	if traceErr != "" {
 		status = "failed"
 	}
+	allDiagnostics := dedupeDiagnostics(append(cloneDiagnostics(additionalDiagnostics), diagnostics...))
 
 	return runTraceResponse{
 		Trace: &runTrace{
-			AppName: app.Name,
-			FlowID:  request.FlowID,
+			AppName:      app.Name,
+			FlowID:       request.FlowID,
+			EvidenceKind: runTraceEvidenceKindSimulatedFallback,
+			RuntimeEvidence: &runtimeEvidence{
+				Kind:           runTraceEvidenceKindSimulatedFallback,
+				FallbackReason: runtimeFallbackReasonFromDiagnostics(additionalDiagnostics),
+			},
 			Summary: runTraceSummary{
 				FlowID:      request.FlowID,
 				Status:      status,
@@ -2344,12 +4405,3007 @@ func traceFlow(app flogoApp, request runTraceRequest) runTraceResponse {
 				Output:      finalOutput,
 				Error:       traceErr,
 				StepCount:   len(steps),
-				Diagnostics: dedupeDiagnostics(diagnostics),
+				Diagnostics: allDiagnostics,
 			},
 			Steps:       steps,
-			Diagnostics: dedupeDiagnostics(diagnostics),
+			Diagnostics: allDiagnostics,
 		},
 	}
+}
+
+func traceFlowRuntime(app flogoApp, request runTraceRequest) (*runTrace, []diagnostic, bool) {
+	runtimeDiagnostics := []diagnostic{}
+	restExecutionFailed := false
+
+	if preparedREST, restDiagnostics, ok, err := prepareRuntimeTraceRESTTrigger(app, request.FlowID); err != nil {
+		runtimeDiagnostics = append(runtimeDiagnostics, diagnostic{
+			Code:     "flogo.run_trace.rest_trigger_runtime_fallback",
+			Message:  fmt.Sprintf("Falling back from the REST trigger runtime-backed slice because setup failed: %s", err.Error()),
+			Severity: "warning",
+			Path:     "triggers",
+		})
+	} else if ok {
+		preparedFlow, unsupportedReason, flowErr := prepareRuntimeTraceFlow(app, request.FlowID)
+		if flowErr != nil {
+			runtimeDiagnostics = append(runtimeDiagnostics, diagnostic{
+				Code:     "flogo.run_trace.rest_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("Falling back from the REST trigger runtime-backed slice because flow setup failed: %s", flowErr.Error()),
+				Severity: "warning",
+				Path:     "resources." + request.FlowID,
+			})
+		} else if unsupportedReason != "" {
+			runtimeDiagnostics = append(runtimeDiagnostics, diagnostic{
+				Code:     "flogo.run_trace.rest_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("Falling back from the REST trigger runtime-backed slice because the flow is not eligible yet: %s", unsupportedReason),
+				Severity: "info",
+				Path:     "resources." + request.FlowID,
+			})
+		} else {
+			trace, execErr := executeRuntimeRESTTrace(app, preparedFlow, preparedREST, request)
+			if execErr != nil {
+				restExecutionFailed = true
+				runtimeDiagnostics = append(runtimeDiagnostics, diagnostic{
+					Code:     "flogo.run_trace.rest_trigger_runtime_fallback",
+					Message:  fmt.Sprintf("Falling back from the REST trigger runtime-backed slice because setup or request execution failed: %s", execErr.Error()),
+					Severity: "warning",
+					Path:     "triggers." + preparedREST.TriggerID,
+				})
+			} else {
+				trace.Diagnostics = dedupeDiagnostics(append(cloneDiagnostics(restDiagnostics), append(cloneDiagnostics(runtimeDiagnostics), trace.Diagnostics...)...))
+				trace.Summary.Diagnostics = dedupeDiagnostics(append(cloneDiagnostics(restDiagnostics), append(cloneDiagnostics(runtimeDiagnostics), trace.Summary.Diagnostics...)...))
+				return trace, nil, true
+			}
+		}
+	} else if len(restDiagnostics) > 0 {
+		runtimeDiagnostics = append(runtimeDiagnostics, restDiagnostics...)
+		runtimeDiagnostics = append(runtimeDiagnostics, diagnostic{
+			Code:     "flogo.run_trace.rest_trigger_runtime_fallback",
+			Message:  "Falling back from the REST trigger runtime-backed slice because this trigger shape is outside the currently supported narrow REST runtime path.",
+			Severity: "info",
+			Path:     "triggers",
+		})
+	}
+
+	if !restExecutionFailed {
+		if preparedCLI, cliDiagnostics, ok, err := prepareRuntimeTraceCLITrigger(app, request.FlowID); err != nil {
+			runtimeDiagnostics = append(runtimeDiagnostics, diagnostic{
+				Code:     "flogo.run_trace.cli_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("Falling back from the CLI trigger runtime-backed slice because setup failed: %s", err.Error()),
+				Severity: "warning",
+				Path:     "triggers",
+			})
+		} else if ok {
+			preparedFlow, unsupportedReason, flowErr := prepareRuntimeTraceFlow(app, request.FlowID)
+			if flowErr != nil {
+				runtimeDiagnostics = append(runtimeDiagnostics, diagnostic{
+					Code:     "flogo.run_trace.cli_trigger_runtime_fallback",
+					Message:  fmt.Sprintf("Falling back from the CLI trigger runtime-backed slice because flow setup failed: %s", flowErr.Error()),
+					Severity: "warning",
+					Path:     "resources." + request.FlowID,
+				})
+			} else if unsupportedReason != "" {
+				runtimeDiagnostics = append(runtimeDiagnostics, diagnostic{
+					Code:     "flogo.run_trace.cli_trigger_runtime_fallback",
+					Message:  fmt.Sprintf("Falling back from the CLI trigger runtime-backed slice because the flow is not eligible yet: %s", unsupportedReason),
+					Severity: "info",
+					Path:     "resources." + request.FlowID,
+				})
+			} else {
+				trace, execErr := executeRuntimeCLITrace(app, preparedFlow, preparedCLI, request)
+				if execErr != nil {
+					runtimeDiagnostics = append(runtimeDiagnostics, diagnostic{
+						Code:     "flogo.run_trace.cli_trigger_runtime_fallback",
+						Message:  fmt.Sprintf("Falling back from the CLI trigger runtime-backed slice because setup or CLI invocation failed: %s", execErr.Error()),
+						Severity: "warning",
+						Path:     "triggers." + preparedCLI.TriggerID,
+					})
+				} else {
+					trace.Diagnostics = dedupeDiagnostics(append(cloneDiagnostics(cliDiagnostics), append(cloneDiagnostics(runtimeDiagnostics), trace.Diagnostics...)...))
+					trace.Summary.Diagnostics = dedupeDiagnostics(append(cloneDiagnostics(cliDiagnostics), append(cloneDiagnostics(runtimeDiagnostics), trace.Summary.Diagnostics...)...))
+					return trace, nil, true
+				}
+			}
+		} else if len(cliDiagnostics) > 0 {
+			runtimeDiagnostics = append(runtimeDiagnostics, cliDiagnostics...)
+			runtimeDiagnostics = append(runtimeDiagnostics, diagnostic{
+				Code:     "flogo.run_trace.cli_trigger_runtime_fallback",
+				Message:  "Falling back from the CLI trigger runtime-backed slice because this trigger shape is outside the currently supported narrow CLI runtime path.",
+				Severity: "info",
+				Path:     "triggers",
+			})
+		}
+	}
+
+	if !restExecutionFailed {
+		if preparedTimer, timerDiagnostics, ok, err := prepareRuntimeTraceTimerTrigger(app, request.FlowID); err != nil {
+			runtimeDiagnostics = append(runtimeDiagnostics, diagnostic{
+				Code:     "flogo.run_trace.timer_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("Falling back from the timer trigger runtime-backed slice because setup failed: %s", err.Error()),
+				Severity: "warning",
+				Path:     "triggers",
+			})
+		} else if ok {
+			preparedFlow, unsupportedReason, flowErr := prepareRuntimeTraceFlow(app, request.FlowID)
+			if flowErr != nil {
+				runtimeDiagnostics = append(runtimeDiagnostics, diagnostic{
+					Code:     "flogo.run_trace.timer_trigger_runtime_fallback",
+					Message:  fmt.Sprintf("Falling back from the timer trigger runtime-backed slice because flow setup failed: %s", flowErr.Error()),
+					Severity: "warning",
+					Path:     "resources." + request.FlowID,
+				})
+			} else if unsupportedReason != "" {
+				runtimeDiagnostics = append(runtimeDiagnostics, diagnostic{
+					Code:     "flogo.run_trace.timer_trigger_runtime_fallback",
+					Message:  fmt.Sprintf("Falling back from the timer trigger runtime-backed slice because the flow is not eligible yet: %s", unsupportedReason),
+					Severity: "info",
+					Path:     "resources." + request.FlowID,
+				})
+			} else {
+				trace, execErr := executeRuntimeTimerTrace(app, preparedFlow, preparedTimer, request)
+				if execErr != nil {
+					runtimeDiagnostics = append(runtimeDiagnostics, diagnostic{
+						Code:     "flogo.run_trace.timer_trigger_runtime_fallback",
+						Message:  fmt.Sprintf("Falling back from the timer trigger runtime-backed slice because setup or trigger execution failed: %s", execErr.Error()),
+						Severity: "warning",
+						Path:     "triggers." + preparedTimer.TriggerID,
+					})
+				} else {
+					trace.Diagnostics = dedupeDiagnostics(append(cloneDiagnostics(runtimeDiagnostics), trace.Diagnostics...))
+					trace.Summary.Diagnostics = dedupeDiagnostics(append(cloneDiagnostics(runtimeDiagnostics), trace.Summary.Diagnostics...))
+					return trace, nil, true
+				}
+			}
+		} else if len(timerDiagnostics) > 0 {
+			runtimeDiagnostics = append(runtimeDiagnostics, timerDiagnostics...)
+			runtimeDiagnostics = append(runtimeDiagnostics, diagnostic{
+				Code:     "flogo.run_trace.timer_trigger_runtime_fallback",
+				Message:  "Falling back from the timer trigger runtime-backed slice because this trigger shape is outside the currently supported narrow timer runtime path.",
+				Severity: "info",
+				Path:     "triggers",
+			})
+		}
+	}
+
+	prepared, unsupportedReason, err := prepareRuntimeTraceFlow(app, request.FlowID)
+	if err != nil {
+		return nil, append(runtimeDiagnostics, diagnostic{
+			Code:     "flogo.run_trace.runtime_fallback",
+			Message:  fmt.Sprintf("Falling back to the simulated trace path because runtime-backed setup failed: %s", err.Error()),
+			Severity: "warning",
+			Path:     "resources." + request.FlowID,
+		}), false
+	}
+	if unsupportedReason != "" {
+		return nil, append(runtimeDiagnostics, diagnostic{
+			Code:     "flogo.run_trace.runtime_fallback",
+			Message:  fmt.Sprintf("Falling back to the simulated trace path because the current runtime-backed foundation does not support this flow yet: %s", unsupportedReason),
+			Severity: "info",
+			Path:     "resources." + request.FlowID,
+		}), false
+	}
+
+	trace, err := executeRuntimeTrace(app, prepared, request)
+	if err != nil {
+		return nil, append(runtimeDiagnostics, diagnostic{
+			Code:     "flogo.run_trace.runtime_fallback",
+			Message:  fmt.Sprintf("Falling back to the simulated trace path because runtime-backed execution setup failed: %s", err.Error()),
+			Severity: "warning",
+			Path:     "resources." + request.FlowID,
+		}), false
+	}
+	if len(runtimeDiagnostics) > 0 {
+		trace.Diagnostics = dedupeDiagnostics(append(cloneDiagnostics(runtimeDiagnostics), trace.Diagnostics...))
+		trace.Summary.Diagnostics = dedupeDiagnostics(append(cloneDiagnostics(runtimeDiagnostics), trace.Summary.Diagnostics...))
+	}
+
+	return trace, nil, true
+}
+
+func prepareRuntimeTraceFlow(app flogoApp, flowID string) (runtimeTracePreparedFlow, string, error) {
+	if len(app.Raw) == 0 {
+		return runtimeTracePreparedFlow{}, "raw app document is unavailable", nil
+	}
+
+	rawFlow, ok := lookupRawFlowRecord(app.Raw, flowID)
+	if !ok {
+		return runtimeTracePreparedFlow{}, "raw flow document is unavailable", nil
+	}
+
+	data := cloneStringAnyMap(mapValue(rawFlow["data"]))
+	if len(data) == 0 {
+		return runtimeTracePreparedFlow{}, "raw flow data is unavailable", nil
+	}
+
+	if strings.TrimSpace(stringValue(data["name"])) == "" {
+		data["name"] = flowID
+	}
+
+	data["metadata"] = normalizeRuntimeTraceMetadata(mapValue(data["metadata"]))
+	taskItems, ok := data["tasks"].([]any)
+	if !ok || len(taskItems) == 0 {
+		return runtimeTracePreparedFlow{}, "runtime-backed tracing requires a concrete task list", nil
+	}
+
+	for index, item := range taskItems {
+		task, ok := item.(map[string]any)
+		if !ok {
+			return runtimeTracePreparedFlow{}, fmt.Sprintf("task %d has an unsupported shape", index), nil
+		}
+
+		if taskType := strings.TrimSpace(stringValue(task["type"])); taskType != "" && taskType != "activity" {
+			return runtimeTracePreparedFlow{}, fmt.Sprintf("task %q uses unsupported type %q", stringValue(task["id"]), taskType), nil
+		}
+
+		settings := mapValue(task["settings"])
+		if len(settings) > 0 {
+			if _, ok := settings["retryOnError"]; ok {
+				return runtimeTracePreparedFlow{}, fmt.Sprintf("task %q uses retryOnError settings", stringValue(task["id"])), nil
+			}
+			if _, ok := settings["iterate"]; ok {
+				return runtimeTracePreparedFlow{}, fmt.Sprintf("task %q uses iterator settings", stringValue(task["id"])), nil
+			}
+			if _, ok := settings["condition"]; ok {
+				return runtimeTracePreparedFlow{}, fmt.Sprintf("task %q uses conditional loop settings", stringValue(task["id"])), nil
+			}
+		}
+
+		activityConfig := cloneStringAnyMap(mapValue(task["activity"]))
+		if len(activityConfig) == 0 {
+			activityConfig = map[string]any{}
+		}
+		if strings.TrimSpace(stringValue(activityConfig["ref"])) == "" {
+			activityConfig["ref"] = stringValue(task["activityRef"])
+		}
+		if _, ok := activityConfig["input"]; !ok && len(mapValue(task["input"])) > 0 {
+			activityConfig["input"] = cloneStringAnyMap(mapValue(task["input"]))
+		}
+		if _, ok := activityConfig["output"]; !ok && len(mapValue(task["output"])) > 0 {
+			activityConfig["output"] = cloneStringAnyMap(mapValue(task["output"]))
+		}
+		if _, ok := activityConfig["settings"]; !ok && len(settings) > 0 {
+			activityConfig["settings"] = cloneStringAnyMap(settings)
+		}
+
+		resolvedActivityRef := normalizeFlowActionRef(stringValue(activityConfig["ref"]), stringValue(mapValue(activityConfig["settings"])["flowURI"]))
+		if strings.HasPrefix(resolvedActivityRef, "#flow:") {
+			return runtimeTracePreparedFlow{}, fmt.Sprintf("task %q invokes a subflow", stringValue(task["id"])), nil
+		}
+
+		runtimeActivityRef, supported := resolveRuntimeActivityRef(app, stringValue(activityConfig["ref"]))
+		if !supported {
+			return runtimeTracePreparedFlow{}, fmt.Sprintf("task %q uses unsupported activity %q", stringValue(task["id"]), stringValue(activityConfig["ref"])), nil
+		}
+		activityConfig["ref"] = runtimeActivityRef
+		task["activity"] = activityConfig
+	}
+
+	resourceData, err := json.Marshal(data)
+	if err != nil {
+		return runtimeTracePreparedFlow{}, "", err
+	}
+
+	runtimeResourceID := runtimeTraceResourceID(app, flowID, resourceData)
+
+	return runtimeTracePreparedFlow{
+		FlowID:            flowID,
+		FlowName:          stringValue(data["name"]),
+		ResourceData:      resourceData,
+		RuntimeResourceID: runtimeResourceID,
+		RuntimeFlowURI:    "res://" + runtimeResourceID,
+	}, "", nil
+}
+
+func runtimeTraceResourceID(app flogoApp, flowID string, resourceData []byte) string {
+	hashInput := valueOrFallback(app.Name, "runtime-trace-app") + "|" + flowID + "|" + string(resourceData)
+	sum := sha256.Sum256([]byte(hashInput))
+	return fmt.Sprintf("flow:%s_%x", flowID, sum[:6])
+}
+
+func prepareRuntimeTraceRESTTrigger(app flogoApp, flowID string) (runtimeTracePreparedRESTTrigger, []diagnostic, bool, error) {
+	matches := []struct {
+		trigger flogoTrigger
+		handler flogoHandler
+	}{}
+
+	for _, trigger := range app.Triggers {
+		triggerAlias := strings.TrimPrefix(trigger.Ref, "#")
+		triggerRef := resolveImportRef(app, trigger.Ref, triggerAlias)
+		if triggerRef != supportedRuntimeRESTTriggerRef {
+			continue
+		}
+		for _, handler := range trigger.Handlers {
+			if resolveHandlerFlowRef(handler) != "#flow:"+flowID {
+				continue
+			}
+			matches = append(matches, struct {
+				trigger flogoTrigger
+				handler flogoHandler
+			}{trigger: trigger, handler: handler})
+		}
+	}
+
+	if len(matches) == 0 {
+		return runtimeTracePreparedRESTTrigger{}, nil, false, nil
+	}
+	if len(matches) > 1 {
+		return runtimeTracePreparedRESTTrigger{}, []diagnostic{
+			{
+				Code:     "flogo.run_trace.rest_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("Found %d REST handlers for flow %q; the current REST runtime slice requires exactly one matching handler.", len(matches), flowID),
+				Severity: "info",
+				Path:     "triggers",
+			},
+		}, false, nil
+	}
+
+	trigger := matches[0].trigger
+	handler := matches[0].handler
+	method := strings.ToUpper(strings.TrimSpace(stringValue(handler.Settings["method"])))
+	path := strings.TrimSpace(stringValue(handler.Settings["path"]))
+	if method != "POST" && method != "PUT" && method != "PATCH" {
+		return runtimeTracePreparedRESTTrigger{}, []diagnostic{
+			{
+				Code:     "flogo.run_trace.rest_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("REST handler %q uses unsupported method %q; the current runtime-backed REST slice only supports POST, PUT, and PATCH handlers.", handler.ID, method),
+				Severity: "info",
+				Path:     "triggers." + trigger.ID,
+			},
+		}, false, nil
+	}
+	if path == "" || strings.Contains(path, ":") || strings.Contains(path, "*") {
+		return runtimeTracePreparedRESTTrigger{}, []diagnostic{
+			{
+				Code:     "flogo.run_trace.rest_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("REST handler %q uses unsupported path %q; the current runtime-backed REST slice only supports static paths.", handler.ID, path),
+				Severity: "info",
+				Path:     "triggers." + trigger.ID,
+			},
+		}, false, nil
+	}
+	if len(handler.Input) == 0 || len(handler.Output) == 0 {
+		return runtimeTracePreparedRESTTrigger{}, []diagnostic{
+			{
+				Code:     "flogo.run_trace.rest_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("REST handler %q requires explicit request and reply mappings for the current runtime-backed slice.", handler.ID),
+				Severity: "info",
+				Path:     "triggers." + trigger.ID,
+			},
+		}, false, nil
+	}
+
+	runtimeRequestMappings, requestDiagnostics, requestSupported := normalizeSupportedRuntimeRESTMappings(handler.Input, "request", trigger.ID, handler.ID)
+	runtimeReplyMappings, replyDiagnostics, replySupported := normalizeSupportedRuntimeRESTMappings(handler.Output, "reply", trigger.ID, handler.ID)
+	translationDiagnostics := append(requestDiagnostics, replyDiagnostics...)
+	if !requestSupported || !replySupported {
+		return runtimeTracePreparedRESTTrigger{}, translationDiagnostics, false, nil
+	}
+
+	port, err := reserveRuntimeRESTPort()
+	if err != nil {
+		return runtimeTracePreparedRESTTrigger{}, nil, false, err
+	}
+	handlerName := strings.TrimSpace(handler.ID)
+	if handlerName == "" {
+		handlerName = trigger.ID + "_handler1"
+	}
+
+	return runtimeTracePreparedRESTTrigger{
+		TriggerID:              trigger.ID,
+		TriggerRef:             supportedRuntimeRESTTriggerRef,
+		HandlerName:            handlerName,
+		Method:                 method,
+		Path:                   path,
+		Port:                   port,
+		RequestMappings:        cloneStringAnyMap(handler.Input),
+		ReplyMappings:          cloneStringAnyMap(handler.Output),
+		RuntimeRequestMappings: runtimeRequestMappings,
+		RuntimeReplyMappings:   runtimeReplyMappings,
+	}, translationDiagnostics, true, nil
+}
+
+func prepareRuntimeTraceCLITrigger(app flogoApp, flowID string) (runtimeTracePreparedCLITrigger, []diagnostic, bool, error) {
+	matches := []struct {
+		trigger flogoTrigger
+		handler flogoHandler
+	}{}
+
+	for _, trigger := range app.Triggers {
+		triggerAlias := strings.TrimPrefix(trigger.Ref, "#")
+		triggerRef := resolveImportRef(app, trigger.Ref, triggerAlias)
+		if triggerRef != supportedRuntimeCLITriggerRef && triggerRef != legacyRuntimeCLITriggerRef {
+			continue
+		}
+		for _, handler := range trigger.Handlers {
+			if resolveHandlerFlowRef(handler) != "#flow:"+flowID {
+				continue
+			}
+			matches = append(matches, struct {
+				trigger flogoTrigger
+				handler flogoHandler
+			}{trigger: trigger, handler: handler})
+		}
+	}
+
+	if len(matches) == 0 {
+		return runtimeTracePreparedCLITrigger{}, nil, false, nil
+	}
+	if len(matches) > 1 {
+		return runtimeTracePreparedCLITrigger{}, []diagnostic{
+			{
+				Code:     "flogo.run_trace.cli_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("Found %d CLI handlers for flow %q; the current CLI runtime slice requires exactly one matching handler.", len(matches), flowID),
+				Severity: "info",
+				Path:     "triggers",
+			},
+		}, false, nil
+	}
+
+	trigger := matches[0].trigger
+	handler := matches[0].handler
+	singleCmd, hasSingleCmd := cliTriggerSingleCmd(trigger.Settings)
+	if !hasSingleCmd {
+		singleCmd = true
+	}
+	commandName := resolveCLICommandName(handler)
+	if strings.TrimSpace(commandName) == "" {
+		return runtimeTracePreparedCLITrigger{}, []diagnostic{
+			{
+				Code:     "flogo.run_trace.cli_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("CLI handler %q does not expose a usable command identity for the current runtime-backed slice.", handler.ID),
+				Severity: "info",
+				Path:     "triggers." + trigger.ID,
+			},
+		}, false, nil
+	}
+
+	flagDescriptions, flagKinds, flagErr := parseCLIFlagDescriptions(handler.Settings["flags"])
+	if flagErr != nil {
+		return runtimeTracePreparedCLITrigger{}, []diagnostic{
+			{
+				Code:     "flogo.run_trace.cli_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("CLI handler %q uses unsupported flag settings for the current runtime-backed slice: %s", handler.ID, flagErr.Error()),
+				Severity: "info",
+				Path:     "triggers." + trigger.ID,
+			},
+		}, false, nil
+	}
+
+	runtimeInputMappings, inputDiagnostics, inputSupported := normalizeSupportedRuntimeCLIMappings(handler.Input, "request", trigger.ID, commandName)
+	runtimeOutputMappings, outputDiagnostics, outputSupported := normalizeSupportedRuntimeCLIMappings(handler.Output, "reply", trigger.ID, commandName)
+	translationDiagnostics := append(inputDiagnostics, outputDiagnostics...)
+	if !inputSupported || !outputSupported {
+		return runtimeTracePreparedCLITrigger{}, translationDiagnostics, false, nil
+	}
+
+	return runtimeTracePreparedCLITrigger{
+		TriggerID:             trigger.ID,
+		TriggerRef:            supportedRuntimeCLITriggerRef,
+		CommandName:           commandName,
+		SingleCmd:             singleCmd,
+		Usage:                 strings.TrimSpace(stringValue(trigger.Settings["usage"])),
+		Long:                  strings.TrimSpace(stringValue(trigger.Settings["long"])),
+		HandlerUsage:          strings.TrimSpace(stringValue(handler.Settings["usage"])),
+		HandlerShort:          strings.TrimSpace(stringValue(handler.Settings["short"])),
+		HandlerLong:           strings.TrimSpace(stringValue(handler.Settings["long"])),
+		FlagDescriptions:      flagDescriptions,
+		FlagKinds:             flagKinds,
+		InputMappings:         cloneStringAnyMap(handler.Input),
+		OutputMappings:        cloneStringAnyMap(handler.Output),
+		RuntimeInputMappings:  runtimeInputMappings,
+		RuntimeOutputMappings: runtimeOutputMappings,
+	}, translationDiagnostics, true, nil
+}
+
+func prepareRuntimeTraceTimerTrigger(app flogoApp, flowID string) (runtimeTracePreparedTimerTrigger, []diagnostic, bool, error) {
+	matches := []struct {
+		trigger flogoTrigger
+		handler flogoHandler
+	}{}
+
+	for _, trigger := range app.Triggers {
+		triggerAlias := strings.TrimPrefix(trigger.Ref, "#")
+		triggerRef := resolveImportRef(app, trigger.Ref, triggerAlias)
+		if triggerRef != supportedRuntimeTimerTriggerRef {
+			continue
+		}
+		for _, handler := range trigger.Handlers {
+			if resolveHandlerFlowRef(handler) != "#flow:"+flowID {
+				continue
+			}
+			matches = append(matches, struct {
+				trigger flogoTrigger
+				handler flogoHandler
+			}{trigger: trigger, handler: handler})
+		}
+	}
+
+	if len(matches) == 0 {
+		return runtimeTracePreparedTimerTrigger{}, nil, false, nil
+	}
+	if len(matches) > 1 {
+		return runtimeTracePreparedTimerTrigger{}, []diagnostic{
+			{
+				Code:     "flogo.run_trace.timer_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("Found %d timer handlers for flow %q; the current timer runtime slice requires exactly one matching handler.", len(matches), flowID),
+				Severity: "info",
+				Path:     "triggers",
+			},
+		}, false, nil
+	}
+
+	trigger := matches[0].trigger
+	handler := matches[0].handler
+	startDelay := strings.TrimSpace(stringValue(handler.Settings["startDelay"]))
+	repeatInterval := strings.TrimSpace(stringValue(handler.Settings["repeatInterval"]))
+	if repeatInterval != "" {
+		return runtimeTracePreparedTimerTrigger{}, []diagnostic{
+			{
+				Code:     "flogo.run_trace.timer_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("Timer handler %q uses repeatInterval %q; the current runtime-backed timer slice only supports one-shot timers.", handler.ID, repeatInterval),
+				Severity: "info",
+				Path:     "triggers." + trigger.ID,
+			},
+		}, false, nil
+	}
+	if startDelay != "" {
+		if _, err := time.ParseDuration(startDelay); err != nil {
+			return runtimeTracePreparedTimerTrigger{}, []diagnostic{
+				{
+					Code:     "flogo.run_trace.timer_trigger_runtime_fallback",
+					Message:  fmt.Sprintf("Timer handler %q uses an invalid startDelay %q: %s", handler.ID, startDelay, err.Error()),
+					Severity: "info",
+					Path:     "triggers." + trigger.ID,
+				},
+			}, false, nil
+		}
+	}
+	if len(handler.Input) > 0 || len(handler.Output) > 0 {
+		return runtimeTracePreparedTimerTrigger{}, []diagnostic{
+			{
+				Code:     "flogo.run_trace.timer_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("Timer handler %q requires no explicit request or reply mappings for the current runtime-backed slice.", handler.ID),
+				Severity: "info",
+				Path:     "triggers." + trigger.ID,
+			},
+		}, false, nil
+	}
+
+	handlerName := strings.TrimSpace(handler.ID)
+	if handlerName == "" {
+		handlerName = trigger.ID + "_handler1"
+	}
+
+	return runtimeTracePreparedTimerTrigger{
+		TriggerID:      trigger.ID,
+		TriggerRef:     supportedRuntimeTimerTriggerRef,
+		HandlerName:    handlerName,
+		StartDelay:     startDelay,
+		RepeatInterval: repeatInterval,
+	}, nil, true, nil
+}
+
+func cliTriggerSingleCmd(settings map[string]any) (bool, bool) {
+	if len(settings) == 0 {
+		return false, false
+	}
+	value, ok := settings["singleCmd"]
+	if !ok {
+		return false, false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed, true
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return false, false
+		}
+		parsed, err := strconv.ParseBool(trimmed)
+		if err != nil {
+			return false, false
+		}
+		return parsed, true
+	default:
+		return boolValue(value), true
+	}
+}
+
+func resolveCLICommandName(handler flogoHandler) string {
+	if command := strings.TrimSpace(stringValue(handler.Settings["command"])); command != "" {
+		return command
+	}
+	if command := strings.TrimSpace(handler.ID); command != "" {
+		return command
+	}
+	return ""
+}
+
+func parseCLIFlagDescriptions(value any) ([]string, map[string]string, error) {
+	items, ok := value.([]any)
+	if !ok || len(items) == 0 {
+		return []string{}, map[string]string{}, nil
+	}
+
+	descriptions := make([]string, 0, len(items))
+	kinds := map[string]string{}
+	for _, item := range items {
+		raw, ok := item.(string)
+		if !ok {
+			return nil, nil, fmt.Errorf("flag descriptions must be strings")
+		}
+		parts := strings.Split(raw, "||")
+		if len(parts) < 3 {
+			return nil, nil, fmt.Errorf("flag description %q does not match name||default||description", raw)
+		}
+		name := strings.TrimSpace(parts[0])
+		if name == "" {
+			return nil, nil, fmt.Errorf("flag description %q is missing a flag name", raw)
+		}
+		defaultValue := strings.TrimSpace(parts[1])
+		kind := "string"
+		if strings.EqualFold(defaultValue, "true") || strings.EqualFold(defaultValue, "false") {
+			kind = "bool"
+		}
+		kinds[name] = kind
+		descriptions = append(descriptions, raw)
+	}
+	return descriptions, kinds, nil
+}
+
+func normalizeSupportedRuntimeCLIMappings(mappings map[string]any, direction string, triggerID string, commandName string) (map[string]any, []diagnostic, bool) {
+	if len(mappings) == 0 {
+		return map[string]any{}, nil, true
+	}
+
+	keys := make([]string, 0, len(mappings))
+	for key := range mappings {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	normalized := map[string]any{}
+	diagnostics := []diagnostic{}
+	supported := true
+	translatedCount := 0
+
+	for _, key := range keys {
+		value, translated, ok := normalizeSupportedRuntimeCLIMappingValue(mappings[key], direction)
+		if !ok {
+			supported = false
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.run_trace.cli_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("CLI command %q uses an unsupported %s mapping at %q for the current runtime-backed slice.", commandName, direction, key),
+				Severity: "info",
+				Path:     "triggers." + triggerID,
+				Details: map[string]any{
+					"commandName": commandName,
+					"direction":   direction,
+					"mapping":     key,
+					"value":       makeJSONSafe(mappings[key]),
+				},
+			})
+			continue
+		}
+		if translated {
+			translatedCount++
+		}
+		normalized[key] = value
+	}
+
+	if translatedCount > 0 {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.run_trace.cli_trigger_runtime_mapping_translation",
+			Message:  fmt.Sprintf("Translated %d %s mapping expressions from stored CLI trigger notation into the official CLI trigger runtime mapper scope.", translatedCount, direction),
+			Severity: "info",
+			Path:     "triggers." + triggerID,
+			Details: map[string]any{
+				"commandName":     commandName,
+				"direction":       direction,
+				"translatedCount": translatedCount,
+			},
+		})
+	}
+
+	return normalized, diagnostics, supported
+}
+
+func normalizeSupportedRuntimeCLIMappingValue(value any, direction string) (any, bool, bool) {
+	switch typed := value.(type) {
+	case string:
+		return normalizeSupportedRuntimeCLIMappingExpression(typed, direction)
+	case map[string]any:
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		result := map[string]any{}
+		translated := false
+		for _, key := range keys {
+			normalized, nestedTranslated, ok := normalizeSupportedRuntimeCLIMappingValue(typed[key], direction)
+			if !ok {
+				return nil, false, false
+			}
+			if nestedTranslated {
+				translated = true
+			}
+			result[key] = normalized
+		}
+		return result, translated, true
+	case []any:
+		result := make([]any, 0, len(typed))
+		translated := false
+		for _, item := range typed {
+			normalized, nestedTranslated, ok := normalizeSupportedRuntimeCLIMappingValue(item, direction)
+			if !ok {
+				return nil, false, false
+			}
+			if nestedTranslated {
+				translated = true
+			}
+			result = append(result, normalized)
+		}
+		return result, translated, true
+	default:
+		return makeJSONSafe(value), false, true
+	}
+}
+
+func normalizeSupportedRuntimeCLIMappingExpression(expression string, direction string) (string, bool, bool) {
+	trimmed := strings.TrimSpace(expression)
+	if trimmed == "" {
+		return expression, false, true
+	}
+	if strings.HasPrefix(trimmed, "=$.") || trimmed == "=$" {
+		return trimmed, false, true
+	}
+	if strings.HasPrefix(trimmed, "$.") || trimmed == "$" {
+		return "=" + trimmed, true, true
+	}
+
+	switch direction {
+	case "request":
+		switch {
+		case trimmed == "$trigger" || trimmed == "=$trigger":
+			return "=$", true, true
+		case strings.HasPrefix(trimmed, "$trigger."):
+			return "=$." + strings.TrimPrefix(trimmed, "$trigger."), true, true
+		case strings.HasPrefix(trimmed, "=$trigger."):
+			return "=$." + strings.TrimPrefix(trimmed, "=$trigger."), true, true
+		}
+	case "reply":
+		switch {
+		case trimmed == "$flow" || trimmed == "=$flow":
+			return "=$", true, true
+		case strings.HasPrefix(trimmed, "$flow."):
+			return "=$." + strings.TrimPrefix(trimmed, "$flow."), true, true
+		case strings.HasPrefix(trimmed, "=$flow."):
+			return "=$." + strings.TrimPrefix(trimmed, "=$flow."), true, true
+		}
+	}
+
+	if strings.HasPrefix(trimmed, "$") || strings.HasPrefix(trimmed, "=$") || strings.HasPrefix(trimmed, "=") {
+		return "", false, false
+	}
+
+	return expression, false, true
+}
+
+func normalizeSupportedRuntimeRESTMappings(mappings map[string]any, direction string, triggerID string, handlerID string) (map[string]any, []diagnostic, bool) {
+	if len(mappings) == 0 {
+		return map[string]any{}, nil, true
+	}
+
+	keys := make([]string, 0, len(mappings))
+	for key := range mappings {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	normalized := map[string]any{}
+	diagnostics := []diagnostic{}
+	supported := true
+	translatedCount := 0
+
+	for _, key := range keys {
+		value, translated, ok := normalizeSupportedRuntimeRESTMappingValue(mappings[key], direction)
+		if !ok {
+			supported = false
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.run_trace.rest_trigger_runtime_fallback",
+				Message:  fmt.Sprintf("REST handler %q uses an unsupported %s mapping at %q for the current runtime-backed slice.", handlerID, direction, key),
+				Severity: "info",
+				Path:     "triggers." + triggerID,
+				Details: map[string]any{
+					"handlerId": handlerID,
+					"direction": direction,
+					"mapping":   key,
+					"value":     makeJSONSafe(mappings[key]),
+				},
+			})
+			continue
+		}
+		if translated {
+			translatedCount++
+		}
+		normalized[key] = value
+	}
+
+	if translatedCount > 0 {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.run_trace.rest_trigger_runtime_mapping_translation",
+			Message:  fmt.Sprintf("Translated %d %s mapping expressions from stored Flogo-agent trigger notation into the official trigger handler runtime mapper scope.", translatedCount, direction),
+			Severity: "info",
+			Path:     "triggers." + triggerID,
+			Details: map[string]any{
+				"handlerId":       handlerID,
+				"direction":       direction,
+				"translatedCount": translatedCount,
+			},
+		})
+	}
+
+	return normalized, diagnostics, supported
+}
+
+func normalizeSupportedRuntimeRESTMappingValue(value any, direction string) (any, bool, bool) {
+	switch typed := value.(type) {
+	case string:
+		return normalizeSupportedRuntimeRESTMappingExpression(typed, direction)
+	case map[string]any:
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		result := map[string]any{}
+		translated := false
+		for _, key := range keys {
+			normalized, nestedTranslated, ok := normalizeSupportedRuntimeRESTMappingValue(typed[key], direction)
+			if !ok {
+				return nil, false, false
+			}
+			if nestedTranslated {
+				translated = true
+			}
+			result[key] = normalized
+		}
+		return result, translated, true
+	case []any:
+		result := make([]any, 0, len(typed))
+		translated := false
+		for _, item := range typed {
+			normalized, nestedTranslated, ok := normalizeSupportedRuntimeRESTMappingValue(item, direction)
+			if !ok {
+				return nil, false, false
+			}
+			if nestedTranslated {
+				translated = true
+			}
+			result = append(result, normalized)
+		}
+		return result, translated, true
+	default:
+		return makeJSONSafe(value), false, true
+	}
+}
+
+func normalizeSupportedRuntimeRESTMappingExpression(expression string, direction string) (string, bool, bool) {
+	trimmed := strings.TrimSpace(expression)
+	if trimmed == "" {
+		return expression, false, true
+	}
+	if strings.HasPrefix(trimmed, "=$.") || trimmed == "=$" {
+		return trimmed, false, true
+	}
+	if strings.HasPrefix(trimmed, "$.") || trimmed == "$" {
+		return "=" + trimmed, true, true
+	}
+
+	switch direction {
+	case "request":
+		switch {
+		case trimmed == "$trigger" || trimmed == "=$trigger":
+			return "=$", true, true
+		case strings.HasPrefix(trimmed, "$trigger."):
+			return "=$." + strings.TrimPrefix(trimmed, "$trigger."), true, true
+		case strings.HasPrefix(trimmed, "=$trigger."):
+			return "=$." + strings.TrimPrefix(trimmed, "=$trigger."), true, true
+		}
+	case "reply":
+		switch {
+		case trimmed == "$flow" || trimmed == "=$flow":
+			return "=$", true, true
+		case strings.HasPrefix(trimmed, "$flow."):
+			return "=$." + strings.TrimPrefix(trimmed, "$flow."), true, true
+		case strings.HasPrefix(trimmed, "=$flow."):
+			return "=$." + strings.TrimPrefix(trimmed, "=$flow."), true, true
+		}
+	}
+
+	if strings.HasPrefix(trimmed, "$") || strings.HasPrefix(trimmed, "=$") || strings.HasPrefix(trimmed, "=") {
+		return "", false, false
+	}
+
+	return expression, false, true
+}
+
+func reserveRuntimeRESTPort() (int, error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer listener.Close()
+	address, ok := listener.Addr().(*net.TCPAddr)
+	if !ok || address.Port == 0 {
+		return 0, fmt.Errorf("unable to reserve an HTTP port for the REST trigger runtime slice")
+	}
+	return address.Port, nil
+}
+
+func executeRuntimeTrace(app flogoApp, prepared runtimeTracePreparedFlow, request runTraceRequest) (*runTrace, error) {
+	runtimeTraceMutex.Lock()
+	defer runtimeTraceMutex.Unlock()
+
+	registerRuntimeTraceSupport()
+	runtimeTraceRecorderSingleton.Reset("full")
+	defer runtimeTraceRecorderSingleton.Reset("")
+
+	runtimeAppConfig := buildRuntimeTraceAppConfig(app, prepared)
+	engineConfigJSON, err := buildRuntimeTraceEngineConfigJSON(prepared.FlowID)
+	if err != nil {
+		return nil, err
+	}
+
+	runtimeEngine, err := coreengine.New(runtimeAppConfig, coreengine.ConfigOption(engineConfigJSON, false))
+	if err != nil {
+		return nil, err
+	}
+
+	flowFactory := coreaction.GetFactory(supportedRuntimeFlowActionRef)
+	if flowFactory == nil {
+		return nil, fmt.Errorf("runtime-backed flow action factory is unavailable")
+	}
+
+	actionConfig := &coreaction.Config{
+		Ref: supportedRuntimeFlowActionRef,
+		Settings: map[string]interface{}{
+			"flowURI": prepared.RuntimeFlowURI,
+		},
+	}
+	actionInstance, err := flowFactory.New(actionConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	listener := newRuntimeTraceListener(request.Capture)
+	listenerName := fmt.Sprintf("runtime-trace-%d", time.Now().UnixNano())
+	eventTypes := []string{flowevent.TaskEventType, flowevent.FlowEventType}
+	if err := coreevent.RegisterListener(listenerName, listener, eventTypes); err != nil {
+		return nil, err
+	}
+	defer coreevent.UnRegisterListener(listenerName, eventTypes)
+
+	runtimeOutput, runtimeErr := corerunner.NewDirect().RunAction(context.Background(), actionInstance, cloneStringAnyMap(request.SampleInput))
+
+	select {
+	case <-listener.done:
+	case <-time.After(250 * time.Millisecond):
+	}
+
+	recorderEvidence := runtimeTraceRecorderSingleton.Evidence()
+	trace := listener.buildTrace(app, prepared, request, runtimeBackedTraceMode, runtimeOutput, runtimeErr)
+	attachRuntimeTraceEvidence(trace, app, prepared.FlowID, request, runtimeBackedTraceMode, recorderEvidence, listener.taskEvents)
+	if runtimeEngine != nil && runtimeErr == nil && trace.Summary.Status == "" {
+		trace.Summary.Status = "completed"
+	}
+	return trace, nil
+}
+
+func executeRuntimeRESTTrace(app flogoApp, preparedFlow runtimeTracePreparedFlow, preparedREST runtimeTracePreparedRESTTrigger, request runTraceRequest) (*runTrace, error) {
+	runtimeTraceMutex.Lock()
+	defer runtimeTraceMutex.Unlock()
+
+	registerRuntimeTraceSupport()
+	runtimeTraceRecorderSingleton.Reset("full")
+	defer runtimeTraceRecorderSingleton.Reset("")
+
+	runtimeAppConfig := buildRuntimeTraceRESTAppConfig(app, preparedFlow, preparedREST)
+	engineConfigJSON, err := buildRuntimeTraceEngineConfigJSON(preparedFlow.FlowID)
+	if err != nil {
+		return nil, err
+	}
+
+	runtimeEngine, err := coreengine.New(runtimeAppConfig, coreengine.ConfigOption(engineConfigJSON, false))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if runtimeEngine != nil {
+			_ = runtimeEngine.Stop()
+		}
+	}()
+
+	listener := newRuntimeTraceListener(request.Capture)
+	listenerName := fmt.Sprintf("runtime-rest-trace-%d", time.Now().UnixNano())
+	eventTypes := []string{flowevent.TaskEventType, flowevent.FlowEventType}
+	if err := coreevent.RegisterListener(listenerName, listener, eventTypes); err != nil {
+		return nil, err
+	}
+	defer coreevent.UnRegisterListener(listenerName, eventTypes)
+
+	if err := runtimeEngine.Start(); err != nil {
+		return nil, err
+	}
+
+	if err := waitForRuntimeRESTTrigger(preparedREST.Port, 2*time.Second); err != nil {
+		return nil, err
+	}
+
+	triggerRequest, triggerReply, runtimeErr := executeRuntimeRESTTriggerRequest(preparedREST, request.SampleInput)
+
+	select {
+	case <-listener.done:
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	recorderEvidence := runtimeTraceRecorderSingleton.Evidence()
+	trace := listener.buildTrace(app, preparedFlow, request, runtimeBackedRESTTriggerTraceMode, nil, runtimeErr)
+	attachRuntimeTraceEvidence(trace, app, preparedFlow.FlowID, request, runtimeBackedRESTTriggerTraceMode, recorderEvidence, listener.taskEvents)
+	if trace.RuntimeEvidence != nil {
+		trace.RuntimeEvidence.RestTriggerRuntime = buildRuntimeRESTTriggerEvidence(preparedREST, request.SampleInput, triggerRequest, triggerReply, trace.RuntimeEvidence)
+		if flowInput := recorderFlowInputs(trace.RuntimeEvidence.FlowStart); len(flowInput) > 0 {
+			trace.Summary.Input = flowInput
+		}
+		if flowOutput := recorderFlowOutputs(trace.RuntimeEvidence.FlowDone); len(flowOutput) > 0 {
+			trace.Summary.Output = flowOutput
+		}
+	}
+
+	triggerDiagnostics := []diagnostic{
+		{
+			Code:     "flogo.run_trace.rest_trigger_runtime_backed",
+			Message:  "Captured runtime-backed REST trigger execution evidence from an actual HTTP request through the official Flogo REST trigger, handler mapping, flow action, and reply mapping path.",
+			Severity: "info",
+			Path:     "triggers." + preparedREST.TriggerID,
+			Details: map[string]any{
+				"mode":        runtimeBackedRESTTriggerTraceMode,
+				"triggerId":   preparedREST.TriggerID,
+				"handlerName": preparedREST.HandlerName,
+				"method":      preparedREST.Method,
+				"path":        preparedREST.Path,
+				"port":        preparedREST.Port,
+			},
+		},
+	}
+	trace.Diagnostics = dedupeDiagnostics(append(triggerDiagnostics, trace.Diagnostics...))
+	trace.Summary.Diagnostics = dedupeDiagnostics(append(triggerDiagnostics, trace.Summary.Diagnostics...))
+
+	if trace.RuntimeEvidence != nil && trace.RuntimeEvidence.RecorderBacked {
+		recorderDiagnostics := []diagnostic{
+			{
+				Code:     "flogo.run_trace.recorder_backed",
+				Message:  "Captured recorder-backed Flow state evidence through the official Flogo Flow recorder interface.",
+				Severity: "info",
+				Path:     "resources." + request.FlowID,
+				Details: map[string]any{
+					"recordingMode": trace.RuntimeEvidence.RecorderMode,
+					"snapshotCount": len(trace.RuntimeEvidence.Snapshots),
+					"stepCount":     len(trace.RuntimeEvidence.Steps),
+					"hasStart":      len(trace.RuntimeEvidence.FlowStart) > 0,
+					"hasDone":       len(trace.RuntimeEvidence.FlowDone) > 0,
+				},
+			},
+		}
+		trace.Diagnostics = dedupeDiagnostics(append(recorderDiagnostics, trace.Diagnostics...))
+		trace.Summary.Diagnostics = dedupeDiagnostics(append(recorderDiagnostics, trace.Summary.Diagnostics...))
+	}
+
+	return trace, runtimeErr
+}
+
+func executeRuntimeCLITrace(app flogoApp, preparedFlow runtimeTracePreparedFlow, preparedCLI runtimeTracePreparedCLITrigger, request runTraceRequest) (*runTrace, error) {
+	runtimeTraceMutex.Lock()
+	defer runtimeTraceMutex.Unlock()
+
+	registerRuntimeTraceSupport()
+	runtimeTraceRecorderSingleton.Reset("full")
+	defer runtimeTraceRecorderSingleton.Reset("")
+
+	requestBundle, err := buildRuntimeCLIRequestBundle(preparedCLI, request.SampleInput)
+	if err != nil {
+		return nil, err
+	}
+
+	runtimeAppConfig := buildRuntimeTraceCLIAppConfig(app, preparedFlow, preparedCLI)
+	engineConfigJSON, err := buildRuntimeTraceEngineConfigJSON(preparedFlow.FlowID)
+	if err != nil {
+		return nil, err
+	}
+
+	runtimeEngine, err := coreengine.New(runtimeAppConfig, coreengine.ConfigOption(engineConfigJSON, false))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if runtimeEngine != nil {
+			_ = runtimeEngine.Stop()
+		}
+	}()
+
+	listener := newRuntimeTraceListener(request.Capture)
+	listenerName := fmt.Sprintf("runtime-cli-trace-%d", time.Now().UnixNano())
+	eventTypes := []string{flowevent.TaskEventType, flowevent.FlowEventType}
+	if err := coreevent.RegisterListener(listenerName, listener, eventTypes); err != nil {
+		return nil, err
+	}
+	defer coreevent.UnRegisterListener(listenerName, eventTypes)
+
+	if err := runtimeEngine.Start(); err != nil {
+		return nil, err
+	}
+
+	originalArgs := append([]string{}, os.Args...)
+	defer func() {
+		os.Args = originalArgs
+	}()
+	os.Args = append([]string{}, requestBundle.Argv...)
+
+	replyStdout, runtimeErr := clicontrib.Invoke()
+
+	select {
+	case <-listener.done:
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	recorderEvidence := runtimeTraceRecorderSingleton.Evidence()
+	trace := listener.buildTrace(app, preparedFlow, request, runtimeBackedCLITriggerTraceMode, nil, runtimeErr)
+	attachRuntimeTraceEvidence(trace, app, preparedFlow.FlowID, request, runtimeBackedCLITriggerTraceMode, recorderEvidence, listener.taskEvents)
+	if trace.RuntimeEvidence != nil {
+		trace.RuntimeEvidence.CLITriggerRuntime = buildRuntimeCLITriggerEvidence(preparedCLI, requestBundle, replyStdout, trace.RuntimeEvidence)
+		if trace.RuntimeEvidence.CLITriggerRuntime != nil {
+			if len(trace.RuntimeEvidence.CLITriggerRuntime.FlowInput) > 0 {
+				trace.Summary.Input = cloneStringAnyMap(trace.RuntimeEvidence.CLITriggerRuntime.FlowInput)
+			}
+			if len(trace.RuntimeEvidence.CLITriggerRuntime.FlowOutput) > 0 {
+				trace.Summary.Output = cloneStringAnyMap(trace.RuntimeEvidence.CLITriggerRuntime.FlowOutput)
+			}
+		}
+	}
+
+	cliDiagnostics := []diagnostic{
+		{
+			Code:     "flogo.run_trace.cli_trigger_runtime_backed",
+			Message:  "Captured runtime-backed CLI trigger execution evidence from the official Flogo CLI trigger, command parsing, flow action, and reply mapping path.",
+			Severity: "info",
+			Path:     "triggers." + preparedCLI.TriggerID,
+			Details: map[string]any{
+				"mode":        runtimeBackedCLITriggerTraceMode,
+				"triggerId":   preparedCLI.TriggerID,
+				"commandName": preparedCLI.CommandName,
+				"singleCmd":   preparedCLI.SingleCmd,
+				"argCount":    len(requestBundle.Args),
+				"flagCount":   len(requestBundle.Flags),
+			},
+		},
+	}
+	trace.Diagnostics = dedupeDiagnostics(append(cliDiagnostics, trace.Diagnostics...))
+	trace.Summary.Diagnostics = dedupeDiagnostics(append(cliDiagnostics, trace.Summary.Diagnostics...))
+
+	return trace, runtimeErr
+}
+
+func executeRuntimeTimerTrace(app flogoApp, preparedFlow runtimeTracePreparedFlow, preparedTimer runtimeTracePreparedTimerTrigger, request runTraceRequest) (*runTrace, error) {
+	runtimeTraceMutex.Lock()
+	defer runtimeTraceMutex.Unlock()
+
+	registerRuntimeTraceSupport()
+	runtimeTraceRecorderSingleton.Reset("full")
+	defer runtimeTraceRecorderSingleton.Reset("")
+
+	tempDir, err := os.MkdirTemp("", "flogo-helper-timer-flow-*")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = os.RemoveAll(tempDir)
+	}()
+
+	flowPath := filepath.Join(tempDir, "flow.json")
+	if err := os.WriteFile(flowPath, preparedFlow.ResourceData, 0o600); err != nil {
+		return nil, err
+	}
+	timerFlowURI := "file://" + filepath.ToSlash(flowPath)
+
+	runtimeAppConfig := buildRuntimeTraceTimerAppConfig(app, preparedFlow, preparedTimer, timerFlowURI)
+	engineConfigJSON, err := buildRuntimeTraceEngineConfigJSON(preparedFlow.FlowID)
+	if err != nil {
+		return nil, err
+	}
+
+	runtimeEngine, err := coreengine.New(runtimeAppConfig, coreengine.ConfigOption(engineConfigJSON, false))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if runtimeEngine != nil {
+			_ = runtimeEngine.Stop()
+		}
+	}()
+
+	listener := newRuntimeTraceListener(request.Capture)
+	listenerName := fmt.Sprintf("runtime-timer-trace-%d", time.Now().UnixNano())
+	eventTypes := []string{flowevent.TaskEventType, flowevent.FlowEventType}
+	if err := coreevent.RegisterListener(listenerName, listener, eventTypes); err != nil {
+		return nil, err
+	}
+	defer coreevent.UnRegisterListener(listenerName, eventTypes)
+
+	startedAt := time.Now().UTC()
+	if err := runtimeEngine.Start(); err != nil {
+		return nil, err
+	}
+
+	firedAt := time.Time{}
+	select {
+	case <-listener.done:
+		firedAt = time.Now().UTC()
+	case <-time.After(2 * time.Second):
+		return nil, fmt.Errorf("timed out waiting for the timer trigger runtime-backed slice to complete")
+	}
+
+	recorderEvidence := runtimeTraceRecorderSingleton.Evidence()
+	trace := listener.buildTrace(app, preparedFlow, request, runtimeBackedTimerTriggerTraceMode, nil, nil)
+	attachRuntimeTraceEvidence(trace, app, preparedFlow.FlowID, request, runtimeBackedTimerTriggerTraceMode, recorderEvidence, listener.taskEvents)
+	if trace.RuntimeEvidence != nil {
+		trace.RuntimeEvidence.TimerTriggerRuntime = buildRuntimeTimerTriggerEvidence(preparedTimer, trace.RuntimeEvidence, startedAt, firedAt)
+		if trace.RuntimeEvidence.TimerTriggerRuntime != nil {
+			trace.Summary.Input = cloneStringAnyMap(trace.RuntimeEvidence.TimerTriggerRuntime.FlowInput)
+			if len(trace.RuntimeEvidence.TimerTriggerRuntime.FlowOutput) > 0 {
+				trace.Summary.Output = cloneStringAnyMap(trace.RuntimeEvidence.TimerTriggerRuntime.FlowOutput)
+			}
+		}
+	}
+	timerDiagnostics := []diagnostic{
+		{
+			Code:     "flogo.run_trace.timer_trigger_runtime_backed",
+			Message:  "Captured runtime-backed timer trigger execution evidence from the official Flogo timer trigger and flow action path.",
+			Severity: "info",
+			Path:     "triggers." + preparedTimer.TriggerID,
+			Details: map[string]any{
+				"mode":           runtimeBackedTimerTriggerTraceMode,
+				"triggerId":      preparedTimer.TriggerID,
+				"handlerName":    preparedTimer.HandlerName,
+				"startDelay":     preparedTimer.StartDelay,
+				"repeatInterval": preparedTimer.RepeatInterval,
+			},
+		},
+	}
+	trace.Diagnostics = dedupeDiagnostics(append(timerDiagnostics, trace.Diagnostics...))
+	trace.Summary.Diagnostics = dedupeDiagnostics(append(timerDiagnostics, trace.Summary.Diagnostics...))
+
+	return trace, nil
+}
+
+func registerRuntimeTraceSupport() {
+	runtimeTraceSupportOnce.Do(func() {
+		runtimeTraceRecorderFactoryRef = support.GetRef(&runtimeTraceRecorderFactory{})
+		_ = coreservice.RegisterFactory(&runtimeTraceRecorderFactory{})
+		_ = coretrigger.Register(runtimeCliTriggerSingleton, &runtimeCliTriggerFactory{})
+	})
+}
+
+func buildRuntimeTraceAppConfig(app flogoApp, prepared runtimeTracePreparedFlow) *coreapp.Config {
+	name := valueOrFallback(app.Name, "runtime-trace-app")
+	version := valueOrFallback(app.AppModel, "1.1.0")
+
+	return &coreapp.Config{
+		Name:    name,
+		Type:    valueOrFallback(app.Type, "flogo:app"),
+		Version: version,
+		Resources: []*coreresource.Config{
+			{
+				ID:   prepared.RuntimeResourceID,
+				Data: prepared.ResourceData,
+			},
+		},
+	}
+}
+
+func buildRuntimeTraceRESTAppConfig(app flogoApp, preparedFlow runtimeTracePreparedFlow, preparedREST runtimeTracePreparedRESTTrigger) *coreapp.Config {
+	name := valueOrFallback(app.Name, "runtime-rest-trace-app")
+	version := valueOrFallback(app.AppModel, "1.1.0")
+
+	return &coreapp.Config{
+		Name:    name,
+		Type:    valueOrFallback(app.Type, "flogo:app"),
+		Version: version,
+		Resources: []*coreresource.Config{
+			{
+				ID:   preparedFlow.RuntimeResourceID,
+				Data: preparedFlow.ResourceData,
+			},
+		},
+		Triggers: []*coretrigger.Config{
+			{
+				Id:       preparedREST.TriggerID,
+				Ref:      preparedREST.TriggerRef,
+				Settings: map[string]any{"port": preparedREST.Port},
+				Handlers: []*coretrigger.HandlerConfig{
+					{
+						Name: preparedREST.HandlerName,
+						Settings: map[string]any{
+							"method": preparedREST.Method,
+							"path":   preparedREST.Path,
+						},
+						Actions: []*coretrigger.ActionConfig{
+							{
+								Config: &coreaction.Config{
+									Ref: supportedRuntimeFlowActionRef,
+									Settings: map[string]any{
+										"flowURI": preparedFlow.RuntimeFlowURI,
+									},
+								},
+								Input:  cloneStringAnyMap(preparedREST.RuntimeRequestMappings),
+								Output: cloneStringAnyMap(preparedREST.RuntimeReplyMappings),
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func buildRuntimeTraceCLIAppConfig(app flogoApp, preparedFlow runtimeTracePreparedFlow, preparedCLI runtimeTracePreparedCLITrigger) *coreapp.Config {
+	name := valueOrFallback(app.Name, "runtime-cli-trace-app")
+	version := valueOrFallback(app.AppModel, "1.1.0")
+
+	triggerSettings := map[string]any{
+		"singleCmd": preparedCLI.SingleCmd,
+	}
+	if preparedCLI.Usage != "" {
+		triggerSettings["usage"] = preparedCLI.Usage
+	}
+	if preparedCLI.Long != "" {
+		triggerSettings["long"] = preparedCLI.Long
+	}
+
+	handlerSettings := map[string]any{}
+	if preparedCLI.HandlerUsage != "" {
+		handlerSettings["usage"] = preparedCLI.HandlerUsage
+	}
+	if preparedCLI.HandlerShort != "" {
+		handlerSettings["short"] = preparedCLI.HandlerShort
+	}
+	if preparedCLI.HandlerLong != "" {
+		handlerSettings["long"] = preparedCLI.HandlerLong
+	}
+	if len(preparedCLI.FlagDescriptions) > 0 {
+		flags := make([]any, 0, len(preparedCLI.FlagDescriptions))
+		for _, flag := range preparedCLI.FlagDescriptions {
+			flags = append(flags, flag)
+		}
+		handlerSettings["flags"] = flags
+	}
+
+	return &coreapp.Config{
+		Name:    name,
+		Type:    valueOrFallback(app.Type, "flogo:app"),
+		Version: version,
+		Resources: []*coreresource.Config{
+			{
+				ID:   preparedFlow.RuntimeResourceID,
+				Data: preparedFlow.ResourceData,
+			},
+		},
+		Triggers: []*coretrigger.Config{
+			{
+				Id:       preparedCLI.TriggerID,
+				Ref:      preparedCLI.TriggerRef,
+				Settings: triggerSettings,
+				Handlers: []*coretrigger.HandlerConfig{
+					{
+						Name:     preparedCLI.CommandName,
+						Settings: handlerSettings,
+						Actions: []*coretrigger.ActionConfig{
+							{
+								Config: &coreaction.Config{
+									Ref: supportedRuntimeFlowActionRef,
+									Settings: map[string]any{
+										"flowURI": preparedFlow.RuntimeFlowURI,
+									},
+								},
+								Input:  cloneStringAnyMap(preparedCLI.RuntimeInputMappings),
+								Output: cloneStringAnyMap(preparedCLI.RuntimeOutputMappings),
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func buildRuntimeTraceTimerAppConfig(app flogoApp, preparedFlow runtimeTracePreparedFlow, preparedTimer runtimeTracePreparedTimerTrigger, flowURI string) *coreapp.Config {
+	name := valueOrFallback(app.Name, "runtime-timer-trace-app")
+	version := valueOrFallback(app.AppModel, "1.1.0")
+
+	handlerSettings := map[string]any{}
+	if preparedTimer.StartDelay != "" {
+		handlerSettings["startDelay"] = preparedTimer.StartDelay
+	}
+	if preparedTimer.RepeatInterval != "" {
+		handlerSettings["repeatInterval"] = preparedTimer.RepeatInterval
+	}
+
+	return &coreapp.Config{
+		Name:    name,
+		Type:    valueOrFallback(app.Type, "flogo:app"),
+		Version: version,
+		Resources: []*coreresource.Config{
+			{
+				ID:   preparedFlow.RuntimeResourceID,
+				Data: preparedFlow.ResourceData,
+			},
+		},
+		Triggers: []*coretrigger.Config{
+			{
+				Id:  preparedTimer.TriggerID,
+				Ref: preparedTimer.TriggerRef,
+				Handlers: []*coretrigger.HandlerConfig{
+					{
+						Name:     preparedTimer.HandlerName,
+						Settings: handlerSettings,
+						Actions: []*coretrigger.ActionConfig{
+							{
+								Config: &coreaction.Config{
+									Ref: supportedRuntimeFlowActionRef,
+									Settings: map[string]any{
+										"flowURI": flowURI,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func buildRuntimeTraceImports(app flogoApp, requiredImports map[string]string) []string {
+	imports := make([]string, 0, len(app.Imports)+len(requiredImports))
+	seenSpecs := map[string]bool{}
+	seenRefs := map[string]bool{}
+
+	for _, entry := range app.Imports {
+		ref := strings.TrimSpace(entry.Ref)
+		if ref == "" {
+			continue
+		}
+		seenRefs[ref] = true
+		importSpec := ref
+		if alias := strings.TrimSpace(entry.Alias); alias != "" {
+			importSpec = alias + " " + ref
+		}
+		if seenSpecs[importSpec] {
+			continue
+		}
+		seenSpecs[importSpec] = true
+		imports = append(imports, importSpec)
+	}
+
+	requiredAliases := make([]string, 0, len(requiredImports))
+	for alias := range requiredImports {
+		requiredAliases = append(requiredAliases, alias)
+	}
+	sort.Strings(requiredAliases)
+	for _, alias := range requiredAliases {
+		ref := requiredImports[alias]
+		if seenRefs[ref] {
+			continue
+		}
+		imports = append(imports, alias+" "+ref)
+	}
+
+	return imports
+}
+
+func waitForRuntimeRESTTrigger(port int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	address := fmt.Sprintf("127.0.0.1:%d", port)
+	for {
+		connection, err := net.DialTimeout("tcp", address, 100*time.Millisecond)
+		if err == nil {
+			_ = connection.Close()
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for the REST trigger listener on %s", address)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func executeRuntimeRESTTriggerRequest(prepared runtimeTracePreparedRESTTrigger, sampleInput map[string]any) (*restTriggerRuntimeRequestEvidence, *restTriggerRuntimeReplyEvidence, error) {
+	requestBody := cloneStringAnyMap(sampleInput)
+	queryParams := mapValue(requestBody["queryParams"])
+	if len(queryParams) > 0 {
+		delete(requestBody, "queryParams")
+	}
+	requestHeaders := map[string]string{
+		"Content-Type": "application/json",
+		"Accept":       "application/json",
+	}
+
+	bodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	requestURL := fmt.Sprintf("http://127.0.0.1:%d%s", prepared.Port, prepared.Path)
+	if len(queryParams) > 0 {
+		values := url.Values{}
+		for key, value := range queryParams {
+			values.Set(key, fmt.Sprint(value))
+		}
+		encodedQuery := values.Encode()
+		if encodedQuery != "" {
+			requestURL += "?" + encodedQuery
+		}
+	}
+	httpRequest, err := http.NewRequest(prepared.Method, requestURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, nil, err
+	}
+	for key, value := range requestHeaders {
+		httpRequest.Header.Set(key, value)
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	httpResponse, err := client.Do(httpRequest)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer httpResponse.Body.Close()
+
+	responseBytes, err := io.ReadAll(httpResponse.Body)
+	if err != nil {
+		return nil, nil, err
+	}
+	responseBody := decodeRuntimeRESTBody(responseBytes, httpResponse.Header.Get("Content-Type"))
+
+	requestEvidence := &restTriggerRuntimeRequestEvidence{
+		Method:      prepared.Method,
+		Path:        prepared.Path,
+		Headers:     runtimeHTTPHeadersToMap(httpRequest.Header),
+		QueryParams: map[string]any{},
+		PathParams:  map[string]any{},
+		Body:        makeJSONSafe(requestBody),
+		Content:     makeJSONSafe(requestBody),
+	}
+	replyEvidence := &restTriggerRuntimeReplyEvidence{
+		Status:  httpResponse.StatusCode,
+		Headers: runtimeHTTPHeadersToMap(httpResponse.Header),
+		Body:    responseBody,
+		Data:    responseBody,
+	}
+	return requestEvidence, replyEvidence, nil
+}
+
+func decodeRuntimeRESTBody(body []byte, contentType string) any {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return nil
+	}
+	if strings.Contains(strings.ToLower(contentType), "json") {
+		var parsed any
+		if err := json.Unmarshal(body, &parsed); err == nil {
+			return makeJSONSafe(parsed)
+		}
+	}
+	return trimmed
+}
+
+func runtimeHTTPHeadersToMap(headers http.Header) map[string]any {
+	if len(headers) == 0 {
+		return map[string]any{}
+	}
+	result := map[string]any{}
+	keys := make([]string, 0, len(headers))
+	for key := range headers {
+		keys = append(keys, strings.ToLower(key))
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		values := headers.Values(http.CanonicalHeaderKey(key))
+		if len(values) == 0 {
+			continue
+		}
+		result[key] = strings.Join(values, ",")
+	}
+	return result
+}
+
+func buildRuntimeRESTTriggerEvidence(prepared runtimeTracePreparedRESTTrigger, sampleInput map[string]any, requestEvidence *restTriggerRuntimeRequestEvidence, replyEvidence *restTriggerRuntimeReplyEvidence, evidence *runtimeEvidence) *restTriggerRuntimeEvidence {
+	if evidence == nil {
+		return nil
+	}
+
+	flowInput := recorderFlowInputs(evidence.FlowStart)
+	flowOutput := recorderFlowOutputs(evidence.FlowDone)
+	if len(flowInput) == 0 && requestEvidence != nil {
+		flowInput = cloneStringAnyMap(mapValue(requestEvidence.Content))
+	}
+	if len(flowOutput) == 0 && replyEvidence != nil {
+		if candidate := cloneStringAnyMap(mapValue(replyEvidence.Data)); len(candidate) > 0 {
+			flowOutput = candidate
+		} else {
+			for _, mapping := range prepared.ReplyMappings {
+				expression := strings.TrimSpace(stringValue(mapping))
+				if strings.HasPrefix(expression, "$flow.") && replyEvidence.Data != nil {
+					flowOutput = map[string]any{
+						strings.TrimPrefix(expression, "$flow."): replyEvidence.Data,
+					}
+					break
+				}
+			}
+		}
+	}
+	if evidence.FlowStart == nil {
+		evidence.FlowStart = map[string]any{}
+	}
+	if evidence.FlowDone == nil {
+		evidence.FlowDone = map[string]any{}
+	}
+	if requestEvidence != nil {
+		evidence.FlowStart["triggerRequest"] = requestEvidence
+	}
+	if replyEvidence != nil {
+		evidence.FlowDone["triggerReply"] = replyEvidence
+	}
+	if len(flowInput) > 0 {
+		evidence.FlowStart["flow_inputs"] = cloneStringAnyMap(flowInput)
+		evidence.FlowStart["mappedFlowInput"] = cloneStringAnyMap(flowInput)
+	}
+	if len(flowOutput) > 0 {
+		evidence.FlowDone["flow_outputs"] = cloneStringAnyMap(flowOutput)
+		evidence.FlowDone["mappedFlowOutput"] = cloneStringAnyMap(flowOutput)
+	}
+	unavailableFields := []string{}
+	if len(flowInput) == 0 {
+		unavailableFields = append(unavailableFields, "flowInput")
+	}
+	if len(flowOutput) == 0 {
+		unavailableFields = append(unavailableFields, "flowOutput")
+	}
+	if replyEvidence == nil {
+		unavailableFields = append(unavailableFields, "reply")
+	}
+
+	mappingUnavailable := []string{}
+	if len(flowInput) == 0 {
+		mappingUnavailable = append(mappingUnavailable, "mappedFlowInput")
+	}
+	if len(flowOutput) == 0 {
+		mappingUnavailable = append(mappingUnavailable, "mappedFlowOutput")
+	}
+
+	return &restTriggerRuntimeEvidence{
+		Kind:       "rest",
+		Request:    requestEvidence,
+		FlowInput:  cloneStringAnyMap(flowInput),
+		FlowOutput: cloneStringAnyMap(flowOutput),
+		Reply:      replyEvidence,
+		Mapping: &restTriggerRuntimeMappingEvidence{
+			RequestMappingMode: "explicit",
+			ReplyMappingMode:   "explicit",
+			MappedFlowInput:    cloneStringAnyMap(flowInput),
+			MappedFlowOutput:   cloneStringAnyMap(flowOutput),
+			RequestMappings:    cloneStringAnyMap(prepared.RequestMappings),
+			ReplyMappings:      cloneStringAnyMap(prepared.ReplyMappings),
+			UnavailableFields:  dedupeStrings(mappingUnavailable),
+			Diagnostics:        []diagnostic{},
+		},
+		UnavailableFields: dedupeStrings(unavailableFields),
+		Diagnostics: []diagnostic{
+			{
+				Code:     "flogo.run_trace.rest_trigger_evidence",
+				Message:  "Captured request, mapped flow input/output, and reply evidence for the supported REST trigger runtime slice.",
+				Severity: "info",
+				Path:     "triggers." + prepared.TriggerID,
+				Details: map[string]any{
+					"handlerName": prepared.HandlerName,
+					"method":      prepared.Method,
+					"path":        prepared.Path,
+					"body":        makeJSONSafe(sampleInput),
+				},
+			},
+		},
+	}
+}
+
+func buildRuntimeCLITriggerEvidence(prepared runtimeTracePreparedCLITrigger, bundle runtimeCLIRequestBundle, replyStdout string, evidence *runtimeEvidence) *cliTriggerRuntimeEvidence {
+	if evidence == nil {
+		return nil
+	}
+
+	triggerData := map[string]any{
+		"args":  append([]string{}, bundle.Args...),
+		"flags": cloneStringAnyMap(bundle.Flags),
+	}
+	mappedFlowInput := runtimeRESTApplyMappings(prepared.RuntimeInputMappings, mappingPreviewContext{
+		Flow:     map[string]any{},
+		Activity: map[string]map[string]any{},
+		Env:      map[string]any{},
+		Property: map[string]any{},
+		Trigger:  triggerData,
+	})
+
+	flowInput := recorderFlowInputs(evidence.FlowStart)
+	if len(flowInput) == 0 {
+		flowInput = cloneStringAnyMap(mappedFlowInput)
+	}
+	flowOutput := recorderFlowOutputs(evidence.FlowDone)
+
+	replyData := any(nil)
+	if len(flowOutput) > 0 {
+		replyValues := runtimeRESTApplyMappings(prepared.RuntimeOutputMappings, mappingPreviewContext{
+			Flow:     flowOutput,
+			Activity: map[string]map[string]any{},
+			Env:      map[string]any{},
+			Property: map[string]any{},
+			Trigger:  triggerData,
+		})
+		if value, ok := replyValues["data"]; ok {
+			replyData = makeJSONSafe(value)
+		}
+	}
+	if replyData == nil && strings.TrimSpace(replyStdout) != "" {
+		replyData = replyStdout
+	}
+
+	if evidence.FlowStart == nil {
+		evidence.FlowStart = map[string]any{}
+	}
+	if evidence.FlowDone == nil {
+		evidence.FlowDone = map[string]any{}
+	}
+	if len(flowInput) > 0 {
+		evidence.FlowStart["flow_inputs"] = cloneStringAnyMap(flowInput)
+		evidence.FlowStart["mappedFlowInput"] = cloneStringAnyMap(flowInput)
+	}
+	if len(flowOutput) > 0 {
+		evidence.FlowDone["flow_outputs"] = cloneStringAnyMap(flowOutput)
+		evidence.FlowDone["mappedFlowOutput"] = cloneStringAnyMap(flowOutput)
+	}
+	if strings.TrimSpace(replyStdout) != "" {
+		evidence.FlowDone["cliReplyStdout"] = replyStdout
+	}
+	if replyData != nil {
+		evidence.FlowDone["cliReplyData"] = makeJSONSafe(replyData)
+	}
+
+	unavailableFields := []string{}
+	if len(flowInput) == 0 {
+		unavailableFields = append(unavailableFields, "flowInput")
+	}
+	if len(flowOutput) == 0 {
+		unavailableFields = append(unavailableFields, "flowOutput")
+	}
+	if replyData == nil {
+		unavailableFields = append(unavailableFields, "reply")
+	}
+	if strings.TrimSpace(replyStdout) == "" {
+		unavailableFields = append(unavailableFields, "stdout")
+	}
+
+	var replyEvidence *cliTriggerRuntimeReplyEvidence
+	if replyData != nil || strings.TrimSpace(replyStdout) != "" {
+		replyEvidence = &cliTriggerRuntimeReplyEvidence{
+			Data:   makeJSONSafe(replyData),
+			Stdout: replyStdout,
+		}
+	}
+
+	return &cliTriggerRuntimeEvidence{
+		Kind: "cli",
+		Settings: &cliTriggerRuntimeSettingsEvidence{
+			SingleCmd: prepared.SingleCmd,
+			Usage:     prepared.Usage,
+			Long:      prepared.Long,
+		},
+		Handler: &cliTriggerRuntimeHandlerEvidence{
+			Command: prepared.CommandName,
+			Usage:   prepared.HandlerUsage,
+			Short:   prepared.HandlerShort,
+			Long:    prepared.HandlerLong,
+			Flags:   cloneStringSlice(prepared.FlagDescriptions),
+		},
+		Args:              append([]string{}, bundle.Args...),
+		Flags:             cloneStringAnyMap(bundle.Flags),
+		FlowInput:         cloneStringAnyMap(flowInput),
+		FlowOutput:        cloneStringAnyMap(flowOutput),
+		Reply:             replyEvidence,
+		UnavailableFields: dedupeStrings(unavailableFields),
+		Diagnostics: []diagnostic{
+			{
+				Code:     "flogo.run_trace.cli_trigger_evidence",
+				Message:  "Captured CLI command identity, args, flags, mapped flow input/output, and reply evidence for the supported CLI runtime slice.",
+				Severity: "info",
+				Path:     "triggers." + prepared.TriggerID,
+				Details: map[string]any{
+					"commandName": prepared.CommandName,
+					"singleCmd":   prepared.SingleCmd,
+					"args":        append([]string{}, bundle.Args...),
+					"flags":       cloneStringAnyMap(bundle.Flags),
+				},
+			},
+		},
+	}
+}
+
+func buildRuntimeTimerTriggerEvidence(prepared runtimeTracePreparedTimerTrigger, evidence *runtimeEvidence, startedAt, firedAt time.Time) *timerTriggerRuntimeEvidence {
+	if evidence == nil {
+		return nil
+	}
+
+	flowInput := recorderFlowInputs(evidence.FlowStart)
+	flowOutput := recorderFlowOutputs(evidence.FlowDone)
+
+	if evidence.FlowStart == nil {
+		evidence.FlowStart = map[string]any{}
+	}
+	if evidence.FlowDone == nil {
+		evidence.FlowDone = map[string]any{}
+	}
+
+	if len(flowInput) > 0 {
+		evidence.FlowStart["mappedFlowInput"] = cloneStringAnyMap(flowInput)
+	}
+	if len(flowOutput) > 0 {
+		evidence.FlowDone["mappedFlowOutput"] = cloneStringAnyMap(flowOutput)
+	}
+
+	runMode := "once"
+	if strings.TrimSpace(prepared.RepeatInterval) != "" {
+		runMode = "repeat"
+	}
+
+	settings := &timerTriggerRuntimeSettingsEvidence{
+		RunMode:        runMode,
+		StartDelay:     prepared.StartDelay,
+		RepeatInterval: prepared.RepeatInterval,
+	}
+	tick := &timerTriggerRuntimeTickEvidence{TickCount: 1}
+	if !startedAt.IsZero() {
+		tick.StartedAt = startedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !firedAt.IsZero() {
+		tick.FiredAt = firedAt.UTC().Format(time.RFC3339Nano)
+	}
+
+	unavailableFields := []string{}
+	if len(flowInput) == 0 {
+		unavailableFields = append(unavailableFields, "flowInput")
+	}
+	if len(flowOutput) == 0 {
+		unavailableFields = append(unavailableFields, "flowOutput")
+	}
+
+	return &timerTriggerRuntimeEvidence{
+		Kind:              "timer",
+		Settings:          settings,
+		FlowInput:         cloneStringAnyMap(flowInput),
+		FlowOutput:        cloneStringAnyMap(flowOutput),
+		Tick:              tick,
+		UnavailableFields: dedupeStrings(unavailableFields),
+		Diagnostics: []diagnostic{
+			{
+				Code:     "flogo.run_trace.timer_trigger_evidence",
+				Message:  "Captured timer settings, observed tick metadata, and mapped flow input/output evidence for the supported timer runtime slice.",
+				Severity: "info",
+				Path:     "triggers." + prepared.TriggerID,
+				Details: map[string]any{
+					"handlerName":    prepared.HandlerName,
+					"runMode":        runMode,
+					"startDelay":     prepared.StartDelay,
+					"repeatInterval": prepared.RepeatInterval,
+					"tickCount":      tick.TickCount,
+				},
+			},
+		},
+	}
+}
+
+func attachRuntimeTraceEvidence(trace *runTrace, app flogoApp, flowID string, request runTraceRequest, runtimeMode string, recorderEvidence *runtimeTraceRecorderEvidence, taskEvents []map[string]any) {
+	if trace == nil {
+		return
+	}
+
+	trace.RuntimeEvidence = buildRuntimeEvidence(
+		runTraceEvidenceKindRuntimeBacked,
+		runtimeMode,
+		"",
+		recorderEvidence,
+		taskEvents,
+	)
+	if trace.RuntimeEvidence != nil && trace.RuntimeEvidence.RecorderMode == "" {
+		trace.RuntimeEvidence.RecorderMode = "full"
+	}
+	if trace.RuntimeEvidence != nil {
+		trace.RuntimeEvidence.NormalizedSteps = buildNormalizedRuntimeSteps(app, flowID, request.Capture, trace.Steps, trace.RuntimeEvidence)
+		if request.Capture.IncludeFlowState {
+			for index := range trace.Steps {
+				if index >= len(trace.RuntimeEvidence.NormalizedSteps) {
+					break
+				}
+				trace.Steps[index].FlowState = cloneStringAnyMap(trace.RuntimeEvidence.NormalizedSteps[index].FlowStateAfter)
+			}
+		}
+		if len(trace.RuntimeEvidence.NormalizedSteps) > 0 {
+			requested, captured, unavailable := runtimeNormalizedRequestedAndCapturedFields(request.Capture, trace.RuntimeEvidence.NormalizedSteps)
+			normalizedDiagnostics := []diagnostic{
+				{
+					Code:     "flogo.run_trace.normalized_step_evidence",
+					Message:  "Captured normalized per-step runtime evidence by combining task events, Flow recorder state, and app metadata on the supported runtime-backed slice.",
+					Severity: "info",
+					Path:     "resources." + flowID,
+					Details: map[string]any{
+						"normalizedStepCount": len(trace.RuntimeEvidence.NormalizedSteps),
+						"requestedFields":     requested,
+						"capturedFields":      captured,
+						"unavailableFields":   unavailable,
+					},
+				},
+			}
+			trace.Diagnostics = dedupeDiagnostics(append(normalizedDiagnostics, trace.Diagnostics...))
+			trace.Summary.Diagnostics = dedupeDiagnostics(append(normalizedDiagnostics, trace.Summary.Diagnostics...))
+		}
+	}
+	if trace.RuntimeEvidence != nil && trace.RuntimeEvidence.RecorderBacked {
+		recorderDiagnostics := []diagnostic{
+			{
+				Code:     "flogo.run_trace.recorder_backed",
+				Message:  "Captured recorder-backed Flow state evidence through the official Flogo Flow recorder interface.",
+				Severity: "info",
+				Path:     "resources." + flowID,
+				Details: map[string]any{
+					"recordingMode": trace.RuntimeEvidence.RecorderMode,
+					"snapshotCount": len(trace.RuntimeEvidence.Snapshots),
+					"stepCount":     len(trace.RuntimeEvidence.Steps),
+					"hasStart":      len(trace.RuntimeEvidence.FlowStart) > 0,
+					"hasDone":       len(trace.RuntimeEvidence.FlowDone) > 0,
+				},
+			},
+		}
+		trace.Diagnostics = dedupeDiagnostics(append(recorderDiagnostics, trace.Diagnostics...))
+		trace.Summary.Diagnostics = dedupeDiagnostics(append(recorderDiagnostics, trace.Summary.Diagnostics...))
+	}
+}
+
+func buildRuntimeTraceEngineConfigJSON(flowID string) (string, error) {
+	registerRuntimeTraceSupport()
+
+	engineConfig := coreengine.Config{
+		Name:              "runtime-trace-helper",
+		Type:              "flogo:engine",
+		Description:       "runtime trace helper engine",
+		StopEngineOnError: true,
+		RunnerType:        coreengine.ValueRunnerTypeDirect,
+		ActionSettings: map[string]map[string]interface{}{
+			supportedRuntimeFlowActionRef: {
+				flow.StateRecordingMode: string(flowstate.RecordingModeFull),
+			},
+		},
+		Services: []*coreengine.ServiceConfig{
+			{
+				Ref:     runtimeTraceRecorderFactoryRef,
+				Enabled: true,
+				Settings: map[string]interface{}{
+					"name": runtimeTraceRecorderServiceName,
+				},
+			},
+		},
+	}
+
+	bytes, err := json.Marshal(engineConfig)
+	if err != nil {
+		return "", err
+	}
+	return string(bytes), nil
+}
+
+func newRuntimeTraceListener(capture runTraceCaptureOptions) *runtimeTraceListener {
+	return &runtimeTraceListener{
+		capture:    capture,
+		steps:      map[string]*runTraceTaskStep{},
+		taskEvents: []map[string]any{},
+		done:       make(chan struct{}),
+	}
+}
+
+func (listener *runtimeTraceListener) HandleEvent(ctx *coreevent.Context) error {
+	listener.mu.Lock()
+	defer listener.mu.Unlock()
+
+	switch ctx.GetEventType() {
+	case flowevent.TaskEventType:
+		event, ok := ctx.GetEvent().(flowevent.TaskEvent)
+		if !ok {
+			return nil
+		}
+		listener.taskEventCount++
+		listener.taskEvents = append(listener.taskEvents, runtimeTaskEventToMap(event))
+
+		taskID := strings.TrimSpace(event.TaskInstanceId())
+		if taskID == "" {
+			taskID = valueOrFallback(strings.TrimSpace(event.TaskName()), fmt.Sprintf("task_%d", listener.taskEventCount))
+		}
+		step, exists := listener.steps[taskID]
+		if !exists {
+			step = &runTraceTaskStep{
+				TaskID:      taskID,
+				TaskName:    event.TaskName(),
+				ActivityRef: event.ActivityRef(),
+				Type:        valueOrFallback(event.TaskType(), "activity"),
+				Status:      "completed",
+				Diagnostics: []diagnostic{},
+			}
+			listener.steps[taskID] = step
+			listener.stepOrder = append(listener.stepOrder, taskID)
+		}
+
+		switch event.TaskStatus() {
+		case flowevent.SCHEDULED, flowevent.STARTED:
+			if step.StartedAt == "" {
+				step.StartedAt = event.Time().UTC().Format(time.RFC3339Nano)
+			}
+		case flowevent.COMPLETED:
+			if step.StartedAt == "" {
+				step.StartedAt = event.Time().UTC().Format(time.RFC3339Nano)
+			}
+			step.Status = "completed"
+			step.FinishedAt = event.Time().UTC().Format(time.RFC3339Nano)
+		case flowevent.FAILED, flowevent.CANCELLED:
+			if step.StartedAt == "" {
+				step.StartedAt = event.Time().UTC().Format(time.RFC3339Nano)
+			}
+			step.Status = "failed"
+			step.FinishedAt = event.Time().UTC().Format(time.RFC3339Nano)
+			if event.TaskError() != nil {
+				step.Error = event.TaskError().Error()
+			}
+		case flowevent.SKIPPED:
+			step.Status = "skipped"
+			step.FinishedAt = event.Time().UTC().Format(time.RFC3339Nano)
+		}
+		if listener.capture.IncludeTaskInputs {
+			if input := stripRuntimeTraceScopes(event.TaskInput()); len(input) > 0 {
+				step.Input = input
+			}
+		}
+		if listener.capture.IncludeTaskOutputs {
+			if output := stripRuntimeTraceScopes(event.TaskOutput()); len(output) > 0 {
+				step.Output = output
+			}
+		}
+		if listener.capture.IncludeActivityOutputs {
+			if output := stripRuntimeTraceScopes(event.TaskOutput()); len(output) > 0 {
+				step.ActivityState = cloneStringAnyMap(output)
+			}
+		}
+
+	case flowevent.FlowEventType:
+		event, ok := ctx.GetEvent().(flowevent.FlowEvent)
+		if !ok {
+			return nil
+		}
+		listener.flowEventCount++
+		if listener.flowInstanceID == "" {
+			listener.flowInstanceID = event.FlowID()
+		}
+
+		filteredInput := stripRuntimeTraceScopes(event.FlowInput())
+		filteredOutput := stripRuntimeTraceScopes(event.FlowOutput())
+		if len(filteredInput) > 0 {
+			listener.flowInput = filteredInput
+		}
+		if len(filteredOutput) > 0 {
+			listener.flowOutput = filteredOutput
+		}
+
+		switch event.FlowStatus() {
+		case flowevent.COMPLETED:
+			listener.flowStatus = "completed"
+			listener.terminalEventOnce.Do(func() {
+				close(listener.done)
+			})
+		case flowevent.FAILED, flowevent.CANCELLED:
+			listener.flowStatus = "failed"
+			if event.FlowError() != nil {
+				listener.flowError = event.FlowError().Error()
+			}
+			listener.terminalEventOnce.Do(func() {
+				close(listener.done)
+			})
+		}
+	}
+
+	return nil
+}
+
+func (listener *runtimeTraceListener) buildTrace(app flogoApp, prepared runtimeTracePreparedFlow, request runTraceRequest, runtimeMode string, runtimeOutput map[string]any, runtimeErr error) *runTrace {
+	listener.mu.Lock()
+	defer listener.mu.Unlock()
+
+	steps := listener.normalizedSteps(app, prepared)
+
+	status := listener.flowStatus
+	if status == "" {
+		status = "completed"
+	}
+	if runtimeErr != nil {
+		status = "failed"
+	}
+
+	finalOutput := buildRuntimeTraceOutput(app, request.FlowID, request.SampleInput, runtimeOutput, listener.flowOutput)
+	traceError := listener.flowError
+	if traceError == "" && runtimeErr != nil {
+		traceError = runtimeErr.Error()
+	}
+
+	diagnostics := []diagnostic{
+		{
+			Code:     "flogo.run_trace.runtime_backed",
+			Message:  "Captured runtime-backed execution evidence from official Flogo Flow/Core task and flow events.",
+			Severity: "info",
+			Path:     "resources." + request.FlowID,
+			Details: map[string]any{
+				"engine":         "project-flogo/core+flow",
+				"mode":           valueOrFallback(runtimeMode, runtimeBackedTraceMode),
+				"flowInstanceId": listener.flowInstanceID,
+				"taskEventCount": listener.taskEventCount,
+				"flowEventCount": listener.flowEventCount,
+			},
+		},
+	}
+
+	if traceError != "" {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.run_trace.runtime_execution_failed",
+			Message:  traceError,
+			Severity: "error",
+			Path:     "resources." + request.FlowID,
+		})
+	}
+
+	return &runTrace{
+		AppName:      app.Name,
+		FlowID:       prepared.FlowID,
+		EvidenceKind: runTraceEvidenceKindRuntimeBacked,
+		Summary: runTraceSummary{
+			FlowID:      prepared.FlowID,
+			Status:      status,
+			Input:       cloneStringAnyMap(request.SampleInput),
+			Output:      finalOutput,
+			Error:       traceError,
+			StepCount:   len(steps),
+			Diagnostics: dedupeDiagnostics(diagnostics),
+		},
+		Steps:       steps,
+		Diagnostics: dedupeDiagnostics(diagnostics),
+	}
+}
+
+func (listener *runtimeTraceListener) normalizedSteps(app flogoApp, prepared runtimeTracePreparedFlow) []runTraceTaskStep {
+	catalog, hasFlow := newRuntimeTraceTaskCatalog(app, prepared.FlowID)
+	accumulators := map[string]*runtimeTraceStepAccumulator{}
+	unmatchedOrder := []string{}
+
+	ensureAccumulator := func(key string) *runtimeTraceStepAccumulator {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			key = fmt.Sprintf("runtime_task_%d", len(accumulators)+1)
+		}
+		if existing := accumulators[key]; existing != nil {
+			return existing
+		}
+		accumulator := &runtimeTraceStepAccumulator{
+			key:             key,
+			evidenceSources: map[string]struct{}{},
+		}
+		accumulators[key] = accumulator
+		unmatchedOrder = append(unmatchedOrder, key)
+		return accumulator
+	}
+
+	for _, taskID := range listener.stepOrder {
+		step := listener.steps[taskID]
+		if step == nil {
+			continue
+		}
+		key, task, matched := catalog.match(step.TaskID, step.TaskName, step.ActivityRef)
+		if strings.TrimSpace(key) == "" {
+			key = valueOrFallback(strings.TrimSpace(step.TaskID), strings.TrimSpace(step.TaskName))
+		}
+		accumulator := ensureAccumulator(key)
+		accumulator.mergeBaseStep(*step)
+		if matched {
+			accumulator.applyTask(task)
+			accumulator.evidenceSources["app_metadata"] = struct{}{}
+		}
+	}
+
+	for _, event := range listener.taskEvents {
+		key, task, matched := catalog.match(stringValue(event["taskId"]), stringValue(event["taskName"]), stringValue(event["activityRef"]))
+		if strings.TrimSpace(key) == "" {
+			key = valueOrFallback(strings.TrimSpace(stringValue(event["taskId"])), strings.TrimSpace(stringValue(event["taskName"])))
+		}
+		accumulator := ensureAccumulator(key)
+		accumulator.taskEvents = append(accumulator.taskEvents, cloneStringAnyMap(event))
+		accumulator.recordStatus(stringValue(event["status"]))
+		accumulator.evidenceSources["task_events"] = struct{}{}
+		if matched {
+			accumulator.applyTask(task)
+			accumulator.evidenceSources["app_metadata"] = struct{}{}
+		}
+		if input := mapValue(event["input"]); len(input) > 0 {
+			accumulator.step.Input = cloneStringAnyMap(input)
+			accumulator.evidenceSources["task_event_input"] = struct{}{}
+		}
+		if output := mapValue(event["output"]); len(output) > 0 {
+			accumulator.step.Output = cloneStringAnyMap(output)
+			accumulator.evidenceSources["task_event_output"] = struct{}{}
+		}
+	}
+
+	recorder := runtimeTraceRecorderSingleton.Evidence()
+	for _, snapshot := range recorder.Snapshots {
+		flowState := runtimeTraceFlowStateFromSnapshot(snapshot)
+		for _, taskRecord := range runtimeTraceTaskItems(snapshot["tasks"]) {
+			key, task, matched := catalog.match(stringValue(taskRecord["id"]), "", "")
+			if strings.TrimSpace(key) == "" {
+				key = strings.TrimSpace(stringValue(taskRecord["id"]))
+			}
+			if key == "" {
+				continue
+			}
+			accumulator := ensureAccumulator(key)
+			if matched {
+				accumulator.applyTask(task)
+				accumulator.evidenceSources["app_metadata"] = struct{}{}
+			}
+			if flowState != nil {
+				accumulator.recorderFlowState = mergeRuntimeEvidenceMap(accumulator.recorderFlowState, flowState)
+			}
+			if status := normalizeRuntimeRecorderTaskStatus(int(numberValue(taskRecord["status"]))); status != "" {
+				accumulator.recorderTaskStatus = status
+				accumulator.recordStatus(status)
+			}
+			accumulator.evidenceSources["recorder_snapshots"] = struct{}{}
+		}
+	}
+
+	for _, recorderStep := range recorder.Steps {
+		recorderFlowState, recorderTasks := runtimeTraceStepEvidence(recorderStep)
+		for taskID, taskEvidence := range recorderTasks {
+			key, task, matched := catalog.match(taskID, "", "")
+			if strings.TrimSpace(key) == "" {
+				key = strings.TrimSpace(taskID)
+			}
+			if key == "" {
+				continue
+			}
+			accumulator := ensureAccumulator(key)
+			if matched {
+				accumulator.applyTask(task)
+				accumulator.evidenceSources["app_metadata"] = struct{}{}
+			}
+			if recorderFlowState != nil {
+				accumulator.recorderFlowState = mergeRuntimeEvidenceMap(accumulator.recorderFlowState, recorderFlowState)
+			}
+			if len(taskEvidence.Input) > 0 && len(accumulator.step.Input) == 0 {
+				accumulator.recorderInput = cloneStringAnyMap(taskEvidence.Input)
+			}
+			if taskEvidence.ActivityState != nil {
+				accumulator.recorderActivity = mergeRuntimeEvidenceMap(accumulator.recorderActivity, taskEvidence.ActivityState)
+			}
+			if taskEvidence.Status != "" {
+				accumulator.recorderTaskStatus = taskEvidence.Status
+				accumulator.recordStatus(taskEvidence.Status)
+			}
+			accumulator.evidenceSources["recorder_steps"] = struct{}{}
+		}
+	}
+
+	orderedKeys := []string{}
+	seen := map[string]struct{}{}
+	if hasFlow {
+		for _, task := range catalog.flow.Tasks {
+			if accumulators[task.ID] != nil {
+				orderedKeys = append(orderedKeys, task.ID)
+				seen[task.ID] = struct{}{}
+			}
+		}
+	}
+	for _, key := range unmatchedOrder {
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		if accumulators[key] == nil {
+			continue
+		}
+		orderedKeys = append(orderedKeys, key)
+		seen[key] = struct{}{}
+	}
+
+	steps := make([]runTraceTaskStep, 0, len(orderedKeys))
+	for _, key := range orderedKeys {
+		if accumulator := accumulators[key]; accumulator != nil {
+			steps = append(steps, accumulator.finalize(listener.capture))
+		}
+	}
+	return steps
+}
+
+func runtimeTraceRequestedAndCapturedFields(capture runTraceCaptureOptions, steps []runTraceTaskStep) ([]string, []string, []string) {
+	requested := []string{}
+	captured := []string{}
+	unavailable := []string{}
+
+	anyFlowState := false
+	anyActivityState := false
+	anyInput := false
+	anyOutput := false
+	for _, step := range steps {
+		if len(step.FlowState) > 0 {
+			anyFlowState = true
+		}
+		if len(step.ActivityState) > 0 {
+			anyActivityState = true
+		}
+		if len(step.Input) > 0 {
+			anyInput = true
+		}
+		if len(step.Output) > 0 {
+			anyOutput = true
+		}
+	}
+
+	recordField := func(name string, requestedFlag bool, capturedFlag bool) {
+		if !requestedFlag {
+			return
+		}
+		requested = append(requested, name)
+		if capturedFlag {
+			captured = append(captured, name)
+			return
+		}
+		unavailable = append(unavailable, name)
+	}
+
+	recordField("flowState", capture.IncludeFlowState, anyFlowState)
+	recordField("activityState", capture.IncludeActivityOutputs, anyActivityState)
+	recordField("taskInput", capture.IncludeTaskInputs, anyInput)
+	recordField("taskOutput", capture.IncludeTaskOutputs, anyOutput)
+
+	return requested, captured, unavailable
+}
+
+func runtimeNormalizedRequestedAndCapturedFields(capture runTraceCaptureOptions, steps []runtimeNormalizedStep) ([]string, []string, []string) {
+	requested := []string{}
+	captured := []string{}
+	unavailable := []string{}
+
+	recordField := func(name string, requestedFlag bool, capturedFlag bool, unavailableFlag bool) {
+		if !requestedFlag {
+			return
+		}
+		requested = append(requested, name)
+		if capturedFlag {
+			captured = append(captured, name)
+			return
+		}
+		if unavailableFlag {
+			unavailable = append(unavailable, name)
+		}
+	}
+
+	hasField := func(field string, value func(step runtimeNormalizedStep) bool) (bool, bool) {
+		seenUnavailable := false
+		for _, step := range steps {
+			if value(step) {
+				return true, seenUnavailable
+			}
+			for _, unavailableField := range step.UnavailableFields {
+				if unavailableField == field {
+					seenUnavailable = true
+					break
+				}
+			}
+		}
+		return false, seenUnavailable
+	}
+
+	resolvedInputsCaptured, resolvedInputsUnavailable := hasField("resolvedInputs", func(step runtimeNormalizedStep) bool {
+		return len(step.ResolvedInputs) > 0
+	})
+	producedOutputsCaptured, producedOutputsUnavailable := hasField("producedOutputs", func(step runtimeNormalizedStep) bool {
+		return len(step.ProducedOutputs) > 0
+	})
+	flowStateBeforeCaptured, flowStateBeforeUnavailable := hasField("flowStateBefore", func(step runtimeNormalizedStep) bool {
+		return len(step.FlowStateBefore) > 0
+	})
+	flowStateAfterCaptured, flowStateAfterUnavailable := hasField("flowStateAfter", func(step runtimeNormalizedStep) bool {
+		return len(step.FlowStateAfter) > 0
+	})
+	stateDeltaCaptured, stateDeltaUnavailable := hasField("stateDelta", func(step runtimeNormalizedStep) bool {
+		return len(step.StateDelta) > 0
+	})
+
+	recordField("resolvedInputs", capture.IncludeTaskInputs, resolvedInputsCaptured, resolvedInputsUnavailable)
+	recordField("producedOutputs", capture.IncludeTaskOutputs, producedOutputsCaptured, producedOutputsUnavailable)
+	recordField("flowStateBefore", capture.IncludeFlowState, flowStateBeforeCaptured, flowStateBeforeUnavailable)
+	recordField("flowStateAfter", capture.IncludeFlowState, flowStateAfterCaptured, flowStateAfterUnavailable)
+	recordField("stateDelta", capture.IncludeFlowState, stateDeltaCaptured, stateDeltaUnavailable)
+
+	return requested, captured, unavailable
+}
+
+type runtimeRecorderTaskEvidence struct {
+	Input         map[string]any
+	ActivityState map[string]any
+	Status        string
+}
+
+func newRuntimeTraceTaskCatalog(app flogoApp, flowID string) (runtimeTraceTaskCatalog, bool) {
+	flow, index := findFlowByID(app, flowID)
+	if index < 0 {
+		return runtimeTraceTaskCatalog{}, false
+	}
+	catalog := runtimeTraceTaskCatalog{
+		flow:             flow,
+		byID:             map[string]flogoTask{},
+		idsByName:        map[string][]string{},
+		idsByActivityRef: map[string][]string{},
+	}
+	for _, task := range flow.Tasks {
+		catalog.byID[task.ID] = task
+		if name := strings.TrimSpace(task.Name); name != "" {
+			catalog.idsByName[name] = append(catalog.idsByName[name], task.ID)
+		}
+		if ref := strings.TrimSpace(task.ActivityRef); ref != "" {
+			catalog.idsByActivityRef[ref] = append(catalog.idsByActivityRef[ref], task.ID)
+		}
+	}
+	return catalog, true
+}
+
+func (catalog runtimeTraceTaskCatalog) match(taskID, taskName, activityRef string) (string, flogoTask, bool) {
+	taskID = strings.TrimSpace(taskID)
+	taskName = strings.TrimSpace(taskName)
+	activityRef = strings.TrimSpace(activityRef)
+
+	if task, ok := catalog.byID[taskID]; ok {
+		return task.ID, task, true
+	}
+	if ids := catalog.idsByName[taskName]; len(ids) == 1 {
+		task := catalog.byID[ids[0]]
+		return task.ID, task, true
+	}
+	if ids := catalog.idsByActivityRef[activityRef]; len(ids) == 1 {
+		task := catalog.byID[ids[0]]
+		return task.ID, task, true
+	}
+	if taskID != "" {
+		return taskID, flogoTask{}, false
+	}
+	return taskName, flogoTask{}, false
+}
+
+func (accumulator *runtimeTraceStepAccumulator) mergeBaseStep(step runTraceTaskStep) {
+	accumulator.step.TaskID = valueOrFallback(accumulator.step.TaskID, step.TaskID)
+	accumulator.step.TaskName = valueOrFallback(accumulator.step.TaskName, step.TaskName)
+	accumulator.step.ActivityRef = valueOrFallback(accumulator.step.ActivityRef, step.ActivityRef)
+	accumulator.step.Type = valueOrFallback(accumulator.step.Type, step.Type)
+	if accumulator.step.Status == "" || accumulator.step.Status == "completed" {
+		accumulator.step.Status = valueOrFallback(step.Status, accumulator.step.Status)
+	}
+	if accumulator.step.StartedAt == "" {
+		accumulator.step.StartedAt = step.StartedAt
+	}
+	if accumulator.step.FinishedAt == "" {
+		accumulator.step.FinishedAt = step.FinishedAt
+	}
+	if accumulator.step.Error == "" {
+		accumulator.step.Error = step.Error
+	}
+	if len(accumulator.step.Input) == 0 && len(step.Input) > 0 {
+		accumulator.step.Input = cloneStringAnyMap(step.Input)
+	}
+	if len(accumulator.step.Output) == 0 && len(step.Output) > 0 {
+		accumulator.step.Output = cloneStringAnyMap(step.Output)
+	}
+	if len(accumulator.step.FlowState) == 0 && len(step.FlowState) > 0 {
+		accumulator.step.FlowState = cloneStringAnyMap(step.FlowState)
+	}
+	if len(accumulator.step.ActivityState) == 0 && len(step.ActivityState) > 0 {
+		accumulator.step.ActivityState = cloneStringAnyMap(step.ActivityState)
+	}
+	accumulator.step.Diagnostics = dedupeDiagnostics(append(cloneDiagnostics(accumulator.step.Diagnostics), step.Diagnostics...))
+	accumulator.recordStatus(step.Status)
+}
+
+func (accumulator *runtimeTraceStepAccumulator) applyTask(task flogoTask) {
+	accumulator.task = task
+	accumulator.hasTask = true
+	accumulator.step.TaskID = task.ID
+	accumulator.step.TaskName = valueOrFallback(task.Name, accumulator.step.TaskName)
+	accumulator.step.ActivityRef = valueOrFallback(task.ActivityRef, accumulator.step.ActivityRef)
+	accumulator.step.Type = valueOrFallback(task.Type, "activity")
+}
+
+func (accumulator *runtimeTraceStepAccumulator) recordStatus(status string) {
+	status = strings.TrimSpace(status)
+	if status == "" {
+		return
+	}
+	if len(accumulator.statusHistory) == 0 || accumulator.statusHistory[len(accumulator.statusHistory)-1] != status {
+		accumulator.statusHistory = append(accumulator.statusHistory, status)
+	}
+}
+
+func (accumulator *runtimeTraceStepAccumulator) finalize(capture runTraceCaptureOptions) runTraceTaskStep {
+	step := accumulator.step
+	if accumulator.hasTask {
+		step.TaskID = accumulator.task.ID
+		step.TaskName = valueOrFallback(accumulator.task.Name, step.TaskName)
+		step.ActivityRef = valueOrFallback(accumulator.task.ActivityRef, step.ActivityRef)
+		step.Type = valueOrFallback(accumulator.task.Type, "activity")
+	}
+	if step.Type == "" {
+		step.Type = "activity"
+	}
+	if step.StartedAt == "" {
+		step.StartedAt = nowRFC3339()
+	}
+	if step.FinishedAt == "" && step.Status != "skipped" {
+		step.FinishedAt = nowRFC3339()
+	}
+	if step.Status == "" {
+		step.Status = valueOrFallback(accumulator.recorderTaskStatus, "completed")
+	}
+
+	if capture.IncludeTaskInputs {
+		if len(step.Input) == 0 && len(accumulator.recorderInput) > 0 {
+			step.Input = cloneStringAnyMap(accumulator.recorderInput)
+		}
+	} else {
+		step.Input = nil
+	}
+	if !capture.IncludeTaskOutputs {
+		step.Output = nil
+	}
+	if capture.IncludeFlowState {
+		step.FlowState = mergeRuntimeEvidenceMap(step.FlowState, accumulator.recorderFlowState)
+		if len(step.FlowState) == 0 {
+			step.FlowState = nil
+		}
+	} else {
+		step.FlowState = nil
+	}
+	if capture.IncludeActivityOutputs {
+		activityState := mergeRuntimeEvidenceMap(step.ActivityState, accumulator.recorderActivity)
+		if len(accumulator.statusHistory) > 0 {
+			activityState = mergeRuntimeEvidenceMap(activityState, map[string]any{
+				"statusHistory": cloneStringSlice(accumulator.statusHistory),
+			})
+		}
+		if accumulator.recorderTaskStatus != "" {
+			activityState = mergeRuntimeEvidenceMap(activityState, map[string]any{
+				"taskStatus": accumulator.recorderTaskStatus,
+			})
+		}
+		if len(activityState) > 0 {
+			step.ActivityState = activityState
+		}
+	} else {
+		step.ActivityState = nil
+	}
+
+	captured := []string{}
+	unavailable := []string{}
+	if capture.IncludeTaskInputs {
+		if len(step.Input) > 0 {
+			captured = append(captured, "taskInput")
+		} else {
+			unavailable = append(unavailable, "taskInput")
+		}
+	}
+	if capture.IncludeTaskOutputs {
+		if len(step.Output) > 0 {
+			captured = append(captured, "taskOutput")
+		} else {
+			unavailable = append(unavailable, "taskOutput")
+		}
+	}
+	if capture.IncludeFlowState {
+		if len(step.FlowState) > 0 {
+			captured = append(captured, "flowState")
+		} else {
+			unavailable = append(unavailable, "flowState")
+		}
+	}
+	if capture.IncludeActivityOutputs {
+		if len(step.ActivityState) > 0 {
+			captured = append(captured, "activityState")
+		} else {
+			unavailable = append(unavailable, "activityState")
+		}
+	}
+
+	sources := mapKeysSorted(accumulator.evidenceSources)
+	if len(captured) > 0 || len(unavailable) > 0 || len(sources) > 0 {
+		step.Diagnostics = dedupeDiagnostics(append(cloneDiagnostics(step.Diagnostics), diagnostic{
+			Code:     "flogo.run_trace.runtime_step_normalized",
+			Message:  fmt.Sprintf("Normalized runtime evidence for task %q from real task-event, recorder, and app-metadata sources where available.", step.TaskID),
+			Severity: "info",
+			Path:     "resources." + step.TaskID,
+			Details: map[string]any{
+				"taskId":            step.TaskID,
+				"evidenceSources":   sources,
+				"capturedFields":    captured,
+				"unavailableFields": unavailable,
+			},
+		}))
+	}
+
+	return step
+}
+
+func runtimeTraceFlowStateFromSnapshot(snapshot map[string]any) map[string]any {
+	state := map[string]any{}
+	if snapshotID := strings.TrimSpace(stringValue(snapshot["id"])); snapshotID != "" {
+		state["lastSnapshotId"] = snapshotID
+	}
+	if status := normalizeRuntimeRecorderFlowStatus(int(numberValue(snapshot["status"]))); status != "" {
+		state["flowStatus"] = status
+	}
+	if attrs := mapValue(snapshot["attrs"]); len(attrs) > 0 {
+		state["attrs"] = cloneStringAnyMap(attrs)
+	}
+	if tasks := runtimeTraceTaskItems(snapshot["tasks"]); len(tasks) > 0 {
+		state["snapshotTaskCount"] = len(tasks)
+	}
+	if workQueue, ok := snapshot["workQueue"].([]any); ok {
+		state["workQueueDepth"] = len(workQueue)
+	}
+	if subflows, ok := snapshot["subflows"].([]any); ok {
+		state["subflowCount"] = len(subflows)
+	}
+	if len(state) == 0 {
+		return nil
+	}
+	return state
+}
+
+func runtimeTraceStepEvidence(step map[string]any) (map[string]any, map[string]runtimeRecorderTaskEvidence) {
+	flowState := map[string]any{}
+	if stepID := strings.TrimSpace(fmt.Sprintf("%v", step["id"])); stepID != "" && stepID != "<nil>" {
+		flowState["lastRecorderStepId"] = stepID
+	}
+
+	evidence := map[string]runtimeRecorderTaskEvidence{}
+	rootChange := runtimeRecorderRootFlowChange(step)
+	if len(rootChange) == 0 {
+		if len(flowState) == 0 {
+			return nil, evidence
+		}
+		return flowState, evidence
+	}
+
+	changeState := map[string]any{}
+	if attrs := mapValue(rootChange["attrs"]); len(attrs) > 0 {
+		changeState["attrs"] = cloneStringAnyMap(attrs)
+	}
+	if returnData := mapValue(rootChange["returnData"]); len(returnData) > 0 {
+		changeState["returnData"] = cloneStringAnyMap(returnData)
+	}
+	if status := normalizeRuntimeRecorderFlowStatus(int(numberValue(rootChange["status"]))); status != "" {
+		changeState["flowStatus"] = status
+	}
+	flowState = mergeRuntimeEvidenceMap(flowState, changeState)
+
+	taskMap := mapValue(rootChange["tasks"])
+	if taskID := strings.TrimSpace(stringValue(rootChange["taskId"])); taskID != "" && len(taskMap) == 0 {
+		taskMap[taskID] = map[string]any{}
+	}
+	for taskID, rawTask := range taskMap {
+		taskState := mapValue(rawTask)
+		item := evidence[taskID]
+		if input := mapValue(taskState["input"]); len(input) > 0 {
+			item.Input = cloneStringAnyMap(input)
+		}
+		activityState := map[string]any{}
+		if status := normalizeRuntimeRecorderTaskStatus(int(numberValue(taskState["status"]))); status != "" {
+			item.Status = status
+			activityState["taskStatus"] = status
+		}
+		if change := normalizeRuntimeRecorderChangeType(int(numberValue(taskState["change"]))); change != "" {
+			activityState["change"] = change
+		}
+		if len(activityState) > 0 {
+			item.ActivityState = mergeRuntimeEvidenceMap(item.ActivityState, activityState)
+		}
+		evidence[taskID] = item
+	}
+
+	if len(flowState) == 0 {
+		flowState = nil
+	}
+	return flowState, evidence
+}
+
+func runtimeTraceFlowChanges(value any) []map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		changes := make([]map[string]any, 0, len(keys))
+		for _, key := range keys {
+			if item := mapValue(typed[key]); len(item) > 0 {
+				changes = append(changes, item)
+			}
+		}
+		return changes
+	case []any:
+		changes := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if record := mapValue(item); len(record) > 0 {
+				changes = append(changes, record)
+			}
+		}
+		return changes
+	default:
+		return []map[string]any{}
+	}
+}
+
+func runtimeTraceTaskItems(value any) []map[string]any {
+	items, ok := value.([]any)
+	if !ok {
+		return []map[string]any{}
+	}
+	result := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if record := mapValue(item); len(record) > 0 {
+			result = append(result, record)
+		}
+	}
+	return result
+}
+
+func normalizeRuntimeRecorderTaskStatus(code int) string {
+	switch code {
+	case 0:
+		return "not_started"
+	case 10:
+		return "scheduled"
+	case 20:
+		return "started"
+	case 30:
+		return "waiting"
+	case 40:
+		return "completed"
+	case 50:
+		return "skipped"
+	case 100:
+		return "failed"
+	case 110:
+		return "cancelled"
+	default:
+		if code == 0 {
+			return ""
+		}
+		return fmt.Sprintf("status_%d", code)
+	}
+}
+
+func normalizeRuntimeRecorderFlowStatus(code int) string {
+	switch code {
+	case 0:
+		return "not_started"
+	case 100:
+		return "active"
+	case 500:
+		return "completed"
+	case 600:
+		return "cancelled"
+	case 700:
+		return "failed"
+	default:
+		if code == 0 {
+			return ""
+		}
+		return fmt.Sprintf("status_%d", code)
+	}
+}
+
+func normalizeRuntimeRecorderChangeType(code int) string {
+	switch code {
+	case 0:
+		return "add"
+	case 1:
+		return "update"
+	case 2:
+		return "delete"
+	default:
+		return ""
+	}
+}
+
+func mergeRuntimeEvidenceMap(base map[string]any, overlay map[string]any) map[string]any {
+	if len(overlay) == 0 {
+		return cloneStringAnyMap(base)
+	}
+	result := cloneStringAnyMap(base)
+	for key, value := range overlay {
+		result[key] = makeJSONSafe(value)
+	}
+	return result
+}
+
+func cloneStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	items := make([]string, 0, len(values))
+	for _, value := range values {
+		items = append(items, value)
+	}
+	return items
+}
+
+func mapKeysSorted(values map[string]struct{}) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func lookupRawFlowRecord(rawApp map[string]any, flowID string) (map[string]any, bool) {
+	resources := rawApp["resources"]
+	switch typed := resources.(type) {
+	case map[string]any:
+		record, ok := typed[flowID].(map[string]any)
+		return record, ok
+	case []any:
+		for _, item := range typed {
+			record, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if valueOrFallback(stringValue(record["id"]), "") == flowID {
+				return record, true
+			}
+		}
+	}
+
+	return nil, false
+}
+
+func normalizeRuntimeTraceMetadata(metadata map[string]any) map[string]any {
+	if len(metadata) == 0 {
+		return map[string]any{}
+	}
+
+	result := cloneStringAnyMap(metadata)
+	result["input"] = normalizeRuntimeTraceMetadataFields(metadata["input"])
+	result["output"] = normalizeRuntimeTraceMetadataFields(metadata["output"])
+	return result
+}
+
+func normalizeRuntimeTraceMetadataFields(value any) []any {
+	items, ok := value.([]any)
+	if !ok {
+		return []any{}
+	}
+
+	result := make([]any, 0, len(items))
+	for _, item := range items {
+		switch typed := item.(type) {
+		case string:
+			result = append(result, map[string]any{
+				"name": typed,
+				"type": "any",
+			})
+		case map[string]any:
+			field := cloneStringAnyMap(typed)
+			if strings.TrimSpace(stringValue(field["type"])) == "" {
+				field["type"] = "any"
+			}
+			result = append(result, field)
+		}
+	}
+	return result
+}
+
+func resolveRuntimeActivityRef(app flogoApp, ref string) (string, bool) {
+	trimmed := strings.TrimSpace(ref)
+	if trimmed == "" {
+		return "", false
+	}
+	if supportedRuntimeActivityRefs[trimmed] {
+		return trimmed, true
+	}
+	if strings.HasPrefix(trimmed, "#") {
+		alias := strings.TrimPrefix(trimmed, "#")
+		for _, entry := range app.Imports {
+			if entry.Alias == alias && supportedRuntimeActivityRefs[entry.Ref] {
+				return entry.Ref, true
+			}
+		}
+	}
+	return "", false
+}
+
+func stripRuntimeTraceScopes(value map[string]interface{}) map[string]any {
+	if len(value) == 0 {
+		return map[string]any{}
+	}
+
+	result := map[string]any{}
+	for key, nested := range value {
+		if strings.HasPrefix(key, "_") {
+			continue
+		}
+		result[key] = makeJSONSafe(nested)
+	}
+	return result
+}
+
+func buildRuntimeTraceOutput(app flogoApp, flowID string, sampleInput map[string]any, runtimeOutput map[string]any, flowEventOutput map[string]any) map[string]any {
+	output := cloneStringAnyMap(sampleInput)
+	for key, value := range flowEventOutput {
+		output[key] = makeJSONSafe(value)
+	}
+	for key, value := range runtimeOutput {
+		output[key] = makeJSONSafe(value)
+	}
+
+	flowIndex := -1
+	for index, candidate := range app.Resources {
+		if candidate.ID == flowID {
+			flowIndex = index
+			break
+		}
+	}
+	if flowIndex < 0 {
+		return output
+	}
+
+	contract := inferFlowContract(app, app.Resources[flowIndex], &[]diagnostic{})
+	if len(contract.Outputs) == 0 {
+		return output
+	}
+
+	filtered := map[string]any{}
+	for _, item := range contract.Outputs {
+		if value, ok := output[item.Name]; ok {
+			filtered[item.Name] = value
+		}
+	}
+	if len(filtered) == 0 {
+		return output
+	}
+	return filtered
 }
 
 func replayFlow(app flogoApp, request replayRequest) replayResponse {
@@ -2361,9 +7417,72 @@ func replayFlow(app flogoApp, request replayRequest) replayResponse {
 		Capture:      request.Capture,
 		ValidateOnly: request.ValidateOnly,
 	}
-	traceResponse := traceFlow(app, traceRequest)
+	var traceResponse runTraceResponse
+	var runtimeFallbackDiagnostics []diagnostic
+	if !request.ValidateOnly {
+		if runtimeTrace, fallbackDiagnostics, ok := traceFlowRuntime(app, traceRequest); ok {
+			if runtimeTrace.RuntimeEvidence != nil {
+				if runtimeTrace.RuntimeEvidence.RuntimeMode == runtimeBackedRESTTriggerTraceMode {
+					runtimeTrace.RuntimeEvidence.RuntimeMode = runtimeBackedRESTReplayMode
+				} else if runtimeTrace.RuntimeEvidence.RuntimeMode == runtimeBackedCLITriggerTraceMode {
+					runtimeTrace.RuntimeEvidence.RuntimeMode = runtimeBackedCLIReplayMode
+				} else if runtimeTrace.RuntimeEvidence.RuntimeMode == runtimeBackedTimerTriggerTraceMode {
+					runtimeTrace.RuntimeEvidence.RuntimeMode = runtimeBackedTimerReplayMode
+				} else {
+					runtimeTrace.RuntimeEvidence.RuntimeMode = runtimeBackedReplayMode
+				}
+			}
+			traceResponse = runTraceResponse{Trace: runtimeTrace}
+			if len(fallbackDiagnostics) > 0 {
+				if traceResponse.Trace != nil {
+					traceResponse.Trace.Diagnostics = dedupeDiagnostics(append(cloneDiagnostics(fallbackDiagnostics), traceResponse.Trace.Diagnostics...))
+					traceResponse.Trace.Summary.Diagnostics = dedupeDiagnostics(append(cloneDiagnostics(fallbackDiagnostics), traceResponse.Trace.Summary.Diagnostics...))
+				}
+			}
+		} else {
+			runtimeFallbackDiagnostics = fallbackDiagnostics
+		}
+	}
+	if traceResponse.Trace == nil && traceResponse.Validation == nil {
+		traceResponse = traceFlowSimulated(app, traceRequest, runtimeFallbackDiagnostics...)
+	}
 	status := "completed"
 	diagnostics := []diagnostic{}
+	if traceResponse.Trace != nil && traceResponse.Trace.EvidenceKind == runTraceEvidenceKindRuntimeBacked {
+		runtimeMode := ""
+		if traceResponse.Trace.RuntimeEvidence != nil {
+			runtimeMode = traceResponse.Trace.RuntimeEvidence.RuntimeMode
+		}
+		if runtimeMode == runtimeBackedRESTReplayMode {
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.replay.rest_runtime_backed",
+				Message:  "Captured runtime-backed replay evidence through the official Flogo REST trigger, handler mapping, flow action, and reply mapping path.",
+				Severity: "info",
+				Path:     "triggers",
+			})
+		} else if runtimeMode == runtimeBackedCLIReplayMode {
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.replay.cli_runtime_backed",
+				Message:  "Captured runtime-backed replay evidence through the official Flogo CLI trigger, command parsing, flow action, and reply mapping path.",
+				Severity: "info",
+				Path:     "triggers",
+			})
+		} else if runtimeMode == runtimeBackedTimerReplayMode {
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.replay.timer_runtime_backed",
+				Message:  "Captured runtime-backed replay evidence through the official Flogo timer trigger and flow action path.",
+				Severity: "info",
+				Path:     "triggers",
+			})
+		} else {
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.replay.runtime_backed",
+				Message:  "Captured runtime-backed replay evidence through the official Flogo Flow/Core path.",
+				Severity: "info",
+				Path:     "resources." + request.FlowID,
+			})
+		}
+	}
 	if traceResponse.Validation != nil {
 		for _, stage := range traceResponse.Validation.Stages {
 			diagnostics = append(diagnostics, stage.Diagnostics...)
@@ -2388,7 +7507,19 @@ func replayFlow(app flogoApp, request replayRequest) replayResponse {
 				OverridesApplied: len(request.Overrides) > 0,
 				Diagnostics:      dedupeDiagnostics(diagnostics),
 			},
-			Trace:      traceResponse.Trace,
+			Trace: traceResponse.Trace,
+			RuntimeEvidence: func() *runtimeEvidence {
+				if traceResponse.Trace == nil && traceResponse.Validation != nil {
+					return nil
+				}
+				if traceResponse.Trace != nil && traceResponse.Trace.RuntimeEvidence != nil {
+					return traceResponse.Trace.RuntimeEvidence
+				}
+				return &runtimeEvidence{
+					Kind:           runTraceEvidenceKindSimulatedFallback,
+					FallbackReason: runtimeFallbackReasonFromDiagnostics(runtimeFallbackDiagnostics),
+				}
+			}(),
 			Validation: traceResponse.Validation,
 		},
 	}
@@ -2405,17 +7536,20 @@ type comparableRunStep struct {
 }
 
 type comparableRun struct {
-	ArtifactID    string
-	Kind          string
-	FlowID        string
-	SummaryStatus string
-	Input         map[string]any
-	Output        map[string]any
-	Error         string
-	StepCount     int
-	Diagnostics   []diagnostic
-	Steps         []comparableRunStep
-	ReplaySummary *replaySummary
+	ArtifactID      string
+	Kind            string
+	FlowID          string
+	SummaryStatus   string
+	Input           map[string]any
+	Output          map[string]any
+	Error           string
+	StepCount       int
+	EvidenceKind    string
+	ComparisonBasis string
+	Diagnostics     []diagnostic
+	Steps           []comparableRunStep
+	RuntimeEvidence *runtimeEvidence
+	ReplaySummary   *replaySummary
 }
 
 func compareRuns(request runComparisonRequest) runComparisonResponse {
@@ -2429,6 +7563,7 @@ func compareRuns(request runComparisonRequest) runComparisonResponse {
 			Severity: "warning",
 		})
 	}
+	comparisonBasis := chooseRunComparisonBasis(left, right)
 
 	if request.ValidateOnly {
 		validation := validationReport{
@@ -2448,17 +7583,66 @@ func compareRuns(request runComparisonRequest) runComparisonResponse {
 
 	result := runComparisonResult{
 		Left: runComparisonArtifactRef{
-			ArtifactID:    left.ArtifactID,
-			Kind:          left.Kind,
-			SummaryStatus: left.SummaryStatus,
-			FlowID:        left.FlowID,
+			ArtifactID:                 left.ArtifactID,
+			Kind:                       left.Kind,
+			SummaryStatus:              left.SummaryStatus,
+			FlowID:                     left.FlowID,
+			EvidenceKind:               left.EvidenceKind,
+			NormalizedStepEvidence:     runtimeEvidenceHasNormalizedSteps(left.RuntimeEvidence),
+			RestTriggerRuntimeEvidence: runtimeEvidenceHasRestTriggerRuntime(left.RuntimeEvidence),
+			RestTriggerRuntimeKind: func() string {
+				if left.RuntimeEvidence == nil || left.RuntimeEvidence.RestTriggerRuntime == nil {
+					return ""
+				}
+				return left.RuntimeEvidence.RestTriggerRuntime.Kind
+			}(),
+			CLITriggerRuntimeEvidence: runtimeEvidenceHasCLITriggerRuntime(left.RuntimeEvidence),
+			CLITriggerRuntimeKind: func() string {
+				if left.RuntimeEvidence == nil || left.RuntimeEvidence.CLITriggerRuntime == nil {
+					return ""
+				}
+				return left.RuntimeEvidence.CLITriggerRuntime.Kind
+			}(),
+			TimerTriggerRuntimeEvidence: runtimeEvidenceHasTimerTriggerRuntime(left.RuntimeEvidence),
+			TimerTriggerRuntimeKind: func() string {
+				if left.RuntimeEvidence == nil || left.RuntimeEvidence.TimerTriggerRuntime == nil {
+					return ""
+				}
+				return left.RuntimeEvidence.TimerTriggerRuntime.Kind
+			}(),
+			ComparisonBasisPreference: left.ComparisonBasis,
 		},
 		Right: runComparisonArtifactRef{
-			ArtifactID:    right.ArtifactID,
-			Kind:          right.Kind,
-			SummaryStatus: right.SummaryStatus,
-			FlowID:        right.FlowID,
+			ArtifactID:                 right.ArtifactID,
+			Kind:                       right.Kind,
+			SummaryStatus:              right.SummaryStatus,
+			FlowID:                     right.FlowID,
+			EvidenceKind:               right.EvidenceKind,
+			NormalizedStepEvidence:     runtimeEvidenceHasNormalizedSteps(right.RuntimeEvidence),
+			RestTriggerRuntimeEvidence: runtimeEvidenceHasRestTriggerRuntime(right.RuntimeEvidence),
+			RestTriggerRuntimeKind: func() string {
+				if right.RuntimeEvidence == nil || right.RuntimeEvidence.RestTriggerRuntime == nil {
+					return ""
+				}
+				return right.RuntimeEvidence.RestTriggerRuntime.Kind
+			}(),
+			CLITriggerRuntimeEvidence: runtimeEvidenceHasCLITriggerRuntime(right.RuntimeEvidence),
+			CLITriggerRuntimeKind: func() string {
+				if right.RuntimeEvidence == nil || right.RuntimeEvidence.CLITriggerRuntime == nil {
+					return ""
+				}
+				return right.RuntimeEvidence.CLITriggerRuntime.Kind
+			}(),
+			TimerTriggerRuntimeEvidence: runtimeEvidenceHasTimerTriggerRuntime(right.RuntimeEvidence),
+			TimerTriggerRuntimeKind: func() string {
+				if right.RuntimeEvidence == nil || right.RuntimeEvidence.TimerTriggerRuntime == nil {
+					return ""
+				}
+				return right.RuntimeEvidence.TimerTriggerRuntime.Kind
+			}(),
+			ComparisonBasisPreference: right.ComparisonBasis,
 		},
+		ComparisonBasis: comparisonBasis,
 		Summary: runComparisonSummaryDiff{
 			StatusChanged:   left.SummaryStatus != right.SummaryStatus,
 			InputDiff:       createRunComparisonValueDiff(left.Input, right.Input),
@@ -2467,8 +7651,10 @@ func compareRuns(request runComparisonRequest) runComparisonResponse {
 			StepCountDiff:   createRunComparisonValueDiff(left.StepCount, right.StepCount),
 			DiagnosticDiffs: buildRunComparisonSummaryDiagnostics(left, right, request.Compare.IncludeDiagnostics),
 		},
-		Steps:       compareRunSteps(left, right, request.Compare),
-		Diagnostics: diagnostics,
+		RestComparison:  buildRunComparisonRESTEnvelopeDiff(left, right),
+		TimerComparison: buildRunComparisonTimerRuntimeDiff(left, right),
+		Steps:           compareRunSteps(left, right, request.Compare),
+		Diagnostics:     diagnostics,
 	}
 
 	return runComparisonResponse{
@@ -2484,16 +7670,19 @@ func normalizeComparableRun(artifact comparableRunArtifactInput) comparableRun {
 		}
 		trace := parseRunTrace(tracePayload)
 		return comparableRun{
-			ArtifactID:    artifact.ArtifactID,
-			Kind:          artifact.Kind,
-			FlowID:        trace.FlowID,
-			SummaryStatus: trace.Summary.Status,
-			Input:         cloneStringAnyMap(trace.Summary.Input),
-			Output:        cloneStringAnyMap(trace.Summary.Output),
-			Error:         trace.Summary.Error,
-			StepCount:     trace.Summary.StepCount,
-			Diagnostics:   dedupeDiagnostics(append(cloneDiagnostics(trace.Summary.Diagnostics), trace.Diagnostics...)),
-			Steps:         mapComparableRunSteps(trace.Steps),
+			ArtifactID:      artifact.ArtifactID,
+			Kind:            artifact.Kind,
+			FlowID:          trace.FlowID,
+			SummaryStatus:   trace.Summary.Status,
+			Input:           preferRecordedFlowInputs(trace),
+			Output:          preferRecordedFlowOutputs(trace),
+			Error:           trace.Summary.Error,
+			StepCount:       preferRecordedStepCount(trace),
+			EvidenceKind:    trace.EvidenceKind,
+			ComparisonBasis: runComparisonBasisForTrace(trace),
+			Diagnostics:     dedupeDiagnostics(append(cloneDiagnostics(trace.Summary.Diagnostics), trace.Diagnostics...)),
+			Steps:           mapComparableEvidenceSteps(trace),
+			RuntimeEvidence: trace.RuntimeEvidence,
 		}
 	}
 
@@ -2502,37 +7691,196 @@ func normalizeComparableRun(artifact comparableRunArtifactInput) comparableRun {
 		fail(fmt.Sprintf("artifact %q does not contain a replay result payload", artifact.ArtifactID))
 	}
 	replay := parseReplayResult(resultPayload)
+	runtimeEvidence := replayRuntimeEvidence(replay)
 	input := cloneStringAnyMap(replay.Summary.EffectiveInput)
-	output := map[string]any{}
+	if runtimeEvidence != nil {
+		if recordedInput := recorderFlowInputs(runtimeEvidence.FlowStart); len(recordedInput) > 0 {
+			input = recordedInput
+		} else if recordedInput := recorderFlowInputs(runtimeEvidence.FlowDone); len(recordedInput) > 0 {
+			input = recordedInput
+		}
+	}
+	output := recorderFlowOutputs(nil)
+	if runtimeEvidence != nil {
+		output = recorderFlowOutputs(runtimeEvidence.FlowDone)
+		if len(output) == 0 {
+			output = recorderFlowOutputs(runtimeEvidence.FlowStart)
+		}
+	}
 	flowID := replay.Summary.FlowID
 	summaryStatus := replay.Summary.Status
 	stepCount := 0
+	if runtimeEvidence != nil {
+		if len(runtimeEvidence.Steps) > stepCount {
+			stepCount = len(runtimeEvidence.Steps)
+		}
+		if len(runtimeEvidence.Snapshots) > stepCount {
+			stepCount = len(runtimeEvidence.Snapshots)
+		}
+		if len(runtimeEvidence.NormalizedSteps) > stepCount {
+			stepCount = len(runtimeEvidence.NormalizedSteps)
+		}
+	}
 	diagnostics := cloneDiagnostics(replay.Summary.Diagnostics)
 	steps := []comparableRunStep{}
 	errorValue := ""
 	if replay.Trace != nil {
-		input = cloneStringAnyMap(replay.Trace.Summary.Input)
-		output = cloneStringAnyMap(replay.Trace.Summary.Output)
+		input = preferRecordedFlowInputs(*replay.Trace)
+		output = preferRecordedFlowOutputs(*replay.Trace)
 		flowID = replay.Trace.FlowID
 		summaryStatus = replay.Trace.Summary.Status
-		stepCount = replay.Trace.Summary.StepCount
+		stepCount = preferRecordedStepCount(*replay.Trace)
 		errorValue = replay.Trace.Summary.Error
 		diagnostics = append(diagnostics, replay.Trace.Summary.Diagnostics...)
 		diagnostics = append(diagnostics, replay.Trace.Diagnostics...)
-		steps = mapComparableRunSteps(replay.Trace.Steps)
+		steps = mapComparableEvidenceSteps(*replay.Trace)
+	}
+	if len(output) == 0 {
+		if runtimeEvidence := replayRuntimeEvidence(replay); runtimeEvidence != nil {
+			if recordedOutput := recorderFlowOutputs(runtimeEvidence.FlowDone); len(recordedOutput) > 0 {
+				output = recordedOutput
+			} else if recordedOutput := recorderFlowOutputs(runtimeEvidence.FlowStart); len(recordedOutput) > 0 {
+				output = recordedOutput
+			}
+			if len(input) == 0 {
+				if recordedInput := recorderFlowInputs(runtimeEvidence.FlowStart); len(recordedInput) > 0 {
+					input = recordedInput
+				}
+			}
+			if stepCount == 0 {
+				stepCount = len(runtimeEvidence.Steps)
+				if len(runtimeEvidence.Snapshots) > stepCount {
+					stepCount = len(runtimeEvidence.Snapshots)
+				}
+				if len(runtimeEvidence.NormalizedSteps) > stepCount {
+					stepCount = len(runtimeEvidence.NormalizedSteps)
+				}
+			}
+		}
 	}
 	return comparableRun{
-		ArtifactID:    artifact.ArtifactID,
-		Kind:          artifact.Kind,
-		FlowID:        flowID,
-		SummaryStatus: summaryStatus,
-		Input:         input,
-		Output:        output,
-		Error:         errorValue,
-		StepCount:     stepCount,
-		Diagnostics:   dedupeDiagnostics(diagnostics),
-		Steps:         steps,
-		ReplaySummary: &replay.Summary,
+		ArtifactID:      artifact.ArtifactID,
+		Kind:            artifact.Kind,
+		FlowID:          flowID,
+		SummaryStatus:   summaryStatus,
+		Input:           input,
+		Output:          output,
+		Error:           errorValue,
+		StepCount:       stepCount,
+		EvidenceKind:    replayTraceEvidenceKind(replay),
+		ComparisonBasis: runComparisonBasisForReplay(replay),
+		Diagnostics:     dedupeDiagnostics(diagnostics),
+		Steps:           steps,
+		RuntimeEvidence: runtimeEvidence,
+		ReplaySummary:   &replay.Summary,
+	}
+}
+
+func preferRecordedFlowInputs(trace runTrace) map[string]any {
+	if trace.RuntimeEvidence != nil {
+		if inputs := recorderFlowInputs(trace.RuntimeEvidence.FlowStart); len(inputs) > 0 {
+			return inputs
+		}
+		if inputs := recorderFlowInputs(trace.RuntimeEvidence.FlowDone); len(inputs) > 0 {
+			return inputs
+		}
+	}
+	return cloneStringAnyMap(trace.Summary.Input)
+}
+
+func preferRecordedFlowOutputs(trace runTrace) map[string]any {
+	if trace.RuntimeEvidence != nil {
+		if outputs := recorderFlowOutputs(trace.RuntimeEvidence.FlowDone); len(outputs) > 0 {
+			return outputs
+		}
+		if outputs := recorderFlowOutputs(trace.RuntimeEvidence.FlowStart); len(outputs) > 0 {
+			return outputs
+		}
+	}
+	return cloneStringAnyMap(trace.Summary.Output)
+}
+
+func preferRecordedStepCount(trace runTrace) int {
+	stepCount := trace.Summary.StepCount
+	if trace.RuntimeEvidence != nil {
+		if len(trace.RuntimeEvidence.Steps) > stepCount {
+			stepCount = len(trace.RuntimeEvidence.Steps)
+		}
+		if len(trace.RuntimeEvidence.Snapshots) > stepCount {
+			stepCount = len(trace.RuntimeEvidence.Snapshots)
+		}
+		if len(trace.RuntimeEvidence.NormalizedSteps) > stepCount {
+			stepCount = len(trace.RuntimeEvidence.NormalizedSteps)
+		}
+	}
+	return stepCount
+}
+
+func runComparisonBasisForTrace(trace runTrace) string {
+	if runtimeEvidenceHasRestTriggerRuntime(trace.RuntimeEvidence) {
+		return "rest_runtime_envelope"
+	}
+	if runtimeEvidenceHasTimerTriggerRuntime(trace.RuntimeEvidence) {
+		return "timer_runtime_startup"
+	}
+	if runtimeEvidenceHasNormalizedSteps(trace.RuntimeEvidence) {
+		return "normalized_runtime_evidence"
+	}
+	if trace.RuntimeEvidence != nil && trace.RuntimeEvidence.RecorderBacked {
+		return "recorder_backed"
+	}
+	if trace.EvidenceKind == runTraceEvidenceKindRuntimeBacked {
+		return "runtime_backed"
+	}
+	return "simulated_fallback"
+}
+
+func replayTraceEvidenceKind(replay replayResult) string {
+	if replay.RuntimeEvidence != nil && strings.TrimSpace(replay.RuntimeEvidence.Kind) != "" {
+		return replay.RuntimeEvidence.Kind
+	}
+	if replay.Trace == nil {
+		return ""
+	}
+	return replay.Trace.EvidenceKind
+}
+
+func runComparisonBasisForReplay(replay replayResult) string {
+	runtimeEvidence := replayRuntimeEvidence(replay)
+	if runtimeEvidenceHasRestTriggerRuntime(runtimeEvidence) {
+		return "rest_runtime_envelope"
+	}
+	if runtimeEvidenceHasTimerTriggerRuntime(runtimeEvidence) {
+		return "timer_runtime_startup"
+	}
+	if runtimeEvidenceHasNormalizedSteps(runtimeEvidence) {
+		return "normalized_runtime_evidence"
+	}
+	if runtimeEvidence != nil && runtimeEvidence.RecorderBacked {
+		return "recorder_backed"
+	}
+	if replay.Trace == nil {
+		return "simulated_fallback"
+	}
+	return runComparisonBasisForTrace(*replay.Trace)
+}
+
+func chooseRunComparisonBasis(left, right comparableRun) string {
+	switch {
+	case restRuntimeEnvelopeComparable(left, right):
+		return "rest_runtime_envelope"
+	case timerRuntimeStartupComparable(left, right):
+		return "timer_runtime_startup"
+	case left.ComparisonBasis == "normalized_runtime_evidence" && right.ComparisonBasis == "normalized_runtime_evidence":
+		return "normalized_runtime_evidence"
+	case comparisonBasisUsesRecorderEvidence(left.ComparisonBasis) && comparisonBasisUsesRecorderEvidence(right.ComparisonBasis):
+		return "recorder_backed"
+	case comparisonBasisUsesRecorderEvidence(left.ComparisonBasis) || comparisonBasisUsesRecorderEvidence(right.ComparisonBasis):
+		return "recorder_preferred"
+	case left.ComparisonBasis == "runtime_backed" || right.ComparisonBasis == "runtime_backed":
+		return "runtime_backed"
+	default:
+		return "simulated_fallback"
 	}
 }
 
@@ -2552,10 +7900,133 @@ func mapComparableRunSteps(steps []runTraceTaskStep) []comparableRunStep {
 	return items
 }
 
+func mapComparableNormalizedSteps(steps []runtimeNormalizedStep) []comparableRunStep {
+	items := make([]comparableRunStep, 0, len(steps))
+	for _, step := range steps {
+		flowState := map[string]any{}
+		if len(step.FlowStateBefore) > 0 {
+			flowState["before"] = cloneStringAnyMap(step.FlowStateBefore)
+		}
+		if len(step.FlowStateAfter) > 0 {
+			flowState["after"] = cloneStringAnyMap(step.FlowStateAfter)
+		}
+		if len(step.StateDelta) > 0 {
+			flowState["delta"] = cloneStringAnyMap(step.StateDelta)
+		}
+
+		activityState := map[string]any{}
+		if len(step.DeclaredInputMappings) > 0 {
+			activityState["declaredInputMappings"] = cloneStringAnyMap(step.DeclaredInputMappings)
+		}
+		if len(step.DeclaredOutputMappings) > 0 {
+			activityState["declaredOutputMappings"] = cloneStringAnyMap(step.DeclaredOutputMappings)
+		}
+		if len(step.EvidenceSource) > 0 {
+			activityState["evidenceSource"] = cloneStringSliceMap(step.EvidenceSource)
+		}
+		if len(step.UnavailableFields) > 0 {
+			activityState["unavailableFields"] = append([]string{}, step.UnavailableFields...)
+		}
+
+		items = append(items, comparableRunStep{
+			TaskID:        step.TaskID,
+			Status:        step.Status,
+			Input:         cloneStringAnyMap(step.ResolvedInputs),
+			Output:        cloneStringAnyMap(step.ProducedOutputs),
+			FlowState:     flowState,
+			ActivityState: activityState,
+			Diagnostics:   cloneDiagnostics(step.Diagnostics),
+		})
+	}
+	return items
+}
+
+func mapComparableEvidenceSteps(trace runTrace) []comparableRunStep {
+	if runtimeEvidenceHasNormalizedSteps(trace.RuntimeEvidence) {
+		return mapComparableNormalizedSteps(trace.RuntimeEvidence.NormalizedSteps)
+	}
+	return mapComparableRunSteps(trace.Steps)
+}
+
+func comparisonBasisUsesRecorderEvidence(basis string) bool {
+	return basis == "normalized_runtime_evidence" ||
+		basis == "recorder_backed" ||
+		basis == "rest_runtime_envelope" ||
+		basis == "timer_runtime_startup"
+}
+
+func recorderFlowInputs(state map[string]any) map[string]any {
+	if len(state) == 0 {
+		return map[string]any{}
+	}
+	if inputs, ok := state["flow_inputs"].(map[string]any); ok {
+		return cloneStringAnyMap(inputs)
+	}
+	return map[string]any{}
+}
+
+func recorderFlowOutputs(state map[string]any) map[string]any {
+	if len(state) == 0 {
+		return map[string]any{}
+	}
+	if outputs, ok := state["flow_outputs"].(map[string]any); ok {
+		return cloneStringAnyMap(outputs)
+	}
+	return map[string]any{}
+}
+
 func buildRunComparisonSummaryDiagnostics(left, right comparableRun, includeDiagnostics bool) []diagnostic {
 	diagnostics := []diagnostic{}
 	if !includeDiagnostics {
 		return diagnostics
+	}
+	if restRuntimeEnvelopeComparable(left, right) && left.RuntimeEvidence != nil && right.RuntimeEvidence != nil {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.run_comparison.rest_runtime_envelope_preferred",
+			Message:  "Compared REST runtime-backed request, mapped flow input, and reply envelopes because both artifacts include REST trigger runtime evidence.",
+			Severity: "info",
+			Details: map[string]any{
+				"leftKind":  left.RuntimeEvidence.RestTriggerRuntime.Kind,
+				"rightKind": right.RuntimeEvidence.RestTriggerRuntime.Kind,
+			},
+		})
+	}
+	if timerRuntimeStartupComparable(left, right) && left.RuntimeEvidence != nil && right.RuntimeEvidence != nil {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.run_comparison.timer_runtime_startup_preferred",
+			Message:  "Compared timer trigger startup evidence, schedule settings, and runtime start/output capture using the helper-supported timer slice.",
+			Severity: "info",
+			Details: map[string]any{
+				"leftSettingsObserved":  left.RuntimeEvidence.TimerTriggerRuntime.Settings != nil,
+				"rightSettingsObserved": right.RuntimeEvidence.TimerTriggerRuntime.Settings != nil,
+				"leftTickObserved":      left.RuntimeEvidence.TimerTriggerRuntime.Tick != nil,
+				"rightTickObserved":     right.RuntimeEvidence.TimerTriggerRuntime.Tick != nil,
+			},
+		})
+	}
+	if left.ComparisonBasis == "normalized_runtime_evidence" && right.ComparisonBasis == "normalized_runtime_evidence" && left.RuntimeEvidence != nil && right.RuntimeEvidence != nil {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.run_comparison.normalized_runtime_evidence_preferred",
+			Message:  "Compared normalized runtime-backed step evidence derived from task events, Flow recorder state, and app metadata.",
+			Severity: "info",
+			Details: map[string]any{
+				"leftNormalizedSteps":  len(left.RuntimeEvidence.NormalizedSteps),
+				"rightNormalizedSteps": len(right.RuntimeEvidence.NormalizedSteps),
+			},
+		})
+	}
+	if left.ComparisonBasis == "recorder_backed" && right.ComparisonBasis == "recorder_backed" && left.RuntimeEvidence != nil && right.RuntimeEvidence != nil {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.run_comparison.recorder_evidence_preferred",
+			Message:  "Compared recorder-backed runtime artifacts using Flow recorder state where available.",
+			Severity: "info",
+			Details: map[string]any{
+				"leftSnapshots":      len(left.RuntimeEvidence.Snapshots),
+				"rightSnapshots":     len(right.RuntimeEvidence.Snapshots),
+				"leftRecordedSteps":  len(left.RuntimeEvidence.Steps),
+				"rightRecordedSteps": len(right.RuntimeEvidence.Steps),
+			},
+		})
 	}
 	if !runComparisonValuesEqual(left.Diagnostics, right.Diagnostics) {
 		diagnostics = append(diagnostics, diagnostic{
@@ -2590,7 +8061,119 @@ func buildRunComparisonSummaryDiagnostics(left, right comparableRun, includeDiag
 			},
 		})
 	}
+	if left.RuntimeEvidence != nil && right.RuntimeEvidence != nil && left.RuntimeEvidence.RecorderBacked && right.RuntimeEvidence.RecorderBacked && len(left.RuntimeEvidence.Snapshots) != len(right.RuntimeEvidence.Snapshots) {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.run_comparison.recorder_snapshot_count_changed",
+			Message:  "Recorder snapshot counts differ between the compared runs.",
+			Severity: "info",
+			Details: map[string]any{
+				"left":  len(left.RuntimeEvidence.Snapshots),
+				"right": len(right.RuntimeEvidence.Snapshots),
+			},
+		})
+	}
+	if left.RuntimeEvidence != nil && right.RuntimeEvidence != nil && left.RuntimeEvidence.RecorderBacked && right.RuntimeEvidence.RecorderBacked && len(left.RuntimeEvidence.Steps) != len(right.RuntimeEvidence.Steps) {
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.run_comparison.recorder_step_count_changed",
+			Message:  "Recorder step counts differ between the compared runs.",
+			Severity: "info",
+			Details: map[string]any{
+				"left":  len(left.RuntimeEvidence.Steps),
+				"right": len(right.RuntimeEvidence.Steps),
+			},
+		})
+	}
 	return diagnostics
+}
+
+func restRuntimeEnvelopeComparable(left, right comparableRun) bool {
+	return runtimeEvidenceHasRestTriggerRuntime(left.RuntimeEvidence) &&
+		runtimeEvidenceHasRestTriggerRuntime(right.RuntimeEvidence)
+}
+
+func timerRuntimeStartupComparable(left, right comparableRun) bool {
+	return runtimeEvidenceHasTimerTriggerRuntime(left.RuntimeEvidence) &&
+		runtimeEvidenceHasTimerTriggerRuntime(right.RuntimeEvidence)
+}
+
+func buildRunComparisonTimerRuntimeDiff(left, right comparableRun) *runComparisonTimerRuntimeDiff {
+	if !timerRuntimeStartupComparable(left, right) {
+		return nil
+	}
+
+	leftTimer := left.RuntimeEvidence.TimerTriggerRuntime
+	rightTimer := right.RuntimeEvidence.TimerTriggerRuntime
+	settingsDiff := createRunComparisonValueDiff(leftTimer.Settings, rightTimer.Settings)
+	flowInputDiff := createRunComparisonValueDiff(zeroMap(leftTimer.FlowInput), zeroMap(rightTimer.FlowInput))
+	flowOutputDiff := createRunComparisonValueDiff(zeroMap(leftTimer.FlowOutput), zeroMap(rightTimer.FlowOutput))
+	tickDiff := createRunComparisonValueDiff(leftTimer.Tick, rightTimer.Tick)
+
+	return &runComparisonTimerRuntimeDiff{
+		ComparisonBasis:    "timer_runtime_startup",
+		RuntimeMode:        valueOrFallback(left.RuntimeEvidence.RuntimeMode, right.RuntimeEvidence.RuntimeMode),
+		SettingsCompared:   true,
+		FlowInputCompared:  true,
+		FlowOutputCompared: true,
+		TickCompared:       true,
+		SettingsDiff:       &settingsDiff,
+		FlowInputDiff:      &flowInputDiff,
+		FlowOutputDiff:     &flowOutputDiff,
+		TickDiff:           &tickDiff,
+		UnsupportedFields:  dedupeStrings(append(cloneStringSlice(leftTimer.UnavailableFields), rightTimer.UnavailableFields...)),
+		Diagnostics:        dedupeDiagnostics(append(cloneDiagnostics(leftTimer.Diagnostics), rightTimer.Diagnostics...)),
+	}
+}
+
+func buildRunComparisonRESTEnvelopeDiff(left, right comparableRun) *runComparisonRESTEnvelopeDiff {
+	if !restRuntimeEnvelopeComparable(left, right) {
+		return nil
+	}
+
+	leftREST := left.RuntimeEvidence.RestTriggerRuntime
+	rightREST := right.RuntimeEvidence.RestTriggerRuntime
+	diff := &runComparisonRESTEnvelopeDiff{
+		UnsupportedFields: []string{},
+	}
+
+	if leftREST.Request != nil && rightREST.Request != nil {
+		diff.RequestEnvelopeCompared = true
+		diff.Request = &runComparisonRESTRequestDiff{
+			MethodDiff:      createRunComparisonValueDiff(emptyStringToNil(leftREST.Request.Method), emptyStringToNil(rightREST.Request.Method)),
+			PathDiff:        createRunComparisonValueDiff(emptyStringToNil(leftREST.Request.Path), emptyStringToNil(rightREST.Request.Path)),
+			QueryParamsDiff: createRunComparisonValueDiff(zeroMap(leftREST.Request.QueryParams), zeroMap(rightREST.Request.QueryParams)),
+			HeadersDiff:     createRunComparisonValueDiff(zeroMap(leftREST.Request.Headers), zeroMap(rightREST.Request.Headers)),
+			BodyDiff:        createRunComparisonValueDiff(leftREST.Request.Body, rightREST.Request.Body),
+			PathParamsDiff:  createRunComparisonValueDiff(zeroMap(leftREST.Request.PathParams), zeroMap(rightREST.Request.PathParams)),
+		}
+	} else {
+		diff.UnsupportedFields = append(diff.UnsupportedFields, "requestEnvelope")
+	}
+
+	if leftREST.FlowInput != nil && rightREST.FlowInput != nil {
+		diff.FlowInputCompared = true
+		value := createRunComparisonValueDiff(zeroMap(leftREST.FlowInput), zeroMap(rightREST.FlowInput))
+		diff.FlowInputDiff = &value
+	} else {
+		diff.UnsupportedFields = append(diff.UnsupportedFields, "mappedFlowInput")
+	}
+
+	if leftREST.Reply != nil && rightREST.Reply != nil {
+		diff.ReplyEnvelopeCompared = true
+		diff.Reply = &runComparisonRESTReplyDiff{
+			StatusDiff:  createRunComparisonValueDiff(leftREST.Reply.Status, rightREST.Reply.Status),
+			BodyDiff:    createRunComparisonValueDiff(leftREST.Reply.Body, rightREST.Reply.Body),
+			DataDiff:    createRunComparisonValueDiff(leftREST.Reply.Data, rightREST.Reply.Data),
+			HeadersDiff: createRunComparisonValueDiff(zeroMap(leftREST.Reply.Headers), zeroMap(rightREST.Reply.Headers)),
+			CookiesDiff: createRunComparisonValueDiff(zeroMap(leftREST.Reply.Cookies), zeroMap(rightREST.Reply.Cookies)),
+		}
+	} else {
+		diff.UnsupportedFields = append(diff.UnsupportedFields, "replyEnvelope")
+	}
+
+	diff.UnsupportedFields = dedupeStrings(append(diff.UnsupportedFields,
+		append(cloneStringSlice(leftREST.UnavailableFields), rightREST.UnavailableFields...)...,
+	))
+	return diff
 }
 
 func compareRunSteps(left, right comparableRun, options runComparisonOptions) []runComparisonStepDiff {
@@ -2760,6 +8343,129 @@ func cloneDiagnostics(values []diagnostic) []diagnostic {
 		items = append(items, item)
 	}
 	return items
+}
+
+func cloneMapSlice(values []map[string]any) []map[string]any {
+	if len(values) == 0 {
+		return []map[string]any{}
+	}
+	items := make([]map[string]any, 0, len(values))
+	for _, value := range values {
+		items = append(items, cloneStringAnyMap(value))
+	}
+	return items
+}
+
+func cloneStringSliceMap(values map[string][]string) map[string]any {
+	if len(values) == 0 {
+		return map[string]any{}
+	}
+	result := map[string]any{}
+	for key, entries := range values {
+		cloned := make([]any, 0, len(entries))
+		for _, entry := range entries {
+			cloned = append(cloned, entry)
+		}
+		result[key] = cloned
+	}
+	return result
+}
+
+func dedupeStrings(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		result = append(result, trimmed)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func flowStateToMap(state *flowstate.FlowState) map[string]any {
+	if state == nil {
+		return map[string]any{}
+	}
+	return toJSONMap(state)
+}
+
+func snapshotToMap(snapshot *flowstate.Snapshot) map[string]any {
+	if snapshot == nil {
+		return map[string]any{}
+	}
+	return toJSONMap(snapshot)
+}
+
+func stepToMap(step *flowstate.Step) map[string]any {
+	if step == nil {
+		return map[string]any{}
+	}
+	return toJSONMap(step)
+}
+
+func runtimeTaskEventToMap(event flowevent.TaskEvent) map[string]any {
+	status := ""
+	switch event.TaskStatus() {
+	case flowevent.SCHEDULED:
+		status = "scheduled"
+	case flowevent.STARTED:
+		status = "started"
+	case flowevent.COMPLETED:
+		status = "completed"
+	case flowevent.FAILED:
+		status = "failed"
+	case flowevent.CANCELLED:
+		status = "cancelled"
+	case flowevent.SKIPPED:
+		status = "skipped"
+	default:
+		status = fmt.Sprintf("%v", event.TaskStatus())
+	}
+
+	item := map[string]any{
+		"taskId":      strings.TrimSpace(event.TaskInstanceId()),
+		"taskName":    event.TaskName(),
+		"activityRef": event.ActivityRef(),
+		"type":        valueOrFallback(event.TaskType(), "activity"),
+		"status":      status,
+		"at":          event.Time().UTC().Format(time.RFC3339Nano),
+	}
+	if input := stripRuntimeTraceScopes(event.TaskInput()); len(input) > 0 {
+		item["input"] = input
+	}
+	if output := stripRuntimeTraceScopes(event.TaskOutput()); len(output) > 0 {
+		item["output"] = output
+	}
+	if event.TaskError() != nil {
+		item["error"] = event.TaskError().Error()
+	}
+	return item
+}
+
+func toJSONMap(value any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	bytes, err := json.Marshal(value)
+	if err != nil {
+		return map[string]any{
+			"error": err.Error(),
+		}
+	}
+	var result map[string]any
+	if err := json.Unmarshal(bytes, &result); err != nil {
+		return map[string]any{
+			"error": err.Error(),
+		}
+	}
+	return result
 }
 
 func replayInputSource(request replayRequest) string {
@@ -3050,6 +8756,7 @@ type triggerBindingOperation struct {
 	NextApp      flogoApp
 	Plan         triggerBindingPlan
 	PatchSummary string
+	Validation   validationReport
 }
 
 type triggerBindingFailure struct {
@@ -3072,10 +8779,7 @@ func bindTrigger(app flogoApp, request triggerBindingRequest) triggerBindingResp
 			Applied:      !request.ValidateOnly,
 			Plan:         operation.Plan,
 			PatchSummary: operation.PatchSummary,
-			Validation: &simpleValidationReport{
-				Ok:     true,
-				Stages: []map[string]any{},
-			},
+			Validation:   &operation.Validation,
 		},
 	}
 
@@ -3147,6 +8851,14 @@ func buildTriggerBindingOperation(app flogoApp, request triggerBindingRequest) (
 
 	trigger := createBindingTrigger(triggerID, triggerRef, handlerName, request.FlowID, request.Profile, mappings)
 	nextApp := applyTriggerBindingPlanToApp(app, triggerAlias, triggerImportRef, trigger, existing)
+	validation := validateFlogoApp(nextApp)
+	if !validation.Ok {
+		diagnostics := flattenValidationDiagnostics(validation)
+		return triggerBindingOperation{}, triggerBindingFailure{
+			Message:     fmt.Sprintf("Generated %s trigger binding is not valid", request.Profile.Kind),
+			Diagnostics: diagnostics,
+		}
+	}
 
 	plan := triggerBindingPlan{
 		FlowID:      request.FlowID,
@@ -3167,6 +8879,7 @@ func buildTriggerBindingOperation(app flogoApp, request triggerBindingRequest) (
 		NextApp:      nextApp,
 		Plan:         plan,
 		PatchSummary: summarizeTriggerBindingPatch(app, nextApp, trigger.ID),
+		Validation:   validation,
 	}, nil
 }
 
@@ -3181,10 +8894,7 @@ func extractSubflow(app flogoApp, request subflowExtractionRequest) subflowExtra
 			Applied:      !request.ValidateOnly,
 			Plan:         operation.Plan,
 			PatchSummary: operation.PatchSummary,
-			Validation: &simpleValidationReport{
-				Ok:     true,
-				Stages: []map[string]any{},
-			},
+			Validation:   &operation.Validation,
 		},
 	}
 	if !request.ValidateOnly {
@@ -3204,10 +8914,7 @@ func inlineSubflow(app flogoApp, request subflowInliningRequest) subflowInlining
 			Applied:      !request.ValidateOnly,
 			Plan:         operation.Plan,
 			PatchSummary: operation.PatchSummary,
-			Validation: &simpleValidationReport{
-				Ok:     true,
-				Stages: []map[string]any{},
-			},
+			Validation:   &operation.Validation,
 		},
 	}
 	if !request.ValidateOnly {
@@ -3220,16 +8927,19 @@ type subflowExtractionOperation struct {
 	NextApp      flogoApp
 	Plan         subflowExtractionPlan
 	PatchSummary string
+	Validation   validationReport
 }
 
 type subflowInliningOperation struct {
 	NextApp      flogoApp
 	Plan         subflowInliningPlan
 	PatchSummary string
+	Validation   validationReport
 }
 
 type subflowFailure struct {
-	Message string
+	Message     string
+	Diagnostics []diagnostic
 }
 
 func (failure subflowFailure) Error() string {
@@ -3240,28 +8950,33 @@ type iteratorSynthesisOperation struct {
 	NextApp      flogoApp
 	Plan         iteratorSynthesisPlan
 	PatchSummary string
+	Validation   validationReport
 }
 
 type retryPolicyOperation struct {
 	NextApp      flogoApp
 	Plan         retryPolicyPlan
 	PatchSummary string
+	Validation   validationReport
 }
 
 type doWhileSynthesisOperation struct {
 	NextApp      flogoApp
 	Plan         doWhileSynthesisPlan
 	PatchSummary string
+	Validation   validationReport
 }
 
 type errorPathTemplateOperation struct {
 	NextApp      flogoApp
 	Plan         errorPathTemplatePlan
 	PatchSummary string
+	Validation   validationReport
 }
 
 type controlFlowFailure struct {
-	Message string
+	Message     string
+	Diagnostics []diagnostic
 }
 
 func (failure controlFlowFailure) Error() string {
@@ -3373,10 +9088,19 @@ func buildSubflowExtractionOperation(app flogoApp, request subflowExtractionRequ
 		Warnings:    dedupeDiagnostics(warnings),
 	}
 
+	validation := validateFlogoApp(nextApp)
+	if !validation.Ok {
+		return subflowExtractionOperation{}, subflowFailure{
+			Message:     fmt.Sprintf("Generated subflow extraction for flow %q is not valid", parentFlow.ID),
+			Diagnostics: flattenValidationDiagnostics(validation),
+		}
+	}
+
 	return subflowExtractionOperation{
 		NextApp:      nextApp,
 		Plan:         plan,
 		PatchSummary: summarizeSubflowPatch(app, nextApp, "extract"),
+		Validation:   validation,
 	}, nil
 }
 
@@ -3449,6 +9173,14 @@ func buildSubflowInliningOperation(app flogoApp, request subflowInliningRequest)
 		}
 	}
 
+	validation := validateFlogoApp(nextApp)
+	if !validation.Ok {
+		return subflowInliningOperation{}, subflowFailure{
+			Message:     fmt.Sprintf("Generated subflow inlining for flow %q is not valid", parentFlow.ID),
+			Diagnostics: flattenValidationDiagnostics(validation),
+		}
+	}
+
 	return subflowInliningOperation{
 		NextApp: nextApp,
 		Plan: subflowInliningPlan{
@@ -3460,6 +9192,7 @@ func buildSubflowInliningOperation(app flogoApp, request subflowInliningRequest)
 			Warnings:         warnings,
 		},
 		PatchSummary: summarizeSubflowPatch(app, nextApp, "inline"),
+		Validation:   validation,
 	}, nil
 }
 
@@ -3474,10 +9207,7 @@ func addIterator(app flogoApp, request iteratorSynthesisRequest) iteratorSynthes
 			Applied:      !request.ValidateOnly,
 			Plan:         operation.Plan,
 			PatchSummary: operation.PatchSummary,
-			Validation: &simpleValidationReport{
-				Ok:     true,
-				Stages: []map[string]any{},
-			},
+			Validation:   &operation.Validation,
 		},
 	}
 	if !request.ValidateOnly {
@@ -3497,10 +9227,7 @@ func addRetryPolicy(app flogoApp, request retryPolicyRequest) retryPolicyRespons
 			Applied:      !request.ValidateOnly,
 			Plan:         operation.Plan,
 			PatchSummary: operation.PatchSummary,
-			Validation: &simpleValidationReport{
-				Ok:     true,
-				Stages: []map[string]any{},
-			},
+			Validation:   &operation.Validation,
 		},
 	}
 	if !request.ValidateOnly {
@@ -3520,10 +9247,7 @@ func addDoWhile(app flogoApp, request doWhileSynthesisRequest) doWhileSynthesisR
 			Applied:      !request.ValidateOnly,
 			Plan:         operation.Plan,
 			PatchSummary: operation.PatchSummary,
-			Validation: &simpleValidationReport{
-				Ok:     true,
-				Stages: []map[string]any{},
-			},
+			Validation:   &operation.Validation,
 		},
 	}
 	if !request.ValidateOnly {
@@ -3543,10 +9267,7 @@ func addErrorPath(app flogoApp, request errorPathTemplateRequest) errorPathTempl
 			Applied:      !request.ValidateOnly,
 			Plan:         operation.Plan,
 			PatchSummary: operation.PatchSummary,
-			Validation: &simpleValidationReport{
-				Ok:     true,
-				Stages: []map[string]any{},
-			},
+			Validation:   &operation.Validation,
 		},
 	}
 	if !request.ValidateOnly {
@@ -3588,6 +9309,14 @@ func buildIteratorSynthesisOperation(app flogoApp, request iteratorSynthesisRequ
 	}
 	nextApp.Resources[flowIndex].Tasks[taskIndex] = nextTask
 
+	validation := validateFlogoApp(nextApp)
+	if !validation.Ok {
+		return iteratorSynthesisOperation{}, controlFlowFailure{
+			Message:     fmt.Sprintf("Generated iterator task for %q is not valid", request.TaskID),
+			Diagnostics: flattenValidationDiagnostics(validation),
+		}
+	}
+
 	return iteratorSynthesisOperation{
 		NextApp: nextApp,
 		Plan: iteratorSynthesisPlan{
@@ -3599,6 +9328,7 @@ func buildIteratorSynthesisOperation(app flogoApp, request iteratorSynthesisRequ
 			Warnings:     []diagnostic{},
 		},
 		PatchSummary: fmt.Sprintf("Converted task %q in flow %q to iterator", request.TaskID, request.FlowID),
+		Validation:   validation,
 	}, nil
 }
 
@@ -3633,6 +9363,14 @@ func buildRetryPolicyOperation(app flogoApp, request retryPolicyRequest) (retryP
 	}
 	nextApp.Resources[flowIndex].Tasks[taskIndex] = nextTask
 
+	validation := validateFlogoApp(nextApp)
+	if !validation.Ok {
+		return retryPolicyOperation{}, controlFlowFailure{
+			Message:     fmt.Sprintf("Generated retryOnError settings for %q are not valid", request.TaskID),
+			Diagnostics: flattenValidationDiagnostics(validation),
+		}
+	}
+
 	return retryPolicyOperation{
 		NextApp: nextApp,
 		Plan: retryPolicyPlan{
@@ -3646,6 +9384,7 @@ func buildRetryPolicyOperation(app flogoApp, request retryPolicyRequest) (retryP
 			Warnings:    []diagnostic{},
 		},
 		PatchSummary: fmt.Sprintf("Added retryOnError to task %q in flow %q", request.TaskID, request.FlowID),
+		Validation:   validation,
 	}, nil
 }
 
@@ -3685,6 +9424,14 @@ func buildDoWhileSynthesisOperation(app flogoApp, request doWhileSynthesisReques
 	}
 	nextApp.Resources[flowIndex].Tasks[taskIndex] = nextTask
 
+	validation := validateFlogoApp(nextApp)
+	if !validation.Ok {
+		return doWhileSynthesisOperation{}, controlFlowFailure{
+			Message:     fmt.Sprintf("Generated doWhile task for %q is not valid", request.TaskID),
+			Diagnostics: flattenValidationDiagnostics(validation),
+		}
+	}
+
 	return doWhileSynthesisOperation{
 		NextApp: nextApp,
 		Plan: doWhileSynthesisPlan{
@@ -3696,6 +9443,7 @@ func buildDoWhileSynthesisOperation(app flogoApp, request doWhileSynthesisReques
 			Warnings:     []diagnostic{},
 		},
 		PatchSummary: fmt.Sprintf("Converted task %q in flow %q to doWhile", request.TaskID, request.FlowID),
+		Validation:   validation,
 	}, nil
 }
 
@@ -3749,6 +9497,14 @@ func buildErrorPathTemplateOperation(app flogoApp, request errorPathTemplateRequ
 		nextApp.Imports = append(nextApp.Imports, flogoImport{Alias: logAlias, Ref: logRef})
 	}
 
+	validation := validateFlogoApp(nextApp)
+	if !validation.Ok {
+		return errorPathTemplateOperation{}, controlFlowFailure{
+			Message:     fmt.Sprintf("Generated error path for task %q is not valid", request.TaskID),
+			Diagnostics: flattenValidationDiagnostics(validation),
+		}
+	}
+
 	return errorPathTemplateOperation{
 		NextApp: nextApp,
 		Plan: errorPathTemplatePlan{
@@ -3762,6 +9518,7 @@ func buildErrorPathTemplateOperation(app flogoApp, request errorPathTemplateRequ
 			Warnings:        []diagnostic{},
 		},
 		PatchSummary: fmt.Sprintf("Added %s error path to task %q in flow %q", request.Template, request.TaskID, request.FlowID),
+		Validation:   validation,
 	}, nil
 }
 
@@ -4709,6 +10466,7 @@ func cloneFlogoApp(app flogoApp) flogoApp {
 		Properties: make([]map[string]any, 0, len(app.Properties)),
 		Triggers:   make([]flogoTrigger, 0, len(app.Triggers)),
 		Resources:  make([]flogoFlow, 0, len(app.Resources)),
+		Raw:        cloneStringAnyMap(app.Raw),
 	}
 
 	for _, property := range app.Properties {

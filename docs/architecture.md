@@ -58,15 +58,14 @@ The Go helper binary exists to bridge into Flogo Core/Flow-native capability wit
 
 It currently supports:
 
-- runtime trace capture,
-- replay,
-- run comparison,
 - flow contract inference,
 - subflow extraction and inlining,
 - iterator synthesis,
 - retry-on-error synthesis,
 - doWhile synthesis,
 - error-path templates,
+- runtime trace capture with narrow recorder-backed runtime helper paths for the supported direct-flow, REST, timer, and CLI slices, narrow real replay on those same slices, and artifact-backed run comparison with runtime-artifact preference,
+- normalized recorder-backed step evidence on those same slices so compare-runs can prefer normalized runtime artifacts when both sides provide them,
 - contribution inventory,
 - contribution catalog generation,
 - descriptor inspection,
@@ -83,6 +82,8 @@ It is expected to grow into:
 
 - programmatic Core composition,
 - contribution scaffolding and validation.
+
+The runtime-evidence commands above are still mostly artifact-backed, but direct trace capture now has narrow in-process Core/Flow runtime paths for the existing direct-flow slice, one supported REST trigger-driven slice, a narrow timer startup slice, and a narrow CLI command-entry slice. Replay reuses those same supported slices, and run comparison prefers normalized runtime artifacts when both sides provide them, REST envelope comparison when both sides are REST-backed, and timer startup comparison when both sides carry timer evidence. Those narrow slices expose normalized per-step task identity, I/O, and flow-state deltas where observable, the REST slice additionally carries request, mapped flow input/output, and reply evidence in `runtimeEvidence.restTriggerRuntime`, the timer slice carries timer settings plus observed tick evidence in `runtimeEvidence.timerTriggerRuntime`, and the CLI slice carries command identity, args, flags, mapped flow input, and reply/stdout evidence in `runtimeEvidence.cliTriggerRuntime`, but the helper is still not a broad live engine trace tap across trigger profiles or flow shapes.
 
 ## High-level topology
 
@@ -122,7 +123,7 @@ Responsibilities:
 - expose direct app-analysis endpoints for flow contract inference,
 - expose direct flow-refactor endpoints for trigger binding, subflow extraction, subflow inlining, and advanced control-flow synthesis,
 - expose direct flow-refactor endpoints for error-path templates,
-- expose direct runtime-analysis endpoints for runtime trace capture and replay,
+- expose direct runtime-analysis endpoints for runtime trace capture, replay, and run comparison,
 - expose direct app-analysis endpoints for property planning and mapping tests,
 - persist app-analysis payload JSON to Blob/Azurite-backed storage,
 - accept internal sync callbacks from the orchestrator and runner paths.
@@ -167,6 +168,7 @@ Current workflow modes:
   - `add_error_path`
   - `capture_run_trace`
   - `replay_flow`
+  - `run_comparison`
   - `inventory_contribs`
   - `catalog_contribs`
   - `inspect_contrib_evidence`
@@ -205,6 +207,7 @@ Current notable behavior:
   - `add_error_path`
   - `capture_run_trace`
   - `replay_flow`
+  - `run_comparison`
   - `inventory_contribs`
   - `catalog_contribs`
   - `inspect_descriptor`
@@ -383,7 +386,7 @@ sequenceDiagram
 
 ## Flogo-native capability baseline
 
-The platform has completed the Phase 1 capability area:
+The platform has completed the Phase 1 capability area and has implemented Phase 2 design-time flow work plus partial Phase 3 runtime-evidence surfaces:
 
 - contribution inventory,
 - contribution cataloging,
@@ -396,6 +399,18 @@ The platform has completed the Phase 1 capability area:
 - coercion suggestions,
 - richer property/environment planning,
 - deployment-profile-aware property/environment planning,
+- flow contract inference,
+- trigger polymorphism,
+- subflow extraction and inlining,
+- iterator synthesis,
+- retry-on-error synthesis,
+- doWhile synthesis,
+- error-path templates,
+- artifact-backed runtime trace capture with a landed recorder-backed direct helper path for the currently supported simple trace scenario,
+- artifact-backed replay with a narrow runtime-backed slice for the same supported direct-flow shape,
+- artifact-backed run comparison that prefers normalized runtime evidence when available and recorder-backed evidence otherwise,
+- trigger-driven runtime startup is now partially implemented through one narrow REST trigger trace/replay slice; broader trigger profile/runtime coverage remains planned,
+- broader runtime coverage beyond the current narrow Phase 3.2 slice remains planned,
 - analysis-only orchestration modes.
 
 See [Capability Matrix](./capability-matrix.md) for the detailed breakdown.
@@ -415,14 +430,13 @@ Persisted through Prisma today:
 
 ### Current partial persistence
 
-- app-scoped inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, mapping-test, runtime-trace, and replay artifacts are persisted through hidden synthetic analysis tasks,
+- app-scoped inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, mapping-test, runtime-trace, replay, and run-comparison artifacts are persisted through hidden synthetic analysis tasks,
 - those app-analysis payloads are stored in Blob/Azurite-backed JSON objects,
 - broader task artifacts outside the app-analysis slice still include logical/local URIs.
 
 ### Planned persistence growth
 
 - blob-backed workspace snapshots,
-- run-comparison artifacts,
 - richer Flogo graph projections,
 - contribution bundle artifacts.
 
@@ -431,7 +445,7 @@ Persisted through Prisma today:
 - `flogo.json` is still the canonical artifact even as the Go helper path grows.
 - The Go helper is intentionally a finite execution binary, not a new always-on service.
 - The current helper uses contribution inventory plus module-aware package discovery, evidence confidence, normalized Flogo metadata, static mapping evaluation, and known-registry inference for the Phase 1 analysis path; it is not yet a full Core/Flow-native runtime.
-- Runtime trace capture, replay, and run comparison are now implemented; contribution-authoring remains a roadmap item.
+- Runtime trace capture, replay, and run comparison are implemented as helper-backed artifact evidence with one narrow live REST/Core/Flow execution slice for trace and replay, a narrow timer startup partial slice, REST envelope comparison preference when both artifacts are REST-backed, and timer startup comparison preference when both artifacts are timer-backed; contribution-authoring remains a roadmap item.
 - In restricted shells on Windows, `next build` and Vitest can fail with `spawn EPERM` even when typecheck is clean.
 
 ## Reference documents

@@ -26,6 +26,8 @@ import {
   ReplayResponseSchema,
   RunComparisonRequestSchema,
   RunComparisonResponseSchema,
+  type RestEnvelopeComparison,
+  type RestReplayEvidence,
   RunTraceRequestSchema,
   RunTraceResponseSchema,
   MappingPreviewRequestSchema,
@@ -35,6 +37,11 @@ import {
   PropertyPlanResponseSchema,
   RetryPolicyRequestSchema,
   RetryPolicyResponseSchema,
+  RuntimeEvidenceSchema,
+  type NormalizedRuntimeStepEvidence,
+  type RunComparisonBasis,
+  type RunTrace,
+  type RuntimeEvidence,
   SubflowExtractionRequestSchema,
   SubflowExtractionResponseSchema,
   SubflowInliningRequestSchema,
@@ -251,6 +258,22 @@ export class FlogoAppsService {
 
     planRunTrace(resolved.content, request);
     const response = await this.executeRunTraceWithHelper(resolved.appPath, request);
+    const runtimeEvidence = this.normalizeRuntimeEvidence(
+      response.trace?.runtimeEvidence,
+      response.trace?.evidenceKind,
+      response.trace?.steps
+    );
+    const comparisonBasisPreference = this.getComparisonBasisPreference(
+      runtimeEvidence,
+      response.trace?.evidenceKind
+    );
+    const trace = response.trace
+      ? {
+          ...response.trace,
+          comparisonBasisPreference,
+          runtimeEvidence: runtimeEvidence ?? response.trace.runtimeEvidence
+        }
+      : response.trace;
     const artifact = await this.persistArtifact(
       resolved,
       "run_trace",
@@ -259,16 +282,32 @@ export class FlogoAppsService {
         analysisType: "run_trace",
         appId,
         flowId: request.flowId,
+        traceEvidenceKind: trace?.evidenceKind ?? runtimeEvidence?.kind,
+        traceComparisonBasisPreference: trace?.comparisonBasisPreference ?? comparisonBasisPreference,
+        runtimeEvidence: trace?.runtimeEvidence ?? runtimeEvidence,
+        traceNormalizedStepCount: Array.isArray(trace?.runtimeEvidence?.normalizedSteps)
+          ? trace.runtimeEvidence.normalizedSteps.length
+          : Array.isArray(runtimeEvidence?.normalizedSteps)
+            ? runtimeEvidence.normalizedSteps.length
+            : 0,
+        traceRecorderBacked: trace?.runtimeEvidence?.recorderBacked ?? runtimeEvidence?.recorderBacked,
+        traceRecorderMode: trace?.runtimeEvidence?.recorderMode ?? runtimeEvidence?.recorderMode,
+        traceRuntimeMode: trace?.runtimeEvidence?.runtimeMode ?? runtimeEvidence?.runtimeMode,
+        traceFallbackReason: trace?.runtimeEvidence?.fallbackReason ?? runtimeEvidence?.fallbackReason,
+        ...this.restTriggerRuntimeMetadata("trace", trace?.runtimeEvidence ?? runtimeEvidence),
+        ...this.cliTriggerRuntimeMetadata("trace", trace?.runtimeEvidence ?? runtimeEvidence),
+        ...this.timerTriggerRuntimeMetadata("trace", trace?.runtimeEvidence ?? runtimeEvidence),
         sourceType: resolved.sourceType
       },
       {
-        trace: response.trace,
+        trace,
         validation: response.validation
       }
     );
 
     return RunTraceResponseSchema.parse({
       ...response,
+      trace,
       artifact
     });
   }
@@ -318,6 +357,30 @@ export class FlogoAppsService {
     if (request.traceArtifactId) {
       response.result.summary.inputSource = "trace_artifact";
     }
+    const runtimeEvidence = this.normalizeRuntimeEvidence(
+      response.result.runtimeEvidence ?? response.result.trace?.runtimeEvidence,
+      response.result.trace?.evidenceKind,
+      response.result.trace?.steps
+    );
+    const comparisonBasisPreference = this.getComparisonBasisPreference(
+      runtimeEvidence,
+      response.result.trace?.evidenceKind
+    );
+    const restReplay = response.result.restReplay ?? this.buildRestReplayEvidence(runtimeEvidence);
+    const resultTrace = response.result.trace
+      ? {
+          ...response.result.trace,
+          comparisonBasisPreference,
+          runtimeEvidence: runtimeEvidence ?? response.result.trace.runtimeEvidence
+        }
+      : response.result.trace;
+    const result = {
+      ...response.result,
+      comparisonBasisPreference,
+      restReplay,
+      trace: resultTrace,
+      runtimeEvidence: runtimeEvidence ?? response.result.runtimeEvidence
+    };
     const artifact = await this.persistArtifact(
       resolved,
       "replay_report",
@@ -326,15 +389,32 @@ export class FlogoAppsService {
         analysisType: "replay",
         appId,
         flowId: request.flowId,
+        replayEvidenceKind: result.runtimeEvidence?.kind,
+        replayComparisonBasisPreference: result.comparisonBasisPreference,
+        replayNormalizedStepCount: Array.isArray(result.runtimeEvidence?.normalizedSteps)
+          ? result.runtimeEvidence.normalizedSteps.length
+          : 0,
+        replayRecorderBacked: result.runtimeEvidence?.recorderBacked,
+        replayRecorderMode: result.runtimeEvidence?.recorderMode,
+        replayRuntimeMode: result.runtimeEvidence?.runtimeMode,
+        replayFallbackReason: result.runtimeEvidence?.fallbackReason,
+        runtimeEvidence: result.runtimeEvidence,
+        traceEvidenceKind: result.trace?.evidenceKind ?? result.runtimeEvidence?.kind,
+        ...this.restReplayMetadata(result.restReplay),
+        ...(this.buildTimerReplayEvidence(result.runtimeEvidence) ?? {}),
+        ...this.restTriggerRuntimeMetadata("replay", result.runtimeEvidence),
+        ...this.cliTriggerRuntimeMetadata("replay", result.runtimeEvidence),
+        ...this.timerTriggerRuntimeMetadata("replay", result.runtimeEvidence),
         sourceType: resolved.sourceType
       },
       {
-        result: response.result
+        result
       }
     );
 
     return ReplayResponseSchema.parse({
       ...response,
+      result,
       artifact
     });
   }
@@ -378,6 +458,27 @@ export class FlogoAppsService {
       {
         analysisType: "run_comparison",
         appId,
+        comparisonBasis: response.result?.comparisonBasis,
+        leftComparisonBasisPreference: response.result?.left.comparisonBasisPreference,
+        rightComparisonBasisPreference: response.result?.right.comparisonBasisPreference,
+        leftEvidenceKind: response.result?.left.evidenceKind,
+        rightEvidenceKind: response.result?.right.evidenceKind,
+        leftNormalizedStepEvidence: response.result?.left.normalizedStepEvidence,
+        rightNormalizedStepEvidence: response.result?.right.normalizedStepEvidence,
+        leftRestTriggerRuntimeEvidence: response.result?.left.restTriggerRuntimeEvidence,
+        rightRestTriggerRuntimeEvidence: response.result?.right.restTriggerRuntimeEvidence,
+        leftRestTriggerRuntimeKind: response.result?.left.restTriggerRuntimeKind,
+        rightRestTriggerRuntimeKind: response.result?.right.restTriggerRuntimeKind,
+        leftCLITriggerRuntimeEvidence: response.result?.left.cliTriggerRuntimeEvidence,
+        rightCLITriggerRuntimeEvidence: response.result?.right.cliTriggerRuntimeEvidence,
+        leftCLITriggerRuntimeKind: response.result?.left.cliTriggerRuntimeKind,
+        rightCLITriggerRuntimeKind: response.result?.right.cliTriggerRuntimeKind,
+        leftTimerTriggerRuntimeEvidence: response.result?.left.timerTriggerRuntimeEvidence,
+        rightTimerTriggerRuntimeEvidence: response.result?.right.timerTriggerRuntimeEvidence,
+        leftTimerTriggerRuntimeKind: response.result?.left.timerTriggerRuntimeKind,
+        rightTimerTriggerRuntimeKind: response.result?.right.timerTriggerRuntimeKind,
+        ...this.restComparisonMetadata(response.result?.restComparison),
+        ...this.timerComparisonMetadata(response.result?.timerComparison),
         sourceType: resolved.sourceType
       },
       {
@@ -1251,6 +1352,261 @@ export class FlogoAppsService {
       ...inputs,
       leftArtifact: artifacts.left,
       rightArtifact: artifacts.right
+    };
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  private normalizeRuntimeEvidenceSteps(
+    traceSteps: RunTrace["steps"] = [],
+    runtimeEvidence?: RuntimeEvidence
+  ): NormalizedRuntimeStepEvidence[] {
+    if (Array.isArray(runtimeEvidence?.normalizedSteps) && runtimeEvidence.normalizedSteps.length > 0) {
+      return runtimeEvidence.normalizedSteps;
+    }
+
+    return traceSteps.map((step) => ({
+      taskId: step.taskId,
+      taskName: step.taskName,
+      activityRef: step.activityRef,
+      type: step.type,
+      status: step.status,
+      error: step.error,
+      startedAt: step.startedAt,
+      finishedAt: step.finishedAt,
+      resolvedInputs: step.input,
+      producedOutputs: step.output,
+      flowStateAfter: step.flowState,
+      diagnostics: step.diagnostics,
+      unavailableFields: []
+    }));
+  }
+
+  private getComparisonBasisPreference(
+    runtimeEvidence?: RuntimeEvidence,
+    evidenceKind?: unknown
+  ): RunComparisonBasis | undefined {
+    if (runtimeEvidence?.restTriggerRuntime) {
+      return "rest_runtime_envelope";
+    }
+    if (runtimeEvidence?.timerTriggerRuntime) {
+      return "timer_runtime_startup";
+    }
+    if ((runtimeEvidence?.normalizedSteps?.length ?? 0) > 0) {
+      return "normalized_runtime_evidence";
+    }
+    if (runtimeEvidence?.recorderBacked) {
+      return "recorder_backed";
+    }
+    if (evidenceKind === "runtime_backed" || runtimeEvidence?.kind === "runtime_backed") {
+      return "runtime_backed";
+    }
+    if (evidenceKind === "simulated_fallback" || runtimeEvidence?.kind === "simulated_fallback") {
+      return "simulated_fallback";
+    }
+    return undefined;
+  }
+
+  private normalizeRuntimeEvidence(
+    runtimeEvidence: unknown,
+    evidenceKind?: unknown,
+    traceSteps: RunTrace["steps"] = []
+  ): RuntimeEvidence | undefined {
+    const runtimeEvidenceRecord = this.isRecord(runtimeEvidence) ? runtimeEvidence : undefined;
+    const parsedRuntimeEvidence = RuntimeEvidenceSchema.safeParse(runtimeEvidence);
+    const baseRuntimeEvidence = parsedRuntimeEvidence.success
+      ? parsedRuntimeEvidence.data
+      : runtimeEvidenceRecord
+        ? ({
+            ...runtimeEvidenceRecord
+          } as RuntimeEvidence)
+        : undefined;
+
+    const kind =
+      (baseRuntimeEvidence?.kind ?? evidenceKind) === "runtime_backed" ||
+      (baseRuntimeEvidence?.kind ?? evidenceKind) === "simulated_fallback"
+        ? (baseRuntimeEvidence?.kind ?? evidenceKind)
+        : undefined;
+
+    if (!kind) {
+      return undefined;
+    }
+
+    const normalizedSteps = this.normalizeRuntimeEvidenceSteps(traceSteps, baseRuntimeEvidence);
+    return RuntimeEvidenceSchema.parse({
+      ...baseRuntimeEvidence,
+      kind,
+      runtimeMode:
+        baseRuntimeEvidence?.runtimeMode ?? (kind === "runtime_backed" ? "independent_action" : undefined),
+      normalizedSteps: normalizedSteps.length > 0 ? normalizedSteps : baseRuntimeEvidence?.normalizedSteps
+    });
+  }
+
+  private restTriggerRuntimeMetadata(prefix: "trace" | "replay", runtimeEvidence?: RuntimeEvidence) {
+    const restTriggerRuntime = runtimeEvidence?.restTriggerRuntime;
+    if (!restTriggerRuntime) {
+      return {};
+    }
+
+    return {
+      [`${prefix}RestTriggerRuntimeEvidence`]: true,
+      [`${prefix}RestTriggerRuntimeKind`]: restTriggerRuntime.kind,
+      [`${prefix}RestTriggerRuntimeMethod`]: restTriggerRuntime.request?.method,
+      [`${prefix}RestTriggerRuntimePath`]: restTriggerRuntime.request?.path,
+      [`${prefix}RestTriggerRuntimeReplyStatus`]: restTriggerRuntime.reply?.status,
+      [`${prefix}RestTriggerRuntimeHasMappedFlowInput`]: Object.keys(restTriggerRuntime.flowInput ?? {}).length > 0,
+      [`${prefix}RestTriggerRuntimeHasMappedFlowOutput`]: Object.keys(restTriggerRuntime.flowOutput ?? {}).length > 0
+    };
+  }
+
+  private cliTriggerRuntimeMetadata(prefix: "trace" | "replay", runtimeEvidence?: RuntimeEvidence) {
+    const cliTriggerRuntime = runtimeEvidence?.cliTriggerRuntime;
+    if (!cliTriggerRuntime) {
+      return {};
+    }
+
+    return {
+      [`${prefix}CLITriggerRuntimeEvidence`]: true,
+      [`${prefix}CLITriggerRuntimeKind`]: cliTriggerRuntime.kind,
+      [`${prefix}CLITriggerRuntimeCommand`]: cliTriggerRuntime.handler?.command,
+      [`${prefix}CLITriggerRuntimeSingleCmd`]: cliTriggerRuntime.settings?.singleCmd,
+      [`${prefix}CLITriggerRuntimeHasArgs`]: (cliTriggerRuntime.args?.length ?? 0) > 0,
+      [`${prefix}CLITriggerRuntimeHasFlags`]: Object.keys(cliTriggerRuntime.flags ?? {}).length > 0,
+      [`${prefix}CLITriggerRuntimeHasMappedFlowInput`]: Object.keys(cliTriggerRuntime.flowInput ?? {}).length > 0,
+      [`${prefix}CLITriggerRuntimeHasMappedFlowOutput`]: Object.keys(cliTriggerRuntime.flowOutput ?? {}).length > 0,
+      [`${prefix}CLITriggerRuntimeHasReply`]: Boolean(cliTriggerRuntime.reply?.data ?? cliTriggerRuntime.reply?.stdout)
+    };
+  }
+
+  private timerTriggerRuntimeMetadata(prefix: "trace" | "replay", runtimeEvidence?: RuntimeEvidence) {
+    const timerTriggerRuntime = runtimeEvidence?.timerTriggerRuntime;
+    if (!timerTriggerRuntime) {
+      return {};
+    }
+
+    return {
+      [`${prefix}TimerTriggerRuntimeEvidence`]: true,
+      [`${prefix}TimerTriggerRuntimeKind`]: timerTriggerRuntime.kind,
+      [`${prefix}TimerTriggerRuntimeRunMode`]: timerTriggerRuntime.settings?.runMode,
+      [`${prefix}TimerTriggerRuntimeStartDelay`]: timerTriggerRuntime.settings?.startDelay,
+      [`${prefix}TimerTriggerRuntimeRepeatInterval`]: timerTriggerRuntime.settings?.repeatInterval,
+      [`${prefix}TimerTriggerRuntimeTickObserved`]: Boolean(timerTriggerRuntime.tick),
+      [`${prefix}TimerTriggerRuntimeHasMappedFlowInput`]: Object.keys(timerTriggerRuntime.flowInput ?? {}).length > 0,
+      [`${prefix}TimerTriggerRuntimeHasMappedFlowOutput`]: Object.keys(timerTriggerRuntime.flowOutput ?? {}).length > 0
+    };
+  }
+
+  private buildRestReplayEvidence(runtimeEvidence?: RuntimeEvidence): RestReplayEvidence | undefined {
+    const restTriggerRuntime = runtimeEvidence?.restTriggerRuntime;
+    if (!restTriggerRuntime) {
+      return undefined;
+    }
+
+    return {
+      comparisonBasis: "rest_runtime_envelope",
+      runtimeMode: runtimeEvidence?.runtimeMode,
+      requestEnvelopeObserved: Boolean(restTriggerRuntime.request),
+      mappedFlowInputObserved: Boolean(restTriggerRuntime.flowInput && Object.keys(restTriggerRuntime.flowInput).length > 0),
+      mappedFlowOutputObserved: Boolean(restTriggerRuntime.flowOutput && Object.keys(restTriggerRuntime.flowOutput).length > 0),
+      replyEnvelopeObserved: Boolean(restTriggerRuntime.reply),
+      unsupportedFields: Array.from(
+        new Set([...(restTriggerRuntime.unavailableFields ?? []), ...(restTriggerRuntime.mapping?.unavailableFields ?? [])])
+      ),
+      diagnostics: [...(restTriggerRuntime.diagnostics ?? [])]
+    };
+  }
+
+  private buildTimerReplayEvidence(runtimeEvidence?: RuntimeEvidence) {
+    const timerTriggerRuntime = runtimeEvidence?.timerTriggerRuntime;
+    if (!timerTriggerRuntime) {
+      return undefined;
+    }
+
+    return {
+      comparisonBasis: "timer_runtime_startup",
+      runtimeMode: runtimeEvidence?.runtimeMode,
+      settingsObserved: Boolean(timerTriggerRuntime.settings),
+      flowInputObserved: Boolean(timerTriggerRuntime.flowInput && Object.keys(timerTriggerRuntime.flowInput).length > 0),
+      flowOutputObserved: Boolean(timerTriggerRuntime.flowOutput && Object.keys(timerTriggerRuntime.flowOutput).length > 0),
+      tickObserved: Boolean(timerTriggerRuntime.tick),
+      unsupportedFields: Array.from(new Set(timerTriggerRuntime.unavailableFields ?? [])),
+      diagnostics: [...(timerTriggerRuntime.diagnostics ?? [])]
+    };
+  }
+
+  private restReplayMetadata(restReplay?: RestReplayEvidence) {
+    if (!restReplay) {
+      return {};
+    }
+
+    return {
+      restReplay,
+      replayRestReplayComparisonBasis: restReplay.comparisonBasis,
+      replayRestRuntimeMode: restReplay.runtimeMode,
+      replayRestRequestEnvelopeObserved: restReplay.requestEnvelopeObserved,
+      replayRestMappedFlowInputObserved: restReplay.mappedFlowInputObserved,
+      replayRestMappedFlowOutputObserved: restReplay.mappedFlowOutputObserved,
+      replayRestReplyEnvelopeObserved: restReplay.replyEnvelopeObserved,
+      replayRestUnsupportedFields: restReplay.unsupportedFields,
+      replayRestDiagnostics: restReplay.diagnostics
+    };
+  }
+
+  private restComparisonMetadata(restComparison?: RestEnvelopeComparison) {
+    if (!restComparison) {
+      return {};
+    }
+
+    return {
+      restComparison,
+      restComparisonBasis: restComparison.comparisonBasis,
+      restRequestEnvelopeCompared: restComparison.requestEnvelopeCompared,
+      restMappedFlowInputCompared: restComparison.mappedFlowInputCompared,
+      restReplyEnvelopeCompared: restComparison.replyEnvelopeCompared,
+      restNormalizedStepEvidenceCompared: restComparison.normalizedStepEvidenceCompared,
+      restRequestEnvelopeDiff: restComparison.requestEnvelopeDiff,
+      restMappedFlowInputDiff: restComparison.mappedFlowInputDiff,
+      restReplyEnvelopeDiff: restComparison.replyEnvelopeDiff,
+      restNormalizedStepCountDiff: restComparison.normalizedStepCountDiff,
+      restComparisonUnsupportedFields: restComparison.unsupportedFields,
+      restComparisonDiagnostics: restComparison.diagnostics
+    };
+  }
+
+  private timerComparisonMetadata(timerComparison?: {
+    comparisonBasis: "timer_runtime_startup";
+    runtimeMode?: string;
+    settingsCompared: boolean;
+    flowInputCompared: boolean;
+    flowOutputCompared: boolean;
+    tickCompared: boolean;
+    settingsDiff?: unknown;
+    flowInputDiff?: unknown;
+    flowOutputDiff?: unknown;
+    tickDiff?: unknown;
+    unsupportedFields: string[];
+    diagnostics: unknown[];
+  }) {
+    if (!timerComparison) {
+      return {};
+    }
+
+    return {
+      timerComparison,
+      timerComparisonBasis: timerComparison.comparisonBasis,
+      timerRuntimeMode: timerComparison.runtimeMode,
+      timerSettingsCompared: timerComparison.settingsCompared,
+      timerFlowInputCompared: timerComparison.flowInputCompared,
+      timerFlowOutputCompared: timerComparison.flowOutputCompared,
+      timerTickCompared: timerComparison.tickCompared,
+      timerSettingsDiff: timerComparison.settingsDiff,
+      timerFlowInputDiff: timerComparison.flowInputDiff,
+      timerFlowOutputDiff: timerComparison.flowOutputDiff,
+      timerTickDiff: timerComparison.tickDiff,
+      timerComparisonUnsupportedFields: timerComparison.unsupportedFields,
+      timerComparisonDiagnostics: timerComparison.diagnostics
     };
   }
 

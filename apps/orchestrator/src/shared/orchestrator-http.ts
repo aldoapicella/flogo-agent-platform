@@ -199,7 +199,6 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
           start.request.inputs["profile"] && typeof start.request.inputs["profile"] === "object" && !Array.isArray(start.request.inputs["profile"])
             ? (start.request.inputs["profile"] as Record<string, unknown>)
             : undefined,
-        validateOnly: start.request.inputs["validateOnly"] !== false,
         replaceExisting: start.request.inputs["replaceExisting"] === true,
         handlerName:
           typeof start.request.inputs["handlerName"] === "string"
@@ -209,10 +208,7 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
           typeof start.request.inputs["triggerId"] === "string"
             ? (start.request.inputs["triggerId"] as string)
             : undefined,
-        triggerName:
-          typeof start.request.inputs["triggerName"] === "string"
-            ? (start.request.inputs["triggerName"] as string)
-            : undefined
+        validateOnly: start.request.inputs["mode"] === "trigger_binding_plan" || start.request.inputs["validateOnly"] === true
       };
       break;
     case "extract_subflow":

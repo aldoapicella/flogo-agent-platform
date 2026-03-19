@@ -148,6 +148,107 @@ describe("RunnerExecutorService", () => {
     expect(result.artifacts.some((artifact) => artifact.type === "flow_contract")).toBe(true);
   });
 
+  it("executes helper-backed timer trace capture and persists timer runtime metadata", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        trace: {
+          appName: "demo",
+          flowId: "heartbeat",
+          evidenceKind: "runtime_backed",
+          runtimeEvidence: {
+            kind: "runtime_backed",
+            recorderBacked: true,
+            recorderKind: "flow_state_recorder",
+            recorderMode: "full",
+            runtimeMode: "timer_trigger",
+            timerTriggerRuntime: {
+              kind: "timer",
+              settings: {
+                runMode: "repeat",
+                startDelay: "10s",
+                repeatInterval: "30s"
+              },
+              flowInput: {},
+              flowOutput: {
+                status: "tick"
+              },
+              tick: {
+                startedAt: "2026-03-18T00:00:00Z",
+                firedAt: "2026-03-18T00:00:30Z",
+                tickCount: 1
+              },
+              unavailableFields: [],
+              diagnostics: []
+            },
+            steps: [{ id: "tick" }]
+          },
+          summary: {
+            flowId: "heartbeat",
+            status: "completed",
+            input: {},
+            output: {
+              status: "tick"
+            },
+            stepCount: 1,
+            diagnostics: []
+          },
+          steps: [
+            {
+              taskId: "tick",
+              status: "completed",
+              diagnostics: []
+            }
+          ],
+          diagnostics: []
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-timer-trace",
+      jobKind: "run_trace_capture",
+      stepType: "capture_run_trace",
+      analysisKind: "run_trace_plan",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://timer-trace",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        flowId: "heartbeat",
+        validateOnly: false
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    const traceArtifact = result.artifacts.find((artifact) => artifact.type === "run_trace");
+    const metadata = traceArtifact?.metadata as
+      | {
+          traceComparisonBasisPreference?: string;
+          traceTimerTriggerRuntimeEvidence?: boolean;
+          traceTimerTriggerRuntimeKind?: string;
+          traceTimerTriggerRuntimeRunMode?: string;
+          traceTimerTriggerRuntimeStartDelay?: string;
+          traceTimerTriggerRuntimeRepeatInterval?: string;
+          traceTimerTriggerRuntimeTickObserved?: boolean;
+        }
+      | undefined;
+
+    expect(result.ok).toBe(true);
+    expect(traceArtifact).toBeDefined();
+    expect(metadata?.traceComparisonBasisPreference).toBe("timer_runtime_startup");
+    expect(metadata?.traceTimerTriggerRuntimeEvidence).toBe(true);
+    expect(metadata?.traceTimerTriggerRuntimeKind).toBe("timer");
+    expect(metadata?.traceTimerTriggerRuntimeRunMode).toBe("repeat");
+    expect(metadata?.traceTimerTriggerRuntimeStartDelay).toBe("10s");
+    expect(metadata?.traceTimerTriggerRuntimeRepeatInterval).toBe("30s");
+    expect(metadata?.traceTimerTriggerRuntimeTickObserved).toBe(true);
+  });
+
   it("executes helper-backed trigger binding and publishes a trigger-binding plan artifact", async () => {
     process.env.FLOGO_HELPER_BIN = await createHelperScript(
       JSON.stringify({
@@ -227,6 +328,105 @@ describe("RunnerExecutorService", () => {
 
     expect(result.ok).toBe(true);
     expect(result.artifacts.some((artifact) => artifact.type === "trigger_binding_plan")).toBe(true);
+    const bindingArtifact = result.artifacts.find((artifact) => artifact.type === "trigger_binding_plan");
+    const bindingMetadata = bindingArtifact?.metadata as
+      | { result?: { plan?: { profile?: { kind?: string; replyMode?: string; requestMappingMode?: string; replyMappingMode?: string } } } }
+      | undefined;
+    expect(bindingMetadata?.result?.plan?.profile?.kind).toBe("rest");
+    expect(bindingMetadata?.result?.plan?.profile?.replyMode).toBe("json");
+    expect(bindingMetadata?.result?.plan?.profile?.requestMappingMode).toBe("auto");
+    expect(bindingMetadata?.result?.plan?.profile?.replyMappingMode).toBe("auto");
+  });
+
+  it("forwards supported trigger-binding flags and omits deprecated triggerName", async () => {
+    const argsPath = path.join(await fs.mkdtemp(path.join(os.tmpdir(), "flogo-helper-args-")), "trigger-binding-args.txt");
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          applied: false,
+          plan: {
+            flowId: "hello",
+            profile: {
+              kind: "rest",
+              method: "POST",
+              path: "/hello",
+              port: 8081,
+              replyMode: "json",
+              requestMappingMode: "auto",
+              replyMappingMode: "auto"
+            },
+            triggerRef: "#rest",
+            triggerId: "flogo-rest-hello",
+            handlerName: "post_hello",
+            generatedMappings: {
+              input: {
+                payload: "$trigger.content"
+              },
+              output: {
+                data: "$flow.message"
+              }
+            },
+            trigger: {
+              id: "flogo-rest-hello",
+              ref: "#rest",
+              settings: {
+                port: 8081
+              },
+              handlers: []
+            },
+            diagnostics: [],
+            warnings: []
+          },
+          patchSummary: "Added trigger \"flogo-rest-hello\"",
+          validation: {
+            ok: true,
+            stages: []
+          }
+        }
+      }),
+      argsPath
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-trigger-binding-args",
+      jobKind: "trigger_binding",
+      stepType: "bind_trigger",
+      analysisKind: "trigger_binding_plan",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://trigger-binding-args",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        flowId: "hello",
+        validateOnly: true,
+        handlerName: "post_hello",
+        triggerId: "flogo-rest-hello",
+        triggerName: "deprecated-name",
+        profile: {
+          kind: "rest",
+          method: "POST",
+          path: "/hello",
+          port: 8081,
+          replyMode: "json",
+          requestMappingMode: "auto",
+          replyMappingMode: "auto"
+        }
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    const forwardedArgs = (await fs.readFile(argsPath, "utf8")).trim().split(/\r?\n/).filter(Boolean);
+
+    expect(result.ok).toBe(true);
+    expect(forwardedArgs).toContain("--validate-only");
+    expect(forwardedArgs).toContain("--handler-name");
+    expect(forwardedArgs).toContain("--trigger-id");
+    expect(forwardedArgs).not.toContain("--trigger-name");
   });
 
   it("executes helper-backed subflow extraction and publishes a subflow-extraction plan artifact", async () => {
@@ -720,9 +920,71 @@ describe("RunnerExecutorService", () => {
   it("executes helper-backed run-trace capture and publishes a run-trace artifact", async () => {
     process.env.FLOGO_HELPER_BIN = await createHelperScript(
       JSON.stringify({
-        trace: {
-          appName: "demo",
-          flowId: "hello",
+          trace: {
+            appName: "demo",
+            flowId: "hello",
+            evidenceKind: "runtime_backed",
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "independent_action",
+              restTriggerRuntime: {
+                kind: "rest",
+                request: {
+                  method: "POST",
+                  path: "/hello",
+                  headers: {
+                    "content-type": "application/json"
+                  },
+                  queryParams: {},
+                  pathParams: {},
+                  body: {
+                    name: "Ada"
+                  }
+                },
+                flowInput: {
+                  name: "Ada"
+                },
+                flowOutput: {
+                  message: "hello"
+                },
+                reply: {
+                  status: 200,
+                  headers: {
+                    "content-type": "application/json"
+                  },
+                  body: {
+                    message: "hello"
+                  },
+                  data: {
+                    message: "hello"
+                  }
+                },
+                mapping: {
+                  requestMappingMode: "auto",
+                  replyMappingMode: "auto",
+                  mappedFlowInput: {
+                    name: "$trigger.content"
+                  },
+                  mappedFlowOutput: {
+                    data: "$flow.message"
+                  },
+                  requestMappings: {
+                    name: "$trigger.content"
+                  },
+                  replyMappings: {
+                    data: "$flow.message"
+                  },
+                  unavailableFields: [],
+                  diagnostics: []
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              steps: [{ id: "log_1" }]
+            },
           summary: {
             flowId: "hello",
             status: "completed",
@@ -771,17 +1033,35 @@ describe("RunnerExecutorService", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.artifacts.some((artifact) => artifact.type === "run_trace")).toBe(true);
+    const traceArtifact = result.artifacts.find((artifact) => artifact.type === "run_trace");
+    expect(traceArtifact).toBeDefined();
+    expect(traceArtifact?.metadata?.["traceEvidenceKind"]).toBe("runtime_backed");
+    expect(traceArtifact?.metadata?.["traceComparisonBasisPreference"]).toBe("rest_runtime_envelope");
+    expect(traceArtifact?.metadata?.["traceNormalizedStepCount"]).toBe(1);
+    expect(traceArtifact?.metadata?.["traceRecorderMode"]).toBe("full");
+    expect(traceArtifact?.metadata?.["traceRestTriggerRuntimeEvidence"]).toBe(true);
+    expect(traceArtifact?.metadata?.["traceRestTriggerRuntimeKind"]).toBe("rest");
+    expect(traceArtifact?.metadata?.["traceRestTriggerRuntimeMethod"]).toBe("POST");
+    expect(traceArtifact?.metadata?.["traceRestTriggerRuntimePath"]).toBe("/hello");
+    expect(traceArtifact?.metadata?.["traceRestTriggerRuntimeReplyStatus"]).toBe(200);
+    expect((traceArtifact?.metadata?.["runtimeEvidence"] as { steps?: unknown[] } | undefined)?.steps).toHaveLength(1);
+    expect(
+      (traceArtifact?.metadata?.["runtimeEvidence"] as { normalizedSteps?: unknown[] } | undefined)?.normalizedSteps
+    ).toHaveLength(1);
+    expect(
+      (traceArtifact?.metadata?.["runtimeEvidence"] as { restTriggerRuntime?: { kind?: string } } | undefined)
+        ?.restTriggerRuntime?.kind
+    ).toBe("rest");
   });
 
   it("executes helper-backed replay planning and publishes a replay-plan artifact", async () => {
     process.env.FLOGO_HELPER_BIN = await createHelperScript(
       JSON.stringify({
-        result: {
-          summary: {
-            flowId: "hello",
-            status: "completed",
-            inputSource: "explicit_input",
+          result: {
+            summary: {
+              flowId: "hello",
+              status: "completed",
+              inputSource: "explicit_input",
             baseInput: {
               payload: "hello"
             },
@@ -846,9 +1126,71 @@ describe("RunnerExecutorService", () => {
             overridesApplied: false,
             diagnostics: []
           },
-          trace: {
-            appName: "demo",
-            flowId: "hello",
+            trace: {
+              appName: "demo",
+              flowId: "hello",
+              evidenceKind: "runtime_backed",
+              runtimeEvidence: {
+                kind: "runtime_backed",
+                recorderBacked: true,
+                recorderKind: "flow_state_recorder",
+                recorderMode: "full",
+                runtimeMode: "independent_action_replay",
+                restTriggerRuntime: {
+                  kind: "rest",
+                  request: {
+                    method: "POST",
+                    path: "/hello",
+                    headers: {
+                      "content-type": "application/json"
+                    },
+                    queryParams: {},
+                    pathParams: {},
+                    body: {
+                      payload: "hello"
+                    }
+                  },
+                  flowInput: {
+                    payload: "hello"
+                  },
+                  flowOutput: {
+                    message: "hello"
+                  },
+                  reply: {
+                    status: 200,
+                    headers: {
+                      "content-type": "application/json"
+                    },
+                    body: {
+                      message: "hello"
+                    },
+                    data: {
+                      message: "hello"
+                    }
+                  },
+                  mapping: {
+                    requestMappingMode: "auto",
+                    replyMappingMode: "auto",
+                    mappedFlowInput: {
+                      payload: "$trigger.content"
+                    },
+                    mappedFlowOutput: {
+                      data: "$flow.message"
+                    },
+                    requestMappings: {
+                      payload: "$trigger.content"
+                    },
+                    replyMappings: {
+                      data: "$flow.message"
+                    },
+                    unavailableFields: [],
+                    diagnostics: []
+                  },
+                  unavailableFields: [],
+                  diagnostics: []
+                },
+                steps: [{ id: "log" }]
+              },
             summary: {
               flowId: "hello",
               status: "completed",
@@ -898,7 +1240,168 @@ describe("RunnerExecutorService", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.artifacts.some((artifact) => artifact.type === "replay_report")).toBe(true);
+    const replayArtifact = result.artifacts.find((artifact) => artifact.type === "replay_report");
+    expect(replayArtifact).toBeDefined();
+    expect(replayArtifact?.metadata?.["replayEvidenceKind"]).toBe("runtime_backed");
+    expect(replayArtifact?.metadata?.["replayComparisonBasisPreference"]).toBe("rest_runtime_envelope");
+    expect(replayArtifact?.metadata?.["replayNormalizedStepCount"]).toBe(1);
+    expect(replayArtifact?.metadata?.["replayRecorderMode"]).toBe("full");
+    expect(replayArtifact?.metadata?.["replayRestReplayComparisonBasis"]).toBe("rest_runtime_envelope");
+    expect(replayArtifact?.metadata?.["replayRestRuntimeMode"]).toBe("independent_action_replay");
+    expect(replayArtifact?.metadata?.["replayRestRequestEnvelopeObserved"]).toBe(true);
+    expect(replayArtifact?.metadata?.["replayRestMappedFlowInputObserved"]).toBe(true);
+    expect(replayArtifact?.metadata?.["replayRestMappedFlowOutputObserved"]).toBe(true);
+    expect(replayArtifact?.metadata?.["replayRestReplyEnvelopeObserved"]).toBe(true);
+    expect(replayArtifact?.metadata?.["replayRestTriggerRuntimeEvidence"]).toBe(true);
+    expect(replayArtifact?.metadata?.["replayRestTriggerRuntimeKind"]).toBe("rest");
+    expect(replayArtifact?.metadata?.["replayRestTriggerRuntimeMethod"]).toBe("POST");
+    expect(replayArtifact?.metadata?.["replayRestTriggerRuntimePath"]).toBe("/hello");
+    expect(replayArtifact?.metadata?.["replayRestTriggerRuntimeReplyStatus"]).toBe(200);
+    expect((replayArtifact?.metadata?.["runtimeEvidence"] as { steps?: unknown[] } | undefined)?.steps).toHaveLength(1);
+    expect(
+      (replayArtifact?.metadata?.["runtimeEvidence"] as { normalizedSteps?: unknown[] } | undefined)?.normalizedSteps
+    ).toHaveLength(1);
+    expect(
+      (replayArtifact?.metadata?.["runtimeEvidence"] as { restTriggerRuntime?: { kind?: string } } | undefined)
+        ?.restTriggerRuntime?.kind
+    ).toBe("rest");
+  });
+
+  it("persists CLI runtime replay metadata for the narrow CLI slice", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          summary: {
+            flowId: "hello",
+            status: "completed",
+            inputSource: "explicit_input",
+            baseInput: {
+              args: ["hello"]
+            },
+            effectiveInput: {
+              args: ["hello"],
+              flags: {
+                loud: true
+              }
+            },
+            overridesApplied: false,
+            diagnostics: []
+          },
+          trace: {
+            appName: "cli-app",
+            flowId: "hello",
+            evidenceKind: "runtime_backed",
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "cli_trigger_replay",
+              cliTriggerRuntime: {
+                kind: "cli",
+                settings: {
+                  singleCmd: true
+                },
+                handler: {
+                  command: "say"
+                },
+                args: ["hello"],
+                flags: {
+                  loud: true
+                },
+                flowInput: {
+                  args: ["hello"],
+                  flags: {
+                    loud: true
+                  }
+                },
+                reply: {
+                  data: "cli-ok",
+                  stdout: "cli-ok"
+                },
+                unavailableFields: ["flowOutput"],
+                diagnostics: []
+              },
+              normalizedSteps: [
+                {
+                  taskId: "prepare",
+                  status: "completed",
+                  unavailableFields: [],
+                  diagnostics: []
+                }
+              ],
+              steps: [{ id: "prepare" }]
+            },
+            summary: {
+              flowId: "hello",
+              status: "completed",
+              input: {
+                args: ["hello"],
+                flags: {
+                  loud: true
+                }
+              },
+              output: {},
+              stepCount: 1,
+              diagnostics: []
+            },
+            steps: [
+              {
+                taskId: "prepare",
+                status: "completed",
+                diagnostics: []
+              }
+            ],
+            diagnostics: []
+          }
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-cli-replay",
+      jobKind: "flow_replay",
+      stepType: "replay_flow",
+      analysisKind: "replay",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://cli-replay",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        flowId: "hello",
+        baseInput: {
+          args: ["hello"],
+          flags: {
+            loud: true
+          }
+        }
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    expect(result.ok).toBe(true);
+    const replayArtifact = result.artifacts.find((artifact) => artifact.type === "replay_report");
+    expect(replayArtifact?.metadata?.["replayEvidenceKind"]).toBe("runtime_backed");
+    expect(replayArtifact?.metadata?.["replayComparisonBasisPreference"]).toBe("normalized_runtime_evidence");
+    expect(replayArtifact?.metadata?.["replayRuntimeMode"]).toBe("cli_trigger_replay");
+    expect(replayArtifact?.metadata?.["replayCLITriggerRuntimeEvidence"]).toBe(true);
+    expect(replayArtifact?.metadata?.["replayCLITriggerRuntimeKind"]).toBe("cli");
+    expect(replayArtifact?.metadata?.["replayCLITriggerRuntimeCommand"]).toBe("say");
+    expect(replayArtifact?.metadata?.["replayCLITriggerRuntimeSingleCmd"]).toBe(true);
+    expect(replayArtifact?.metadata?.["replayCLITriggerRuntimeHasArgs"]).toBe(true);
+    expect(replayArtifact?.metadata?.["replayCLITriggerRuntimeHasFlags"]).toBe(true);
+    expect(replayArtifact?.metadata?.["replayCLITriggerRuntimeHasMappedFlowInput"]).toBe(true);
+    expect(replayArtifact?.metadata?.["replayCLITriggerRuntimeHasMappedFlowOutput"]).toBe(false);
+    expect(replayArtifact?.metadata?.["replayCLITriggerRuntimeHasReply"]).toBe(true);
+    expect(
+      (replayArtifact?.metadata?.["runtimeEvidence"] as { cliTriggerRuntime?: { kind?: string } } | undefined)
+        ?.cliTriggerRuntime?.kind
+    ).toBe("cli");
   });
 
   it("executes helper-backed run-comparison planning and publishes a run-comparison-plan artifact", async () => {
@@ -942,6 +1445,7 @@ describe("RunnerExecutorService", () => {
             trace: {
               appName: "demo",
               flowId: "hello",
+              evidenceKind: "runtime_backed",
               summary: {
                 flowId: "hello",
                 status: "completed",
@@ -962,6 +1466,7 @@ describe("RunnerExecutorService", () => {
             trace: {
               appName: "demo",
               flowId: "hello",
+              evidenceKind: "runtime_backed",
               summary: {
                 flowId: "hello",
                 status: "completed",
@@ -993,13 +1498,79 @@ describe("RunnerExecutorService", () => {
             artifactId: "left-trace",
             kind: "run_trace",
             summaryStatus: "completed",
-            flowId: "hello"
+            flowId: "hello",
+            evidenceKind: "runtime_backed",
+            normalizedStepEvidence: true,
+            comparisonBasisPreference: "rest_runtime_envelope",
+            restTriggerRuntimeEvidence: true,
+            restTriggerRuntimeKind: "rest"
           },
           right: {
             artifactId: "right-replay",
             kind: "replay_report",
             summaryStatus: "completed",
-            flowId: "hello"
+            flowId: "hello",
+            evidenceKind: "runtime_backed",
+            normalizedStepEvidence: true,
+            comparisonBasisPreference: "rest_runtime_envelope",
+            restTriggerRuntimeEvidence: true,
+            restTriggerRuntimeKind: "rest"
+          },
+          comparisonBasis: "rest_runtime_envelope",
+          restComparison: {
+            comparisonBasis: "rest_runtime_envelope",
+            requestEnvelopeCompared: true,
+            mappedFlowInputCompared: true,
+            replyEnvelopeCompared: true,
+            normalizedStepEvidenceCompared: true,
+            requestEnvelopeDiff: {
+              kind: "changed",
+              left: {
+                method: "POST",
+                path: "/hello",
+                body: {
+                  payload: "hello"
+                }
+              },
+              right: {
+                method: "POST",
+                path: "/hello",
+                body: {
+                  payload: "replayed"
+                }
+              }
+            },
+            mappedFlowInputDiff: {
+              kind: "changed",
+              left: {
+                payload: "hello"
+              },
+              right: {
+                payload: "replayed"
+              }
+            },
+            replyEnvelopeDiff: {
+              kind: "changed",
+              left: {
+                status: 200,
+                body: {
+                  message: "hello"
+                }
+              },
+              right: {
+                status: 200,
+                body: {
+                  message: "replayed"
+                }
+              }
+            },
+            normalizedStepCountDiff: {
+              kind: "same",
+              left: 1,
+              right: 1
+            },
+            unsupportedFields: [],
+            diagnostics: []
           },
           summary: {
             statusChanged: false,
@@ -1067,6 +1638,58 @@ describe("RunnerExecutorService", () => {
             trace: {
               appName: "demo",
               flowId: "hello",
+              evidenceKind: "runtime_backed",
+              runtimeEvidence: {
+                kind: "runtime_backed",
+                recorderBacked: true,
+                recorderKind: "flow_state_recorder",
+                recorderMode: "full",
+                runtimeMode: "independent_action",
+                restTriggerRuntime: {
+                  kind: "rest",
+                  request: {
+                    method: "POST",
+                    path: "/hello"
+                  },
+                  flowInput: {
+                    payload: "hello"
+                  },
+                  flowOutput: {
+                    message: "hello"
+                  },
+                  reply: {
+                    status: 200
+                  },
+                  mapping: {
+                    requestMappingMode: "auto",
+                    replyMappingMode: "auto",
+                    mappedFlowInput: {
+                      payload: "$trigger.content"
+                    },
+                    mappedFlowOutput: {
+                      data: "$flow.message"
+                    },
+                    unavailableFields: [],
+                    diagnostics: []
+                  },
+                  unavailableFields: [],
+                  diagnostics: []
+                },
+                normalizedSteps: [
+                  {
+                    taskId: "log",
+                    status: "completed",
+                    resolvedInputs: {
+                      payload: "hello"
+                    },
+                    producedOutputs: {
+                      message: "hello"
+                    },
+                    unavailableFields: [],
+                    diagnostics: []
+                  }
+                ]
+              },
               summary: {
                 flowId: "hello",
                 status: "completed",
@@ -1097,6 +1720,58 @@ describe("RunnerExecutorService", () => {
               trace: {
                 appName: "demo",
                 flowId: "hello",
+                evidenceKind: "runtime_backed",
+                runtimeEvidence: {
+                  kind: "runtime_backed",
+                  recorderBacked: true,
+                  recorderKind: "flow_state_recorder",
+                  recorderMode: "full",
+                  runtimeMode: "independent_action_replay",
+                  restTriggerRuntime: {
+                    kind: "rest",
+                    request: {
+                      method: "POST",
+                      path: "/hello"
+                    },
+                    flowInput: {
+                      payload: "replayed"
+                    },
+                    flowOutput: {
+                      message: "replayed"
+                    },
+                    reply: {
+                      status: 200
+                    },
+                    mapping: {
+                      requestMappingMode: "auto",
+                      replyMappingMode: "auto",
+                      mappedFlowInput: {
+                        payload: "$trigger.content"
+                      },
+                      mappedFlowOutput: {
+                        data: "$flow.message"
+                      },
+                      unavailableFields: [],
+                      diagnostics: []
+                    },
+                    unavailableFields: [],
+                    diagnostics: []
+                  },
+                  normalizedSteps: [
+                    {
+                      taskId: "log",
+                      status: "completed",
+                      resolvedInputs: {
+                        payload: "replayed"
+                      },
+                      producedOutputs: {
+                        message: "replayed"
+                      },
+                      unavailableFields: [],
+                      diagnostics: []
+                    }
+                  ]
+                },
                 summary: {
                   flowId: "hello",
                   status: "completed",
@@ -1117,7 +1792,21 @@ describe("RunnerExecutorService", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.artifacts.some((artifact) => artifact.type === "run_comparison")).toBe(true);
+    const comparisonArtifact = result.artifacts.find((artifact) => artifact.type === "run_comparison");
+    expect(comparisonArtifact).toBeDefined();
+    expect(comparisonArtifact?.metadata?.["comparisonBasis"]).toBe("rest_runtime_envelope");
+    expect(comparisonArtifact?.metadata?.["leftEvidenceKind"]).toBe("runtime_backed");
+    expect(comparisonArtifact?.metadata?.["leftNormalizedStepEvidence"]).toBe(true);
+    expect(comparisonArtifact?.metadata?.["rightNormalizedStepEvidence"]).toBe(true);
+    expect(comparisonArtifact?.metadata?.["restComparisonBasis"]).toBe("rest_runtime_envelope");
+    expect(comparisonArtifact?.metadata?.["restRequestEnvelopeCompared"]).toBe(true);
+    expect(comparisonArtifact?.metadata?.["restMappedFlowInputCompared"]).toBe(true);
+    expect(comparisonArtifact?.metadata?.["restReplyEnvelopeCompared"]).toBe(true);
+    expect(comparisonArtifact?.metadata?.["restNormalizedStepEvidenceCompared"]).toBe(true);
+    expect((comparisonArtifact?.metadata?.["restComparison"] as { comparisonBasis?: string } | undefined)?.comparisonBasis).toBe(
+      "rest_runtime_envelope"
+    );
+    expect((comparisonArtifact?.metadata?.["result"] as { steps?: Array<{ taskId: string }> } | undefined)?.steps).toHaveLength(1);
   });
 
   it("executes helper-backed mapping test analysis and publishes a mapping-test artifact", async () => {
@@ -1378,19 +2067,26 @@ describe("RunnerExecutorService", () => {
   });
 });
 
-async function createHelperScript(stdout: string) {
+async function createHelperScript(stdout: string, recordArgsPath?: string) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "flogo-helper-test-"));
-  const scriptPath = path.join(tempDir, process.platform === "win32" ? "helper.cmd" : "helper.sh");
-
-  const contents =
-    process.platform === "win32"
-      ? `@echo off\r\necho ${stdout}\r\n`
-      : `#!/usr/bin/env sh\nprintf '%s\n' '${stdout}'\n`;
+  const scriptPath = path.join(tempDir, "helper.js");
+  const wrapperPath = path.join(tempDir, process.platform === "win32" ? "helper.cmd" : "helper.sh");
+  const contents = [
+    'const fs = require("node:fs");',
+    `const stdout = ${JSON.stringify(stdout)};`,
+    recordArgsPath ? `fs.writeFileSync(${JSON.stringify(recordArgsPath)}, process.argv.slice(2).join("\\n"));` : "",
+    "process.stdout.write(stdout);"
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   await fs.writeFile(scriptPath, contents, "utf8");
-  if (process.platform !== "win32") {
-    await fs.chmod(scriptPath, 0o755);
+  if (process.platform === "win32") {
+    await fs.writeFile(wrapperPath, `@echo off\r\nnode "%~dp0helper.js" %*\r\n`, "utf8");
+  } else {
+    await fs.writeFile(wrapperPath, `#!/usr/bin/env sh\nexec node "$(dirname \"$0\")/helper.js" "$@"\n`, "utf8");
+    await fs.chmod(wrapperPath, 0o755);
   }
 
-  return scriptPath;
+  return wrapperPath;
 }

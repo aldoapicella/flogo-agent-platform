@@ -410,6 +410,68 @@ describe("FlogoAppsService", () => {
         trace: {
           appName: "subflow-app",
           flowId: "orchestrate",
+          evidenceKind: "runtime_backed",
+          runtimeEvidence: {
+            kind: "runtime_backed",
+            recorderBacked: true,
+            recorderKind: "flow_state_recorder",
+            recorderMode: "full",
+            runtimeMode: "independent_action",
+            restTriggerRuntime: {
+              kind: "rest",
+              request: {
+                method: "POST",
+                path: "/orchestrate",
+                headers: {
+                  "content-type": "application/json"
+                },
+                queryParams: {},
+                pathParams: {},
+                body: {
+                  payload: "hello"
+                }
+              },
+              flowInput: {
+                payload: "hello"
+              },
+              flowOutput: {
+                message: "hello"
+              },
+              reply: {
+                status: 200,
+                headers: {
+                  "content-type": "application/json"
+                },
+                body: {
+                  message: "hello"
+                },
+                data: {
+                  message: "hello"
+                }
+              },
+              mapping: {
+                requestMappingMode: "auto",
+                replyMappingMode: "auto",
+                mappedFlowInput: {
+                  payload: "$trigger.content"
+                },
+                mappedFlowOutput: {
+                  data: "$flow.message"
+                },
+                requestMappings: {
+                  payload: "$trigger.content"
+                },
+                replyMappings: {
+                  data: "$flow.message"
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              unavailableFields: [],
+              diagnostics: []
+            },
+            steps: [{ id: "prepare" }]
+          },
           summary: {
             flowId: "orchestrate",
             status: "completed",
@@ -449,7 +511,20 @@ describe("FlogoAppsService", () => {
     });
 
     expect(response?.trace?.flowId).toBe("orchestrate");
+    expect(response?.trace?.runtimeEvidence?.steps).toHaveLength(1);
+    expect(response?.trace?.runtimeEvidence?.normalizedSteps).toHaveLength(1);
     expect(response?.artifact?.type).toBe("run_trace");
+    expect(response?.artifact?.metadata?.traceEvidenceKind).toBe("runtime_backed");
+    expect(response?.artifact?.metadata?.traceComparisonBasisPreference).toBe("rest_runtime_envelope");
+    expect(response?.artifact?.metadata?.traceNormalizedStepCount).toBe(1);
+    expect(response?.artifact?.metadata?.traceRecorderBacked).toBe(true);
+    expect(response?.artifact?.metadata?.traceRecorderMode).toBe("full");
+    expect(response?.artifact?.metadata?.traceRestTriggerRuntimeEvidence).toBe(true);
+    expect(response?.artifact?.metadata?.traceRestTriggerRuntimeKind).toBe("rest");
+    expect(response?.artifact?.metadata?.traceRestTriggerRuntimeMethod).toBe("POST");
+    expect(response?.artifact?.metadata?.traceRestTriggerRuntimePath).toBe("/orchestrate");
+    expect(response?.artifact?.metadata?.traceRestTriggerRuntimeReplyStatus).toBe(200);
+    expect(response?.trace?.runtimeEvidence?.restTriggerRuntime?.kind).toBe("rest");
     expect(storedPayloads.some((entry) => entry.blobPath.includes("/run_trace/"))).toBe(true);
   });
 
@@ -467,6 +542,113 @@ describe("FlogoAppsService", () => {
         sampleInput: {}
       })
     ).rejects.toThrow(/Run trace request is invalid/);
+  });
+
+  it("persists CLI runtime trace metadata for the narrow CLI slice", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        trace: {
+          appName: "cli-app",
+          flowId: "orchestrate",
+          evidenceKind: "runtime_backed",
+          runtimeEvidence: {
+            kind: "runtime_backed",
+            recorderBacked: true,
+            recorderKind: "flow_state_recorder",
+            recorderMode: "full",
+            runtimeMode: "cli_trigger",
+            cliTriggerRuntime: {
+              kind: "cli",
+              settings: {
+                singleCmd: true
+              },
+              handler: {
+                command: "say"
+              },
+              args: ["hello"],
+              flags: {
+                loud: true
+              },
+              flowInput: {
+                args: ["hello"],
+                flags: {
+                  loud: true
+                }
+              },
+              reply: {
+                data: "cli-ok",
+                stdout: "cli-ok"
+              },
+              unavailableFields: ["flowOutput"],
+              diagnostics: []
+            },
+            normalizedSteps: [
+              {
+                taskId: "prepare",
+                status: "completed",
+                resolvedInputs: {
+                  args: ["hello"]
+                },
+                unavailableFields: [],
+                diagnostics: []
+              }
+            ],
+            steps: [{ id: "prepare" }]
+          },
+          summary: {
+            flowId: "orchestrate",
+            status: "completed",
+            input: {
+              args: ["hello"],
+              flags: {
+                loud: true
+              }
+            },
+            output: {},
+            stepCount: 1,
+            diagnostics: []
+          },
+          steps: [
+            {
+              taskId: "prepare",
+              status: "completed",
+              diagnostics: []
+            }
+          ],
+          diagnostics: []
+        }
+      })
+    );
+
+    const storedAppPath = await createSubflowStoredAppFile();
+    const { service, storedPayloads } = createService({
+      storedAppPath,
+      storedAppId: "subflow-app",
+      storedAppName: "subflow-app"
+    });
+
+    const response = await service.traceFlow("demo", "subflow-app", {
+      flowId: "orchestrate",
+      sampleInput: {
+        args: ["hello"],
+        flags: {
+          loud: true
+        }
+      }
+    });
+
+    expect(response?.trace?.runtimeEvidence?.cliTriggerRuntime?.kind).toBe("cli");
+    expect(response?.artifact?.metadata?.traceComparisonBasisPreference).toBe("normalized_runtime_evidence");
+    expect(response?.artifact?.metadata?.traceCLITriggerRuntimeEvidence).toBe(true);
+    expect(response?.artifact?.metadata?.traceCLITriggerRuntimeKind).toBe("cli");
+    expect(response?.artifact?.metadata?.traceCLITriggerRuntimeCommand).toBe("say");
+    expect(response?.artifact?.metadata?.traceCLITriggerRuntimeSingleCmd).toBe(true);
+    expect(response?.artifact?.metadata?.traceCLITriggerRuntimeHasArgs).toBe(true);
+    expect(response?.artifact?.metadata?.traceCLITriggerRuntimeHasFlags).toBe(true);
+    expect(response?.artifact?.metadata?.traceCLITriggerRuntimeHasMappedFlowInput).toBe(true);
+    expect(response?.artifact?.metadata?.traceCLITriggerRuntimeHasMappedFlowOutput).toBe(false);
+    expect(response?.artifact?.metadata?.traceCLITriggerRuntimeHasReply).toBe(true);
+    expect(storedPayloads.some((entry) => entry.blobPath.includes("/run_trace/"))).toBe(true);
   });
 
   it("plans a replay with explicit input without mutating the app file", async () => {
@@ -516,6 +698,68 @@ describe("FlogoAppsService", () => {
           trace: {
             appName: "subflow-app",
             flowId: "orchestrate",
+            evidenceKind: "runtime_backed",
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "independent_action_replay",
+              restTriggerRuntime: {
+                kind: "rest",
+                request: {
+                  method: "POST",
+                  path: "/orchestrate",
+                  headers: {
+                    "content-type": "application/json"
+                  },
+                  queryParams: {},
+                  pathParams: {},
+                  body: {
+                    payload: "replayed"
+                  }
+                },
+                flowInput: {
+                  payload: "replayed"
+                },
+                flowOutput: {
+                  message: "replayed"
+                },
+                reply: {
+                  status: 200,
+                  headers: {
+                    "content-type": "application/json"
+                  },
+                  body: {
+                    message: "replayed"
+                  },
+                  data: {
+                    message: "replayed"
+                  }
+                },
+                mapping: {
+                  requestMappingMode: "auto",
+                  replyMappingMode: "auto",
+                  mappedFlowInput: {
+                    payload: "$trigger.content"
+                  },
+                  mappedFlowOutput: {
+                    data: "$flow.message"
+                  },
+                  requestMappings: {
+                    payload: "$trigger.content"
+                  },
+                  replyMappings: {
+                    data: "$flow.message"
+                  },
+                  unavailableFields: [],
+                  diagnostics: []
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              steps: [{ id: "prepare" }]
+            },
             summary: {
               flowId: "orchestrate",
               status: "completed",
@@ -559,7 +803,127 @@ describe("FlogoAppsService", () => {
     });
 
     expect(response?.result.summary.inputSource).toBe("explicit_input");
+    expect(response?.result.trace?.runtimeEvidence?.steps).toHaveLength(1);
+    expect(response?.result.trace?.runtimeEvidence?.normalizedSteps).toHaveLength(1);
     expect(response?.artifact?.type).toBe("replay_report");
+    expect(response?.artifact?.metadata?.replayEvidenceKind).toBe("runtime_backed");
+    expect(response?.result.restReplay?.comparisonBasis).toBe("rest_runtime_envelope");
+    expect(response?.result.restReplay?.requestEnvelopeObserved).toBe(true);
+    expect(response?.result.restReplay?.replyEnvelopeObserved).toBe(true);
+    expect(response?.artifact?.metadata?.replayComparisonBasisPreference).toBe("rest_runtime_envelope");
+    expect(response?.artifact?.metadata?.replayNormalizedStepCount).toBe(1);
+    expect(response?.artifact?.metadata?.replayRecorderMode).toBe("full");
+    expect(response?.artifact?.metadata?.replayRestReplayComparisonBasis).toBe("rest_runtime_envelope");
+    expect(response?.artifact?.metadata?.replayRestRuntimeMode).toBe("independent_action_replay");
+    expect(response?.artifact?.metadata?.replayRestRequestEnvelopeObserved).toBe(true);
+    expect(response?.artifact?.metadata?.replayRestMappedFlowInputObserved).toBe(true);
+    expect(response?.artifact?.metadata?.replayRestMappedFlowOutputObserved).toBe(true);
+    expect(response?.artifact?.metadata?.replayRestReplyEnvelopeObserved).toBe(true);
+    expect(response?.artifact?.metadata?.replayRestTriggerRuntimeEvidence).toBe(true);
+    expect(response?.artifact?.metadata?.replayRestTriggerRuntimeKind).toBe("rest");
+    expect(response?.artifact?.metadata?.replayRestTriggerRuntimeMethod).toBe("POST");
+    expect(response?.artifact?.metadata?.replayRestTriggerRuntimePath).toBe("/orchestrate");
+    expect(response?.artifact?.metadata?.replayRestTriggerRuntimeReplyStatus).toBe(200);
+    expect(response?.result.trace?.runtimeEvidence?.restTriggerRuntime?.kind).toBe("rest");
+    expect(storedPayloads.some((entry) => entry.blobPath.includes("/replay_report/"))).toBe(true);
+  });
+
+  it("replays a timer-backed flow and persists timer runtime metadata", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          summary: {
+            flowId: "orchestrate",
+            status: "completed",
+            inputSource: "explicit_input",
+            baseInput: {
+              payload: "hello"
+            },
+            effectiveInput: {
+              payload: "hello"
+            },
+            overridesApplied: false,
+            diagnostics: []
+          },
+          trace: {
+            appName: "timer-app",
+            flowId: "orchestrate",
+            evidenceKind: "runtime_backed",
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "timer_trigger_replay",
+              timerTriggerRuntime: {
+                kind: "timer",
+                settings: {
+                  runMode: "repeat",
+                  startDelay: "10s",
+                  repeatInterval: "30s"
+                },
+                flowInput: {},
+                flowOutput: {
+                  status: "tick"
+                },
+                tick: {
+                  startedAt: "2026-03-18T00:00:00Z",
+                  firedAt: "2026-03-18T00:00:30Z",
+                  tickCount: 1
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              steps: [{ id: "tick" }]
+            },
+            summary: {
+              flowId: "orchestrate",
+              status: "completed",
+              input: {
+                payload: "hello"
+              },
+              output: {
+                status: "tick"
+              },
+              stepCount: 1,
+              diagnostics: []
+            },
+            steps: [
+              {
+                taskId: "tick",
+                status: "completed",
+                diagnostics: []
+              }
+            ],
+            diagnostics: []
+          }
+        }
+      })
+    );
+
+    const storedAppPath = await createSubflowStoredAppFile();
+    const { service, storedPayloads } = createService({
+      storedAppPath,
+      storedAppId: "subflow-app",
+      storedAppName: "subflow-app"
+    });
+
+    const response = await service.replayFlow("demo", "subflow-app", {
+      flowId: "orchestrate",
+      baseInput: {
+        payload: "hello"
+      },
+      validateOnly: false
+    });
+
+    expect(response?.artifact?.type).toBe("replay_report");
+    expect(response?.artifact?.metadata?.replayComparisonBasisPreference).toBe("timer_runtime_startup");
+    expect(response?.artifact?.metadata?.replayTimerTriggerRuntimeEvidence).toBe(true);
+    expect(response?.artifact?.metadata?.replayTimerTriggerRuntimeKind).toBe("timer");
+    expect(response?.artifact?.metadata?.replayTimerTriggerRuntimeRunMode).toBe("repeat");
+    expect(response?.artifact?.metadata?.replayTimerTriggerRuntimeStartDelay).toBe("10s");
+    expect(response?.artifact?.metadata?.replayTimerTriggerRuntimeRepeatInterval).toBe("30s");
+    expect(response?.artifact?.metadata?.replayTimerTriggerRuntimeTickObserved).toBe(true);
     expect(storedPayloads.some((entry) => entry.blobPath.includes("/replay_report/"))).toBe(true);
   });
 
@@ -569,6 +933,7 @@ describe("FlogoAppsService", () => {
         trace: {
           appName: "subflow-app",
           flowId: "orchestrate",
+          evidenceKind: "runtime_backed",
           summary: {
             flowId: "orchestrate",
             status: "completed",
@@ -583,6 +948,57 @@ describe("FlogoAppsService", () => {
             },
             stepCount: 1,
             diagnostics: []
+          },
+          runtimeEvidence: {
+            kind: "runtime_backed",
+            recorderBacked: true,
+            recorderKind: "flow_state_recorder",
+            recorderMode: "full",
+            runtimeMode: "independent_action",
+            restTriggerRuntime: {
+              kind: "rest",
+              request: {
+                method: "POST",
+                path: "/orchestrate"
+              },
+              flowInput: {
+                payload: "hello"
+              },
+              flowOutput: {
+                message: "hello"
+              },
+              reply: {
+                status: 200
+              },
+              mapping: {
+                requestMappingMode: "auto",
+                replyMappingMode: "auto",
+                mappedFlowInput: {
+                  payload: "$trigger.content"
+                },
+                mappedFlowOutput: {
+                  data: "$flow.message"
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              unavailableFields: [],
+              diagnostics: []
+            },
+            normalizedSteps: [
+              {
+                taskId: "prepare",
+                status: "completed",
+                resolvedInputs: {
+                  payload: "hello"
+                },
+                producedOutputs: {
+                  message: "hello"
+                },
+                unavailableFields: [],
+                diagnostics: []
+              }
+            ]
           },
           steps: [
             {
@@ -620,6 +1036,55 @@ describe("FlogoAppsService", () => {
           trace: {
             appName: "subflow-app",
             flowId: "orchestrate",
+            evidenceKind: "runtime_backed",
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "independent_action_replay",
+              restTriggerRuntime: {
+                kind: "rest",
+                request: {
+                  method: "POST",
+                  path: "/orchestrate"
+                },
+                flowInput: {
+                  payload: "replayed"
+                },
+                flowOutput: {
+                  message: "replayed"
+                },
+                reply: {
+                  status: 200
+                },
+                mapping: {
+                  requestMappingMode: "auto",
+                  replyMappingMode: "auto",
+                  mappedFlowInput: {
+                    payload: "$trigger.content"
+                  },
+                  mappedFlowOutput: {
+                    data: "$flow.message"
+                  },
+                  unavailableFields: [],
+                  diagnostics: []
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              flowStart: {
+                flow_inputs: {
+                  payload: "replayed"
+                }
+              },
+              flowDone: {
+                flow_outputs: {
+                  message: "replayed"
+                }
+              },
+              steps: [{ id: "prepare" }]
+            },
             summary: {
               flowId: "orchestrate",
               status: "completed",
@@ -693,6 +1158,7 @@ describe("FlogoAppsService", () => {
     expect(traceResponse?.artifact?.type).toBe("run_trace_plan");
     expect(storedTraceArtifact?.type).toBe("run_trace");
     expect(response?.result.summary.inputSource).toBe("trace_artifact");
+    expect(response?.result.trace?.evidenceKind).toBe("runtime_backed");
     expect(response?.result.summary.effectiveInput).toEqual({
       payload: "hello",
       nested: {
@@ -726,6 +1192,25 @@ describe("FlogoAppsService", () => {
         trace: {
           appName: "subflow-app",
           flowId: "orchestrate",
+          evidenceKind: "runtime_backed",
+          runtimeEvidence: {
+            kind: "runtime_backed",
+            recorderBacked: true,
+            recorderKind: "flow_state_recorder",
+            recorderMode: "full",
+            runtimeMode: "independent_action",
+            flowStart: {
+              flow_inputs: {
+                payload: "hello"
+              }
+            },
+            flowDone: {
+              flow_outputs: {
+                message: "hello"
+              }
+            },
+            steps: [{ id: "prepare" }]
+          },
           summary: {
             flowId: "orchestrate",
             status: "completed",
@@ -788,6 +1273,68 @@ describe("FlogoAppsService", () => {
         trace: {
           appName: "subflow-app",
           flowId: "orchestrate",
+          evidenceKind: "runtime_backed",
+          runtimeEvidence: {
+            kind: "runtime_backed",
+            recorderBacked: true,
+            recorderKind: "flow_state_recorder",
+            recorderMode: "full",
+            runtimeMode: "independent_action",
+            restTriggerRuntime: {
+              kind: "rest",
+              request: {
+                method: "POST",
+                path: "/orchestrate",
+                headers: {
+                  "content-type": "application/json"
+                },
+                queryParams: {},
+                pathParams: {},
+                body: {
+                  payload: "hello"
+                }
+              },
+              flowInput: {
+                payload: "hello"
+              },
+              flowOutput: {
+                message: "hello"
+              },
+              reply: {
+                status: 200,
+                headers: {
+                  "content-type": "application/json"
+                },
+                body: {
+                  message: "hello"
+                },
+                data: {
+                  message: "hello"
+                }
+              },
+              mapping: {
+                requestMappingMode: "auto",
+                replyMappingMode: "auto",
+                mappedFlowInput: {
+                  payload: "$trigger.content"
+                },
+                mappedFlowOutput: {
+                  data: "$flow.message"
+                },
+                requestMappings: {
+                  payload: "$trigger.content"
+                },
+                replyMappings: {
+                  data: "$flow.message"
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              unavailableFields: [],
+              diagnostics: []
+            },
+            steps: [{ id: "prepare" }]
+          },
           summary: {
             flowId: "orchestrate",
             status: "completed",
@@ -833,6 +1380,7 @@ describe("FlogoAppsService", () => {
           trace: {
             appName: "subflow-app",
             flowId: "orchestrate",
+            evidenceKind: "runtime_backed",
             summary: {
               flowId: "orchestrate",
               status: "completed",
@@ -897,9 +1445,351 @@ describe("FlogoAppsService", () => {
     });
 
     expect(response?.artifact?.type).toBe("run_comparison");
+    expect(response?.artifact?.metadata?.comparisonBasis).toBe("rest_runtime_envelope");
+    expect(response?.artifact?.metadata?.rightEvidenceKind).toBe("runtime_backed");
+    expect(response?.artifact?.metadata?.leftNormalizedStepEvidence).toBe(true);
+    expect(response?.artifact?.metadata?.rightNormalizedStepEvidence).toBe(true);
+    expect(response?.artifact?.metadata?.leftRestTriggerRuntimeEvidence).toBe(true);
+    expect(response?.artifact?.metadata?.rightRestTriggerRuntimeEvidence).toBe(true);
+    expect(response?.artifact?.metadata?.leftRestTriggerRuntimeKind).toBe("rest");
+    expect(response?.artifact?.metadata?.rightRestTriggerRuntimeKind).toBe("rest");
+    expect(response?.artifact?.metadata?.restComparisonBasis).toBe("rest_runtime_envelope");
+    expect(response?.artifact?.metadata?.restRequestEnvelopeCompared).toBe(true);
+    expect(response?.artifact?.metadata?.restMappedFlowInputCompared).toBe(true);
+    expect(response?.artifact?.metadata?.restReplyEnvelopeCompared).toBe(true);
+    expect(response?.artifact?.metadata?.restNormalizedStepEvidenceCompared).toBe(true);
+    expect(response?.artifact?.metadata?.restComparisonUnsupportedFields).toEqual([]);
+    expect(response?.result?.restComparison?.comparisonBasis).toBe("rest_runtime_envelope");
     expect(response?.result?.summary.outputDiff.kind).toBe("changed");
     expect(response?.result?.steps.some((step) => step.taskId === "prepare")).toBe(true);
     expect(storedPayloads.some((entry) => entry.blobPath.includes("/run_comparison/"))).toBe(true);
+  });
+
+  it("compares timer-backed trace and replay artifacts using timer startup evidence", async () => {
+    const traceHelper = await createHelperScript(
+      JSON.stringify({
+        trace: {
+          appName: "timer-app",
+          flowId: "orchestrate",
+          evidenceKind: "runtime_backed",
+          runtimeEvidence: {
+            kind: "runtime_backed",
+            recorderBacked: true,
+            recorderKind: "flow_state_recorder",
+            recorderMode: "full",
+            runtimeMode: "timer_trigger",
+            timerTriggerRuntime: {
+              kind: "timer",
+              settings: {
+                runMode: "repeat",
+                startDelay: "10s",
+                repeatInterval: "30s"
+              },
+              flowInput: {},
+              flowOutput: {
+                status: "tick"
+              },
+              tick: {
+                startedAt: "2026-03-18T00:00:00Z",
+                firedAt: "2026-03-18T00:00:30Z",
+                tickCount: 1
+              },
+              unavailableFields: [],
+              diagnostics: []
+            },
+            steps: [{ id: "tick" }]
+          },
+          summary: {
+            flowId: "orchestrate",
+            status: "completed",
+            input: {
+              payload: "hello"
+            },
+            output: {
+              status: "tick"
+            },
+            stepCount: 1,
+            diagnostics: []
+          },
+          steps: [
+            {
+              taskId: "tick",
+              status: "completed",
+              diagnostics: []
+            }
+          ],
+          diagnostics: []
+        }
+      })
+    );
+    const replayHelper = await createHelperScript(
+      JSON.stringify({
+        result: {
+          summary: {
+            flowId: "orchestrate",
+            status: "completed",
+            inputSource: "explicit_input",
+            baseInput: {
+              payload: "hello"
+            },
+            effectiveInput: {
+              payload: "hello"
+            },
+            overridesApplied: false,
+            diagnostics: []
+          },
+          trace: {
+            appName: "timer-app",
+            flowId: "orchestrate",
+            evidenceKind: "runtime_backed",
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "timer_trigger_replay",
+              timerTriggerRuntime: {
+                kind: "timer",
+                settings: {
+                  runMode: "repeat",
+                  startDelay: "10s",
+                  repeatInterval: "30s"
+                },
+                flowInput: {},
+                flowOutput: {
+                  status: "tick"
+                },
+                tick: {
+                  startedAt: "2026-03-18T00:00:00Z",
+                  firedAt: "2026-03-18T00:00:30Z",
+                  tickCount: 1
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              steps: [{ id: "tick" }]
+            },
+            summary: {
+              flowId: "orchestrate",
+              status: "completed",
+              input: {
+                payload: "hello"
+              },
+              output: {
+                status: "tick"
+              },
+              stepCount: 1,
+              diagnostics: []
+            },
+            steps: [
+              {
+                taskId: "tick",
+                status: "completed",
+                diagnostics: []
+              }
+            ],
+            diagnostics: []
+          }
+        }
+      })
+    );
+
+    const storedAppPath = await createSubflowStoredAppFile();
+    const { service, storedPayloads } = createService({
+      storedAppPath,
+      storedAppId: "subflow-app",
+      storedAppName: "subflow-app"
+    });
+
+    process.env.FLOGO_HELPER_BIN = traceHelper;
+    await service.traceFlow("demo", "subflow-app", {
+      flowId: "orchestrate",
+      sampleInput: {
+        payload: "hello"
+      }
+    });
+
+    process.env.FLOGO_HELPER_BIN = replayHelper;
+    await service.replayFlow("demo", "subflow-app", {
+      flowId: "orchestrate",
+      baseInput: {
+        payload: "hello"
+      }
+    });
+
+    const artifacts = await service.listArtifacts("demo", "subflow-app");
+    const left = artifacts?.find((artifact) => artifact.type === "run_trace");
+    const right = artifacts?.find((artifact) => artifact.type === "replay_report");
+    const response = await service.compareRuns("demo", "subflow-app", {
+      leftArtifactId: left?.id,
+      rightArtifactId: right?.id
+    });
+
+    expect(response?.artifact?.metadata?.comparisonBasis).toBe("timer_runtime_startup");
+    expect(response?.artifact?.metadata?.timerComparisonBasis).toBe("timer_runtime_startup");
+    expect(response?.artifact?.metadata?.leftTimerTriggerRuntimeEvidence).toBe(true);
+    expect(response?.artifact?.metadata?.rightTimerTriggerRuntimeEvidence).toBe(true);
+    expect(response?.artifact?.metadata?.timerSettingsCompared).toBe(true);
+    expect(response?.result?.timerComparison?.comparisonBasis).toBe("timer_runtime_startup");
+    expect(response?.result?.timerComparison?.settingsCompared).toBe(true);
+    expect(response?.result?.timerComparison?.flowInputCompared).toBe(true);
+    expect(response?.result?.timerComparison?.flowOutputCompared).toBe(true);
+    expect(response?.result?.timerComparison?.tickCompared).toBe(true);
+    expect(storedPayloads.some((entry) => entry.blobPath.includes("/run_comparison/"))).toBe(true);
+  });
+
+  it("compares a stored run trace with a replay report summary when embedded replay trace data is unavailable", async () => {
+    const traceHelper = await createHelperScript(
+      JSON.stringify({
+        trace: {
+          appName: "subflow-app",
+          flowId: "orchestrate",
+          evidenceKind: "runtime_backed",
+          summary: {
+            flowId: "orchestrate",
+            status: "completed",
+            input: {
+              payload: "hello"
+            },
+            output: {
+              message: "hello"
+            },
+            stepCount: 1,
+            diagnostics: []
+          },
+          steps: [
+            {
+              taskId: "prepare",
+              status: "completed",
+              output: {
+                message: "hello"
+              },
+              diagnostics: []
+            }
+          ],
+          diagnostics: []
+        }
+      })
+    );
+    const replayHelper = await createHelperScript(
+      JSON.stringify({
+        result: {
+          summary: {
+            flowId: "orchestrate",
+            status: "completed",
+            inputSource: "explicit_input",
+            baseInput: {
+              payload: "hello"
+            },
+            effectiveInput: {
+              payload: "replayed"
+            },
+            overridesApplied: true,
+            diagnostics: []
+          },
+          runtimeEvidence: {
+            kind: "runtime_backed",
+            recorderBacked: true,
+            recorderKind: "flow_state_recorder",
+            recorderMode: "full",
+            runtimeMode: "independent_action_replay",
+            restTriggerRuntime: {
+              kind: "rest",
+              request: {
+                method: "POST",
+                path: "/orchestrate",
+                headers: {
+                  "content-type": "application/json"
+                },
+                queryParams: {},
+                pathParams: {},
+                body: {
+                  payload: "replayed"
+                }
+              },
+              flowInput: {
+                payload: "replayed"
+              },
+              flowOutput: {
+                message: "replayed"
+              },
+              reply: {
+                status: 200,
+                headers: {
+                  "content-type": "application/json"
+                },
+                body: {
+                  message: "replayed"
+                },
+                data: {
+                  message: "replayed"
+                }
+              },
+              mapping: {
+                requestMappingMode: "auto",
+                replyMappingMode: "auto",
+                mappedFlowInput: {
+                  payload: "$trigger.content"
+                },
+                mappedFlowOutput: {
+                  data: "$flow.message"
+                },
+                requestMappings: {
+                  payload: "$trigger.content"
+                },
+                replyMappings: {
+                  data: "$flow.message"
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              unavailableFields: [],
+              diagnostics: []
+            },
+            steps: [{ id: "prepare" }]
+          }
+        }
+      })
+    );
+
+    const storedAppPath = await createSubflowStoredAppFile();
+    const { service } = createService({
+      storedAppPath,
+      storedAppId: "subflow-app",
+      storedAppName: "subflow-app"
+    });
+
+    process.env.FLOGO_HELPER_BIN = traceHelper;
+    await service.traceFlow("demo", "subflow-app", {
+      flowId: "orchestrate",
+      sampleInput: {
+        payload: "hello"
+      }
+    });
+
+    process.env.FLOGO_HELPER_BIN = replayHelper;
+    await service.replayFlow("demo", "subflow-app", {
+      flowId: "orchestrate",
+      baseInput: {
+        payload: "hello"
+      },
+      overrides: {
+        payload: "replayed"
+      }
+    });
+
+    const artifacts = await service.listArtifacts("demo", "subflow-app");
+    const left = artifacts?.find((artifact) => artifact.type === "run_trace");
+    const right = artifacts?.find((artifact) => artifact.type === "replay_report");
+
+    const response = await service.compareRuns("demo", "subflow-app", {
+      leftArtifactId: left?.id,
+      rightArtifactId: right?.id
+    });
+
+    expect(response?.artifact?.type).toBe("run_comparison");
+    expect(response?.result?.summary.outputDiff.kind).toBe("removed");
+    expect(response?.result?.steps.some((step) => step.changeKind === "removed")).toBe(true);
   });
 
   it("rejects run comparison when an artifact is missing", async () => {
@@ -1062,6 +1952,10 @@ describe("FlogoAppsService", () => {
     const after = await fs.readFile(storedAppPath, "utf8");
     expect(response.result.applied).toBe(false);
     expect(response.result.artifact?.type).toBe("trigger_binding_plan");
+    expect(response.result.plan.profile.kind).toBe("rest");
+    expect(response.result.plan.profile.replyMode).toBe("json");
+    expect(response.result.plan.profile.requestMappingMode).toBe("auto");
+    expect(response.result.plan.profile.replyMappingMode).toBe("auto");
     expect(response.result.plan.triggerRef).toBe("#rest");
     expect(after).toBe(before);
     expect(storedPayloads.some((entry) => entry.blobPath.includes("/trigger_binding_plan/"))).toBe(true);
@@ -1090,6 +1984,7 @@ describe("FlogoAppsService", () => {
 
     expect(response.result.applied).toBe(true);
     expect(response.result.artifact?.type).toBe("trigger_binding_result");
+    expect(response.result.plan.profile.kind).toBe("channel");
     expect(updated.imports.some((entry) => entry.alias === "channel")).toBe(true);
     expect(updated.triggers.some((trigger) => trigger.ref === "#channel")).toBe(true);
     expect(updated.triggers[0]?.handlers[0]?.action?.ref).toBe("#flow");

@@ -291,11 +291,13 @@ Important fields:
 Response shape:
 
 - `RunTraceResponse`
+- `trace.evidenceKind? = "runtime_backed" | "simulated_fallback"`
 
 Important behavior:
 
 - `validateOnly = true` persists a `run_trace_plan` artifact and does not execute the flow
 - `validateOnly = false` executes the flow through the helper path and persists a `run_trace` artifact
+- persisted `run_trace` artifacts mirror the same provenance as `artifact.metadata.traceEvidenceKind`
 - unknown flows return `404`
 - missing required inputs return `422`
 - analysis-only tasks can request `inputs.mode = "run_trace_plan"`
@@ -303,7 +305,16 @@ Important behavior:
 
 Current implementation notes:
 
-- trace capture is task-level rather than engine-internal event spam,
+- direct trace capture now first attempts a narrow [Project Flogo](https://tibcosoftware.github.io/flogo/introduction/) [Core](https://pkg.go.dev/github.com/project-flogo/core) / [Flow](https://github.com/project-flogo/flow) runtime path for simple same-flow `#log` activity traces through the helper's in-process independent-action execution,
+- for eligible REST-bound flows, trace can also start one narrow runtime-backed REST trigger slice through the official Flogo REST trigger and capture request, mapped flow input/output, and reply evidence in `runtimeEvidence.restTriggerRuntime`,
+- for timer-bound flows in the narrow timer slice, trace can also capture `runtimeEvidence.timerTriggerRuntime` with timer settings, mapped flow input/output, and observed tick evidence when the helper can see them,
+- for eligible CLI-bound flows, trace can also start one narrow runtime-backed CLI trigger slice through the official Flogo CLI trigger and capture trigger settings, command identity, args, flags, mapped flow input, and reply/stdout evidence in `runtimeEvidence.cliTriggerRuntime`,
+- that runtime-backed slice now attaches the Flow `flow/state.Recorder` seam and returns recorder-backed `runtimeEvidence.flowStart`, `runtimeEvidence.flowDone`, `runtimeEvidence.snapshots`, `runtimeEvidence.steps`, and task lifecycle events,
+- the supported slice now projects that recorder/task-event evidence into `runtimeEvidence.normalizedSteps`, including per-step task identity, declared mappings, resolved inputs and produced outputs when observable, flow state before/after, state deltas, and explicit unavailable-field markers when the runtime path cannot observe a requested field,
+- the REST trigger runtime slice is intentionally narrow: static paths only, supported methods limited to `POST`, `PUT`, and `PATCH`, explicit request/reply mappings, and the same helper-supported compiled activity allowlist used by the direct-flow runtime slice,
+- the CLI trigger runtime slice is intentionally narrow: one supported command-entry handler, official CLI trigger argument/flag parsing, supported flag descriptors, explicit args/flags mappings, and the same helper-supported compiled activity allowlist used by the direct-flow runtime slice,
+- unsupported trace topologies fall back to `trace.evidenceKind = "simulated_fallback"` instead of failing outright,
+- the runtime-backed trace surface remains narrow and does not widen engine coverage beyond the current supported direct-flow, REST, timer, and CLI slices,
 - the helper returns structured step snapshots, summary status, and diagnostics only through JSON stdout,
 - current runtime trace is additive runtime evidence and does not replace static mapping preview or mapping tests.
 
@@ -342,10 +353,16 @@ Important behavior:
 
 Current implementation notes:
 
-- replay reuses the helper-backed runtime trace path internally after computing the effective input,
+- replay now first attempts the same narrow runtime-backed helper path as direct trace after computing the effective input,
+- for eligible REST-bound flows, replay can now re-run the same narrow runtime-backed REST trigger slice and capture request, mapped flow input/output, reply evidence, and normalized step evidence in the nested trace,
+- for the narrow timer slice, replay preserves `runtimeEvidence.timerTriggerRuntime` and comparison metadata so timer startup evidence can flow through nested trace artifacts,
+- for the narrow CLI slice, replay can also re-run the same runtime-backed CLI trigger slice and preserve command identity, args, flags, mapped flow input, reply/stdout evidence, and normalized step evidence in the nested trace,
 - replay from `traceArtifactId` loads the stored `run_trace` payload and uses `trace.summary.input` as the base input,
 - successful replay returns structured replay metadata plus a nested trace payload,
 - failed task execution still returns a structured replay response when the helper can serialize the failure.
+- successful narrow runtime-backed replay is labeled separately through `result.runtimeEvidence.runtimeMode` values such as `independent_action_replay`, `rest_trigger_replay`, `cli_trigger_replay`, and `timer_trigger_replay`,
+- the supported slices preserve the same `runtimeEvidence.normalizedSteps` structure in the nested trace when replay succeeds,
+- replay remains simulated/helper-backed for unsupported shapes, the REST-backed slice stays scoped to the same narrow static-path request/reply contract as REST trace, and the CLI-backed slice stays scoped to the same narrow supported command-entry contract as CLI trace.
 
 ### `POST /v1/projects/:projectId/apps/:appId/flows/compare-runs`
 
@@ -378,7 +395,13 @@ Important behavior:
 
 Current implementation notes:
 
-- replay artifacts are normalized through their nested runtime trace before comparison,
+- replay artifacts are normalized through their nested runtime trace when present and otherwise through replay summary plus top-level runtime evidence,
+- when both artifacts provide `runtimeEvidence.normalizedSteps`, comparison prefers that normalized runtime evidence and returns `result.comparisonBasis = "normalized_runtime_evidence"`,
+- that preference is limited to the current supported slice and does not imply a live engine tap beyond persisted artifacts,
+- when normalized runtime evidence is unavailable, comparison falls back to recorder-backed inputs/outputs/step counts when possible and otherwise to the replay summary payload,
+- when both artifacts are REST runtime-backed, comparison can prefer a REST envelope basis and diff request method/path/query/headers/body/path params, mapped flow input, and reply status/body/headers/cookies,
+- when both artifacts carry timer runtime evidence, comparison can prefer `timer_runtime_startup` and surface timer settings, flow input, flow output, and tick diffs in `result.timerComparison`,
+- comparison preserves REST runtime metadata from stored artifacts when present, preserves CLI runtime metadata from stored artifacts when present, but it remains artifact-backed and only performs REST envelope diffing when both sides are REST runtime-backed,
 - cross-flow comparison is allowed and returns a warning diagnostic instead of a hard failure,
 - array values are compared as whole values in this slice,
 - comparison artifacts capture summary-level diffs, task-level diffs, and diagnostic changes.
@@ -397,13 +420,15 @@ Important fields:
 - `profile`
 - `validateOnly`
 - `replaceExisting`
+- `handlerName?`
+- `triggerId?`
 
 Supported trigger profiles in the current slice:
 
 - `rest`
 - `timer`
 - `cli`
-- `channel`
+- `channel` remains deferred from the current runtime-backed slice
 
 Response shape:
 
@@ -419,10 +444,11 @@ Important behavior:
 
 Current implementation notes:
 
+- `handlerName` and `triggerId` default to generated values when omitted
 - REST bindings auto-map common request and reply fields based on the flow contract
 - Timer bindings are limited to flows with zero required inputs in this slice
-- CLI bindings auto-map `args` and `flags`
-- Channel bindings auto-map `data`
+- CLI bindings are supported for design-time binding and now have one narrow runtime-backed command-entry slice; Channel remains deferred from the current runtime-backed slice
+- `triggerName`, `requestMappingMode`, `replyMappingMode`, and `runMode` are deprecated compatibility fields and are ignored by the current binder
 
 ### `POST /v1/projects/:projectId/apps/:appId/flows/extract-subflow`
 

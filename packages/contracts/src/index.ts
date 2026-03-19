@@ -671,9 +671,229 @@ export const RunTraceSummarySchema = z.object({
 });
 export type RunTraceSummary = z.infer<typeof RunTraceSummarySchema>;
 
+export const RunTraceEvidenceKindSchema = z.enum(["runtime_backed", "simulated_fallback"]);
+export type RunTraceEvidenceKind = z.infer<typeof RunTraceEvidenceKindSchema>;
+
+export const RunComparisonBasisSchema = z.enum([
+  "normalized_runtime_evidence",
+  "rest_runtime_envelope",
+  "timer_runtime_startup",
+  "recorder_backed",
+  "recorder_preferred",
+  "runtime_backed",
+  "simulated_fallback"
+]);
+export type RunComparisonBasis = z.infer<typeof RunComparisonBasisSchema>;
+
+export const RuntimeEvidenceStepStatusSchema = z.enum([
+  "scheduled",
+  "started",
+  "completed",
+  "failed",
+  "cancelled",
+  "skipped",
+  "unknown"
+]);
+export type RuntimeEvidenceStepStatus = z.infer<typeof RuntimeEvidenceStepStatusSchema>;
+
+export const RuntimeEvidenceStepSourceSchema = z.enum([
+  "trace_step",
+  "runtime_evidence_step",
+  "task_event",
+  "merged"
+]);
+export type RuntimeEvidenceStepSource = z.infer<typeof RuntimeEvidenceStepSourceSchema>;
+
+export const RestTriggerRuntimeRequestEvidenceSchema = z
+  .object({
+    method: z.string().optional(),
+    path: z.string().optional(),
+    headers: z.record(z.string(), z.unknown()).optional(),
+    queryParams: z.record(z.string(), z.unknown()).optional(),
+    pathParams: z.record(z.string(), z.unknown()).optional(),
+    body: z.unknown().optional(),
+    content: z.unknown().optional()
+  })
+  .passthrough();
+export type RestTriggerRuntimeRequestEvidence = z.infer<typeof RestTriggerRuntimeRequestEvidenceSchema>;
+
+export const RestTriggerRuntimeReplyEvidenceSchema = z
+  .object({
+    status: z.number().int().optional(),
+    headers: z.record(z.string(), z.unknown()).optional(),
+    body: z.unknown().optional(),
+    data: z.unknown().optional(),
+    cookies: z.record(z.string(), z.unknown()).optional()
+  })
+  .passthrough();
+export type RestTriggerRuntimeReplyEvidence = z.infer<typeof RestTriggerRuntimeReplyEvidenceSchema>;
+
+export const RestTriggerRuntimeMappingEvidenceSchema = z
+  .object({
+    requestMappingMode: z.enum(["auto", "explicit"]).optional(),
+    replyMappingMode: z.enum(["auto", "explicit"]).optional(),
+    mappedFlowInput: z.record(z.string(), z.unknown()).optional(),
+    mappedFlowOutput: z.record(z.string(), z.unknown()).optional(),
+    requestMappings: z.record(z.string(), z.unknown()).optional(),
+    replyMappings: z.record(z.string(), z.unknown()).optional(),
+    unavailableFields: z.array(z.string()).default([]),
+    diagnostics: z.array(DiagnosticSchema).default([])
+  })
+  .passthrough();
+export type RestTriggerRuntimeMappingEvidence = z.infer<typeof RestTriggerRuntimeMappingEvidenceSchema>;
+
+export const RestTriggerRuntimeEvidenceSchema = z
+  .object({
+    kind: z.literal("rest"),
+    request: RestTriggerRuntimeRequestEvidenceSchema.optional(),
+    flowInput: z.record(z.string(), z.unknown()).optional(),
+    flowOutput: z.record(z.string(), z.unknown()).optional(),
+    reply: RestTriggerRuntimeReplyEvidenceSchema.optional(),
+    mapping: RestTriggerRuntimeMappingEvidenceSchema.optional(),
+    unavailableFields: z.array(z.string()).default([]),
+    diagnostics: z.array(DiagnosticSchema).default([])
+  })
+  .passthrough();
+export type RestTriggerRuntimeEvidence = z.infer<typeof RestTriggerRuntimeEvidenceSchema>;
+
+export const TimerTriggerRuntimeSettingsEvidenceSchema = z
+  .object({
+    runMode: z.enum(["once_immediate", "once_delay", "repeat", "repeat_delay"]).optional(),
+    startDelay: z.string().optional(),
+    repeatInterval: z.string().optional()
+  })
+  .passthrough();
+export type TimerTriggerRuntimeSettingsEvidence = z.infer<typeof TimerTriggerRuntimeSettingsEvidenceSchema>;
+
+export const TimerTriggerRuntimeTickEvidenceSchema = z
+  .object({
+    startedAt: z.string().optional(),
+    firedAt: z.string().optional(),
+    tickCount: z.number().int().nonnegative().optional()
+  })
+  .passthrough();
+export type TimerTriggerRuntimeTickEvidence = z.infer<typeof TimerTriggerRuntimeTickEvidenceSchema>;
+
+export const TimerTriggerRuntimeEvidenceSchema = z
+  .object({
+    kind: z.literal("timer"),
+    settings: TimerTriggerRuntimeSettingsEvidenceSchema.optional(),
+    flowInput: z.record(z.string(), z.unknown()).optional(),
+    flowOutput: z.record(z.string(), z.unknown()).optional(),
+    tick: TimerTriggerRuntimeTickEvidenceSchema.optional(),
+    unavailableFields: z.array(z.string()).default([]),
+    diagnostics: z.array(DiagnosticSchema).default([])
+  })
+  .passthrough();
+export type TimerTriggerRuntimeEvidence = z.infer<typeof TimerTriggerRuntimeEvidenceSchema>;
+
+export const CLITriggerRuntimeSettingsEvidenceSchema = z
+  .object({
+    singleCmd: z.boolean().optional(),
+    usage: z.string().optional(),
+    long: z.string().optional()
+  })
+  .passthrough();
+export type CLITriggerRuntimeSettingsEvidence = z.infer<typeof CLITriggerRuntimeSettingsEvidenceSchema>;
+
+export const CLITriggerRuntimeHandlerEvidenceSchema = z
+  .object({
+    command: z.string().optional(),
+    usage: z.string().optional(),
+    short: z.string().optional(),
+    long: z.string().optional(),
+    flags: z.array(z.string()).default([])
+  })
+  .passthrough();
+export type CLITriggerRuntimeHandlerEvidence = z.infer<typeof CLITriggerRuntimeHandlerEvidenceSchema>;
+
+export const CLITriggerRuntimeReplyEvidenceSchema = z
+  .object({
+    data: z.unknown().optional(),
+    stdout: z.string().optional()
+  })
+  .passthrough();
+export type CLITriggerRuntimeReplyEvidence = z.infer<typeof CLITriggerRuntimeReplyEvidenceSchema>;
+
+export const CLITriggerRuntimeEvidenceSchema = z
+  .object({
+    kind: z.literal("cli"),
+    settings: CLITriggerRuntimeSettingsEvidenceSchema.optional(),
+    handler: CLITriggerRuntimeHandlerEvidenceSchema.optional(),
+    args: z.array(z.string()).default([]),
+    flags: z.record(z.string(), z.unknown()).optional(),
+    flowInput: z.record(z.string(), z.unknown()).optional(),
+    flowOutput: z.record(z.string(), z.unknown()).optional(),
+    reply: CLITriggerRuntimeReplyEvidenceSchema.optional(),
+    unavailableFields: z.array(z.string()).default([]),
+    diagnostics: z.array(DiagnosticSchema).default([])
+  })
+  .passthrough();
+export type CLITriggerRuntimeEvidence = z.infer<typeof CLITriggerRuntimeEvidenceSchema>;
+
+export const NormalizedRuntimeStepEvidenceSchema = z
+  .object({
+    taskId: z.string(),
+    taskName: z.string().optional(),
+    activityRef: z.string().optional(),
+    type: z.string().optional(),
+    status: z.enum(["completed", "failed", "skipped"]),
+    error: z.string().optional(),
+    startedAt: z.string().optional(),
+    finishedAt: z.string().optional(),
+    declaredInputMappings: z.record(z.string(), z.unknown()).optional(),
+    declaredOutputMappings: z.record(z.string(), z.unknown()).optional(),
+    resolvedInputs: z.record(z.string(), z.unknown()).optional(),
+    producedOutputs: z.record(z.string(), z.unknown()).optional(),
+    flowStateBefore: z.record(z.string(), z.unknown()).optional(),
+    flowStateAfter: z.record(z.string(), z.unknown()).optional(),
+    stateDelta: z.record(z.string(), z.unknown()).optional(),
+    evidenceSource: z.record(z.string(), z.array(z.string())).optional(),
+    unavailableFields: z.array(z.string()).default([]),
+    diagnostics: z.array(DiagnosticSchema).default([]),
+  })
+  .passthrough();
+export type NormalizedRuntimeStepEvidence = z.infer<typeof NormalizedRuntimeStepEvidenceSchema>;
+
+export const RuntimeEvidenceSchema = z.object({
+  kind: RunTraceEvidenceKindSchema,
+  recorderBacked: z.boolean().optional(),
+  recorderKind: z.string().optional(),
+  recorderMode: z.string().optional(),
+  runtimeMode: z.string().optional(),
+  fallbackReason: z.string().optional(),
+  flowStart: z.record(z.string(), z.unknown()).optional(),
+  flowDone: z.record(z.string(), z.unknown()).optional(),
+  snapshots: z.array(z.record(z.string(), z.unknown())).optional(),
+  steps: z.array(z.record(z.string(), z.unknown())).optional(),
+  taskEvents: z.array(z.record(z.string(), z.unknown())).optional(),
+  normalizedSteps: z.array(NormalizedRuntimeStepEvidenceSchema).optional(),
+  restTriggerRuntime: RestTriggerRuntimeEvidenceSchema.optional(),
+  cliTriggerRuntime: CLITriggerRuntimeEvidenceSchema.optional(),
+  timerTriggerRuntime: TimerTriggerRuntimeEvidenceSchema.optional()
+});
+export type RuntimeEvidence = z.infer<typeof RuntimeEvidenceSchema>;
+
+export const RestReplayEvidenceSchema = z
+  .object({
+    comparisonBasis: z.literal("rest_runtime_envelope").optional(),
+    runtimeMode: z.string().optional(),
+    requestEnvelopeObserved: z.boolean().default(false),
+    mappedFlowInputObserved: z.boolean().default(false),
+    mappedFlowOutputObserved: z.boolean().default(false),
+    replyEnvelopeObserved: z.boolean().default(false),
+    unsupportedFields: z.array(z.string()).default([]),
+    diagnostics: z.array(DiagnosticSchema).default([])
+  })
+  .passthrough();
+export type RestReplayEvidence = z.infer<typeof RestReplayEvidenceSchema>;
+
 export const RunTraceSchema = z.object({
   appName: z.string(),
   flowId: z.string(),
+  evidenceKind: RunTraceEvidenceKindSchema.optional(),
+  comparisonBasisPreference: RunComparisonBasisSchema.optional(),
+  runtimeEvidence: RuntimeEvidenceSchema.optional(),
   summary: RunTraceSummarySchema,
   steps: z.array(RunTraceTaskStepSchema).default([]),
   diagnostics: z.array(DiagnosticSchema).default([])
@@ -729,6 +949,9 @@ export type ReplaySummary = z.infer<typeof ReplaySummarySchema>;
 export const ReplayResultSchema = z.object({
   summary: ReplaySummarySchema,
   trace: RunTraceSchema.optional(),
+  comparisonBasisPreference: RunComparisonBasisSchema.optional(),
+  runtimeEvidence: RuntimeEvidenceSchema.optional(),
+  restReplay: RestReplayEvidenceSchema.optional(),
   validation: ValidationReportSchema.optional()
 });
 export type ReplayResult = z.infer<typeof ReplayResultSchema>;
@@ -763,7 +986,16 @@ export const RunComparisonArtifactRefSchema = z.object({
   artifactId: z.string(),
   kind: ComparableRunArtifactKindSchema,
   summaryStatus: z.enum(["completed", "failed"]),
-  flowId: z.string()
+  flowId: z.string(),
+  evidenceKind: RunTraceEvidenceKindSchema.optional(),
+  normalizedStepEvidence: z.boolean().optional(),
+  restTriggerRuntimeEvidence: z.boolean().optional(),
+  restTriggerRuntimeKind: z.string().optional(),
+  cliTriggerRuntimeEvidence: z.boolean().optional(),
+  cliTriggerRuntimeKind: z.string().optional(),
+  timerTriggerRuntimeEvidence: z.boolean().optional(),
+  timerTriggerRuntimeKind: z.string().optional(),
+  comparisonBasisPreference: RunComparisonBasisSchema.optional()
 });
 export type RunComparisonArtifactRef = z.infer<typeof RunComparisonArtifactRefSchema>;
 
@@ -773,6 +1005,41 @@ export const RunComparisonValueDiffSchema = z.object({
   right: z.unknown().optional()
 });
 export type RunComparisonValueDiff = z.infer<typeof RunComparisonValueDiffSchema>;
+
+export const TimerRuntimeComparisonSchema = z
+  .object({
+    comparisonBasis: z.literal("timer_runtime_startup"),
+    runtimeMode: z.string().optional(),
+    settingsCompared: z.boolean(),
+    flowInputCompared: z.boolean(),
+    flowOutputCompared: z.boolean(),
+    tickCompared: z.boolean(),
+    settingsDiff: RunComparisonValueDiffSchema.optional(),
+    flowInputDiff: RunComparisonValueDiffSchema.optional(),
+    flowOutputDiff: RunComparisonValueDiffSchema.optional(),
+    tickDiff: RunComparisonValueDiffSchema.optional(),
+    unsupportedFields: z.array(z.string()).default([]),
+    diagnostics: z.array(DiagnosticSchema).default([])
+  })
+  .passthrough();
+export type TimerRuntimeComparison = z.infer<typeof TimerRuntimeComparisonSchema>;
+
+export const RestEnvelopeComparisonSchema = z
+  .object({
+    comparisonBasis: z.literal("rest_runtime_envelope"),
+    requestEnvelopeCompared: z.boolean(),
+    mappedFlowInputCompared: z.boolean(),
+    replyEnvelopeCompared: z.boolean(),
+    normalizedStepEvidenceCompared: z.boolean(),
+    requestEnvelopeDiff: RunComparisonValueDiffSchema.optional(),
+    mappedFlowInputDiff: RunComparisonValueDiffSchema.optional(),
+    replyEnvelopeDiff: RunComparisonValueDiffSchema.optional(),
+    normalizedStepCountDiff: RunComparisonValueDiffSchema.optional(),
+    unsupportedFields: z.array(z.string()).default([]),
+    diagnostics: z.array(DiagnosticSchema).default([])
+  })
+  .passthrough();
+export type RestEnvelopeComparison = z.infer<typeof RestEnvelopeComparisonSchema>;
 
 export const RunComparisonStepDiffSchema = z.object({
   taskId: z.string(),
@@ -800,6 +1067,9 @@ export type RunComparisonSummaryDiff = z.infer<typeof RunComparisonSummaryDiffSc
 export const RunComparisonResultSchema = z.object({
   left: RunComparisonArtifactRefSchema,
   right: RunComparisonArtifactRefSchema,
+  comparisonBasis: RunComparisonBasisSchema.optional(),
+  restComparison: RestEnvelopeComparisonSchema.optional(),
+  timerComparison: TimerRuntimeComparisonSchema.optional(),
   summary: RunComparisonSummaryDiffSchema,
   steps: z.array(RunComparisonStepDiffSchema).default([]),
   diagnostics: z.array(DiagnosticSchema).default([])
@@ -822,13 +1092,16 @@ export const RestTriggerProfileSchema = z.object({
   path: z.string(),
   port: z.number().int().positive(),
   replyMode: z.enum(["json", "raw", "status_only"]).default("json"),
+  // Deprecated compatibility fields. The current binder ignores them.
   requestMappingMode: z.enum(["auto", "explicit"]).default("auto"),
+  // Deprecated compatibility fields. The current binder ignores them.
   replyMappingMode: z.enum(["auto", "explicit"]).default("auto")
 });
 export type RestTriggerProfile = z.infer<typeof RestTriggerProfileSchema>;
 
 export const TimerTriggerProfileSchema = z.object({
   kind: z.literal("timer"),
+  // Deprecated compatibility field. The current binder ignores it.
   runMode: z.enum(["once_immediate", "once_delay", "repeat", "repeat_delay"]),
   startDelay: z.string().optional(),
   repeatInterval: z.string().optional()
@@ -873,6 +1146,7 @@ export const TriggerBindingRequestSchema = z.object({
   replaceExisting: z.boolean().default(false),
   handlerName: z.string().optional(),
   triggerId: z.string().optional(),
+  // Deprecated compatibility field. The current binder ignores it.
   triggerName: z.string().optional()
 });
 export type TriggerBindingRequest = z.infer<typeof TriggerBindingRequestSchema>;

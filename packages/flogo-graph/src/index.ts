@@ -47,9 +47,16 @@ import {
   RunComparisonResultSchema,
   type ComparableRunArtifactKind,
   type RunComparisonArtifactRef,
+  type RunComparisonBasis,
   type RunComparisonRequest,
   type RunComparisonResponse,
   type RunComparisonResult,
+  type NormalizedRuntimeStepEvidence,
+  type RestEnvelopeComparison,
+  type RestReplayEvidence,
+  type RuntimeEvidence,
+  TimerRuntimeComparisonSchema,
+  type TimerRuntimeComparison,
   type FlowContract,
   type FlowContracts,
   type ReplayRequest,
@@ -315,8 +322,12 @@ type ComparableRun = {
   output?: Record<string, unknown>;
   error?: string;
   stepCount: number;
+  evidenceKind?: "runtime_backed" | "simulated_fallback";
+  comparisonBasis: RunComparisonBasis;
   diagnostics: Diagnostic[];
   steps: ComparableRunStep[];
+  runtimeEvidence?: RuntimeEvidence;
+  restReplay?: RestReplayEvidence;
   replayMetadata?: {
     inputSource: "trace_artifact" | "explicit_input";
     baseInput: Record<string, unknown>;
@@ -336,7 +347,7 @@ const triggerImportRegistry = {
   },
   cli: {
     alias: "cli",
-    ref: "github.com/project-flogo/trigger/cli"
+    ref: "github.com/project-flogo/contrib/trigger/cli"
   },
   channel: {
     alias: "channel",
@@ -994,6 +1005,130 @@ export function planReplay(
   });
 }
 
+function normalizeRuntimeEvidenceSteps(
+  _traceSteps: RunTrace["steps"],
+  runtimeEvidence?: RuntimeEvidence
+): NormalizedRuntimeStepEvidence[] {
+  return runtimeEvidence?.normalizedSteps ?? [];
+}
+
+function runtimeEvidenceHasRestTriggerRuntime(runtimeEvidence?: RuntimeEvidence) {
+  return Boolean(runtimeEvidence?.restTriggerRuntime);
+}
+
+function runtimeEvidenceHasTimerTriggerRuntime(runtimeEvidence?: RuntimeEvidence) {
+  return Boolean(runtimeEvidence?.timerTriggerRuntime);
+}
+
+function runtimeEvidenceHasCLITriggerRuntime(runtimeEvidence?: RuntimeEvidence) {
+  return Boolean(runtimeEvidence?.cliTriggerRuntime);
+}
+
+function runtimeEvidenceHasRestEnvelope(runtimeEvidence?: RuntimeEvidence) {
+  return Boolean(runtimeEvidence?.restTriggerRuntime);
+}
+
+function buildTimerRuntimeComparison(left: ComparableRun, right: ComparableRun): TimerRuntimeComparison | undefined {
+  const leftTimerRuntime = left.runtimeEvidence?.timerTriggerRuntime;
+  const rightTimerRuntime = right.runtimeEvidence?.timerTriggerRuntime;
+  if (!leftTimerRuntime || !rightTimerRuntime) {
+    return undefined;
+  }
+
+  return TimerRuntimeComparisonSchema.parse({
+    comparisonBasis: "timer_runtime_startup",
+    runtimeMode: left.runtimeEvidence?.runtimeMode ?? right.runtimeEvidence?.runtimeMode,
+    settingsCompared: true,
+    flowInputCompared: true,
+    flowOutputCompared: true,
+    tickCompared: true,
+    settingsDiff: createValueDiff(leftTimerRuntime.settings, rightTimerRuntime.settings),
+    flowInputDiff: createValueDiff(leftTimerRuntime.flowInput, rightTimerRuntime.flowInput),
+    flowOutputDiff: createValueDiff(leftTimerRuntime.flowOutput, rightTimerRuntime.flowOutput),
+    tickDiff: createValueDiff(leftTimerRuntime.tick, rightTimerRuntime.tick),
+    unsupportedFields: dedupeStrings([
+      ...(leftTimerRuntime.unavailableFields ?? []),
+      ...(rightTimerRuntime.unavailableFields ?? [])
+    ]),
+    diagnostics: dedupeDiagnostics([
+      ...cloneDiagnostics(leftTimerRuntime.diagnostics),
+      ...cloneDiagnostics(rightTimerRuntime.diagnostics)
+    ])
+  });
+}
+
+function comparableRunSteps(
+  traceSteps: RunTrace["steps"],
+  runtimeEvidence?: RuntimeEvidence
+): ComparableRunStep[] {
+  const normalizedSteps = normalizeRuntimeEvidenceSteps(traceSteps, runtimeEvidence);
+  if (normalizedSteps.length === 0) {
+    return traceSteps.map((step) => ({
+      taskId: step.taskId,
+      status: step.status,
+      input: step.input,
+      output: step.output,
+      flowState: step.flowState,
+      activityState: step.activityState,
+      diagnostics: step.diagnostics
+    }));
+  }
+
+  return normalizedSteps.map((step) => ({
+    taskId: step.taskId,
+    status: step.status,
+    input: step.resolvedInputs,
+    output: step.producedOutputs,
+    flowState: Object.keys({
+      ...(step.flowStateBefore ? { before: step.flowStateBefore } : {}),
+      ...(step.flowStateAfter ? { after: step.flowStateAfter } : {}),
+      ...(step.stateDelta ? { delta: step.stateDelta } : {})
+    }).length
+      ? {
+          ...(step.flowStateBefore ? { before: step.flowStateBefore } : {}),
+          ...(step.flowStateAfter ? { after: step.flowStateAfter } : {}),
+          ...(step.stateDelta ? { delta: step.stateDelta } : {})
+        }
+      : undefined,
+    activityState: Object.keys({
+      ...(step.declaredInputMappings ? { declaredInputMappings: step.declaredInputMappings } : {}),
+      ...(step.declaredOutputMappings ? { declaredOutputMappings: step.declaredOutputMappings } : {}),
+      ...(step.evidenceSource ? { evidenceSource: step.evidenceSource } : {}),
+      ...((step.unavailableFields?.length ?? 0) > 0 ? { unavailableFields: step.unavailableFields } : {})
+    }).length
+      ? {
+          ...(step.declaredInputMappings ? { declaredInputMappings: step.declaredInputMappings } : {}),
+          ...(step.declaredOutputMappings ? { declaredOutputMappings: step.declaredOutputMappings } : {}),
+          ...(step.evidenceSource ? { evidenceSource: step.evidenceSource } : {}),
+          ...((step.unavailableFields?.length ?? 0) > 0 ? { unavailableFields: step.unavailableFields } : {})
+        }
+      : undefined,
+    diagnostics: step.diagnostics
+  }));
+}
+
+function comparisonBasisPreference(
+  runtimeEvidence?: RuntimeEvidence,
+  evidenceKind?: "runtime_backed" | "simulated_fallback"
+): RunComparisonBasis {
+  if (runtimeEvidenceHasRestEnvelope(runtimeEvidence)) {
+    return "rest_runtime_envelope";
+  }
+  if (runtimeEvidenceHasTimerTriggerRuntime(runtimeEvidence)) {
+    return "timer_runtime_startup";
+  }
+  if ((runtimeEvidence?.normalizedSteps?.length ?? 0) > 0) {
+    return "normalized_runtime_evidence";
+  }
+  if (runtimeEvidence?.recorderBacked) {
+    return "recorder_backed";
+  }
+  if (evidenceKind === "runtime_backed" || runtimeEvidence?.kind === "runtime_backed") {
+    return "runtime_backed";
+  }
+  return "simulated_fallback";
+}
+
 function parseComparableRunPayload(
   artifactId: string,
   kind: ComparableRunArtifactKind,
@@ -1023,54 +1158,56 @@ function parseComparableRunPayload(
       ]);
     }
 
+    const runtimeEvidence = parsed.trace.runtimeEvidence;
+    const evidenceKind = parsed.trace.evidenceKind ?? runtimeEvidence?.kind;
+    const artifactComparisonBasis =
+      parsed.trace.comparisonBasisPreference ??
+      comparisonBasisPreference(runtimeEvidence, evidenceKind);
     return {
       artifactId,
       kind,
       flowId: parsed.trace.flowId,
       summaryStatus: parsed.trace.summary.status,
-      input: parsed.trace.summary.input,
-      output: parsed.trace.summary.output,
+      input: preferRecordedFlowInputs(parsed.trace.summary.input, runtimeEvidence),
+      output: preferRecordedFlowOutputs(parsed.trace.summary.output, runtimeEvidence),
       error: parsed.trace.summary.error,
-      stepCount: parsed.trace.summary.stepCount,
+      stepCount: preferRecordedStepCount(parsed.trace.summary.stepCount, runtimeEvidence),
+      evidenceKind,
+      comparisonBasis: artifactComparisonBasis,
       diagnostics: dedupeDiagnostics([
         ...parsed.trace.summary.diagnostics,
         ...parsed.trace.diagnostics
       ]),
-      steps: parsed.trace.steps.map((step) => ({
-        taskId: step.taskId,
-        status: step.status,
-        input: step.input,
-        output: step.output,
-        flowState: step.flowState,
-        activityState: step.activityState,
-        diagnostics: step.diagnostics
-      }))
+      steps: comparableRunSteps(parsed.trace.steps, runtimeEvidence),
+      runtimeEvidence
     };
   }
 
   const parsed = ReplayResponseSchema.parse(payload);
   const nestedTrace = parsed.result.trace;
+  const runtimeEvidence = parsed.result.runtimeEvidence ?? nestedTrace?.runtimeEvidence;
   const flowId = nestedTrace?.flowId ?? parsed.result.summary.flowId;
   const summaryStatus = nestedTrace?.summary.status ?? parsed.result.summary.status;
-  const input = nestedTrace?.summary.input ?? parsed.result.summary.effectiveInput;
-  const output = nestedTrace?.summary.output;
+  const input = nestedTrace
+    ? preferRecordedFlowInputs(nestedTrace.summary.input, runtimeEvidence)
+    : preferRecordedFlowInputs(parsed.result.summary.effectiveInput, runtimeEvidence);
+  const output = nestedTrace
+    ? preferRecordedFlowOutputs(nestedTrace.summary.output, runtimeEvidence)
+    : recorderFlowOutputs(runtimeEvidence);
   const error = nestedTrace?.summary.error;
-  const stepCount = nestedTrace?.summary.stepCount ?? 0;
+  const stepCount = preferRecordedStepCount(nestedTrace?.summary.stepCount ?? 0, runtimeEvidence);
   const diagnostics = dedupeDiagnostics([
     ...parsed.result.summary.diagnostics,
     ...(nestedTrace?.summary.diagnostics ?? []),
     ...(nestedTrace?.diagnostics ?? [])
   ]);
-  const steps =
-    nestedTrace?.steps.map((step) => ({
-      taskId: step.taskId,
-      status: step.status,
-      input: step.input,
-      output: step.output,
-      flowState: step.flowState,
-      activityState: step.activityState,
-      diagnostics: step.diagnostics
-    })) ?? [];
+  const evidenceKind = runtimeEvidence?.kind ?? nestedTrace?.evidenceKind;
+  const artifactComparisonBasis =
+    parsed.result.comparisonBasisPreference ??
+    nestedTrace?.comparisonBasisPreference ??
+    comparisonBasisPreference(runtimeEvidence, evidenceKind);
+  const steps = comparableRunSteps(nestedTrace?.steps ?? [], runtimeEvidence);
+  const restReplay = parsed.result.restReplay ?? buildRestReplayEvidence(runtimeEvidence);
 
   return {
     artifactId,
@@ -1081,8 +1218,12 @@ function parseComparableRunPayload(
     output,
     error,
     stepCount,
+    evidenceKind,
+    comparisonBasis: artifactComparisonBasis,
     diagnostics,
     steps,
+    runtimeEvidence,
+    restReplay,
     replayMetadata: {
       inputSource: parsed.result.summary.inputSource,
       baseInput: parsed.result.summary.baseInput,
@@ -1090,6 +1231,145 @@ function parseComparableRunPayload(
       overridesApplied: parsed.result.summary.overridesApplied
     }
   };
+}
+
+function recorderFlowInputs(runtimeEvidence?: RuntimeEvidence) {
+  if (!runtimeEvidence?.flowStart || typeof runtimeEvidence.flowStart !== "object") {
+    return undefined;
+  }
+  const inputs = runtimeEvidence.flowStart["flow_inputs"];
+  if (!inputs || typeof inputs !== "object" || Array.isArray(inputs)) {
+    return undefined;
+  }
+  return inputs as Record<string, unknown>;
+}
+
+function recorderFlowOutputs(runtimeEvidence?: RuntimeEvidence) {
+  const candidate = runtimeEvidence?.flowDone ?? runtimeEvidence?.flowStart;
+  if (!candidate || typeof candidate !== "object") {
+    return undefined;
+  }
+  const outputs = candidate["flow_outputs"];
+  if (!outputs || typeof outputs !== "object" || Array.isArray(outputs)) {
+    return undefined;
+  }
+  return outputs as Record<string, unknown>;
+}
+
+function preferRecordedFlowInputs(
+  summaryInput: Record<string, unknown>,
+  runtimeEvidence?: RuntimeEvidence
+) {
+  return recorderFlowInputs(runtimeEvidence) ?? summaryInput;
+}
+
+function preferRecordedFlowOutputs(
+  summaryOutput: Record<string, unknown> | undefined,
+  runtimeEvidence?: RuntimeEvidence
+) {
+  return recorderFlowOutputs(runtimeEvidence) ?? summaryOutput;
+}
+
+function preferRecordedStepCount(summaryStepCount: number, runtimeEvidence?: RuntimeEvidence) {
+  const recorderStepCount = runtimeEvidence?.steps?.length ?? 0;
+  const snapshotCount = runtimeEvidence?.snapshots?.length ?? 0;
+  const normalizedStepCount = runtimeEvidence?.normalizedSteps?.length ?? 0;
+  return Math.max(summaryStepCount, recorderStepCount, snapshotCount, normalizedStepCount);
+}
+
+function buildRestReplayEvidence(runtimeEvidence?: RuntimeEvidence): RestReplayEvidence | undefined {
+  const restRuntime = runtimeEvidence?.restTriggerRuntime;
+  if (!restRuntime) {
+    return undefined;
+  }
+
+  return {
+    comparisonBasis: "rest_runtime_envelope",
+    runtimeMode: runtimeEvidence?.runtimeMode,
+    requestEnvelopeObserved: Boolean(restRuntime.request),
+    mappedFlowInputObserved: Boolean(restRuntime.flowInput && Object.keys(restRuntime.flowInput).length > 0),
+    mappedFlowOutputObserved: Boolean(restRuntime.flowOutput && Object.keys(restRuntime.flowOutput).length > 0),
+    replyEnvelopeObserved: Boolean(restRuntime.reply),
+    unsupportedFields: dedupeStrings([...(restRuntime.unavailableFields ?? []), ...(restRuntime.mapping?.unavailableFields ?? [])]),
+    diagnostics: cloneDiagnostics(restRuntime.diagnostics)
+  };
+}
+
+function buildRestEnvelopeComparison(left: ComparableRun, right: ComparableRun): RestEnvelopeComparison | undefined {
+  const leftRestRuntime = left.runtimeEvidence?.restTriggerRuntime;
+  const rightRestRuntime = right.runtimeEvidence?.restTriggerRuntime;
+  if (!leftRestRuntime || !rightRestRuntime) {
+    return undefined;
+  }
+
+  const normalizedStepEvidenceCompared =
+    (left.runtimeEvidence?.normalizedSteps?.length ?? 0) > 0 ||
+    (right.runtimeEvidence?.normalizedSteps?.length ?? 0) > 0;
+
+  return {
+    comparisonBasis: "rest_runtime_envelope",
+    requestEnvelopeCompared: true,
+    mappedFlowInputCompared: true,
+    replyEnvelopeCompared: true,
+    normalizedStepEvidenceCompared,
+    requestEnvelopeDiff: createValueDiff(leftRestRuntime.request, rightRestRuntime.request),
+    mappedFlowInputDiff: createValueDiff(
+      leftRestRuntime.mapping?.mappedFlowInput ?? leftRestRuntime.flowInput,
+      rightRestRuntime.mapping?.mappedFlowInput ?? rightRestRuntime.flowInput
+    ),
+    replyEnvelopeDiff: createValueDiff(leftRestRuntime.reply, rightRestRuntime.reply),
+    normalizedStepCountDiff: createValueDiff(
+      left.runtimeEvidence?.normalizedSteps?.length ?? 0,
+      right.runtimeEvidence?.normalizedSteps?.length ?? 0
+    ),
+    unsupportedFields: dedupeStrings([
+      ...(leftRestRuntime.unavailableFields ?? []),
+      ...(leftRestRuntime.mapping?.unavailableFields ?? []),
+      ...(rightRestRuntime.unavailableFields ?? []),
+      ...(rightRestRuntime.mapping?.unavailableFields ?? [])
+    ]),
+    diagnostics: []
+  };
+}
+
+function chooseRunComparisonBasis(left: ComparableRun, right: ComparableRun) {
+  if (
+    left.comparisonBasis === "rest_runtime_envelope" &&
+    right.comparisonBasis === "rest_runtime_envelope"
+  ) {
+    return "rest_runtime_envelope" as const;
+  }
+  if (
+    left.comparisonBasis === "timer_runtime_startup" &&
+    right.comparisonBasis === "timer_runtime_startup"
+  ) {
+    return "timer_runtime_startup" as const;
+  }
+  if (
+    left.comparisonBasis === "normalized_runtime_evidence" &&
+    right.comparisonBasis === "normalized_runtime_evidence"
+  ) {
+    return "normalized_runtime_evidence" as const;
+  }
+  if (usesRecorderComparisonBasis(left.comparisonBasis) && usesRecorderComparisonBasis(right.comparisonBasis)) {
+    return "recorder_backed" as const;
+  }
+  if (usesRecorderComparisonBasis(left.comparisonBasis) || usesRecorderComparisonBasis(right.comparisonBasis)) {
+    return "recorder_preferred" as const;
+  }
+  if (left.comparisonBasis === "runtime_backed" || right.comparisonBasis === "runtime_backed") {
+    return "runtime_backed" as const;
+  }
+  return "simulated_fallback" as const;
+}
+
+function usesRecorderComparisonBasis(basis: RunComparisonBasis) {
+  return (
+    basis === "normalized_runtime_evidence" ||
+    basis === "recorder_backed" ||
+    basis === "rest_runtime_envelope" ||
+    basis === "timer_runtime_startup"
+  );
 }
 
 function normalizeRunComparisonValue(value: unknown): unknown {
@@ -1144,6 +1424,83 @@ function buildSummaryDiagnosticDiffs(left: ComparableRun, right: ComparableRun, 
     return diagnostics;
   }
 
+  if (
+    left.comparisonBasis === "rest_runtime_envelope" &&
+    right.comparisonBasis === "rest_runtime_envelope"
+  ) {
+    diagnostics.push(
+      createDiagnostic(
+        "flogo.run_comparison.rest_runtime_envelope_preferred",
+        "Compared REST runtime-backed request, mapping, and reply envelopes using the helper-supported REST slice.",
+        "info",
+        undefined,
+        {
+          leftRequestObserved: left.restReplay?.requestEnvelopeObserved ?? false,
+          rightRequestObserved: right.restReplay?.requestEnvelopeObserved ?? false,
+          leftReplyObserved: left.restReplay?.replyEnvelopeObserved ?? false,
+          rightReplyObserved: right.restReplay?.replyEnvelopeObserved ?? false,
+          leftNormalizedSteps: left.runtimeEvidence?.normalizedSteps?.length ?? 0,
+          rightNormalizedSteps: right.runtimeEvidence?.normalizedSteps?.length ?? 0
+        }
+      )
+    );
+  }
+
+  if (
+    left.comparisonBasis === "timer_runtime_startup" &&
+    right.comparisonBasis === "timer_runtime_startup"
+  ) {
+    diagnostics.push(
+      createDiagnostic(
+        "flogo.run_comparison.timer_runtime_startup_preferred",
+        "Compared timer trigger startup evidence, schedule settings, and runtime start/output capture using the helper-supported timer slice.",
+        "info",
+        undefined,
+        {
+          leftSettingsObserved: Boolean(left.runtimeEvidence?.timerTriggerRuntime?.settings),
+          rightSettingsObserved: Boolean(right.runtimeEvidence?.timerTriggerRuntime?.settings),
+          leftTickObserved: Boolean(left.runtimeEvidence?.timerTriggerRuntime?.tick),
+          rightTickObserved: Boolean(right.runtimeEvidence?.timerTriggerRuntime?.tick)
+        }
+      )
+    );
+  }
+
+  if (
+    left.comparisonBasis === "normalized_runtime_evidence" &&
+    right.comparisonBasis === "normalized_runtime_evidence"
+  ) {
+    diagnostics.push(
+      createDiagnostic(
+        "flogo.run_comparison.normalized_runtime_evidence_preferred",
+        "Compared normalized runtime-backed step evidence derived from task events, Flow recorder state, and app metadata.",
+        "info",
+        undefined,
+        {
+          leftNormalizedSteps: left.runtimeEvidence?.normalizedSteps?.length ?? 0,
+          rightNormalizedSteps: right.runtimeEvidence?.normalizedSteps?.length ?? 0
+        }
+      )
+    );
+  }
+
+  if (left.comparisonBasis === "recorder_backed" && right.comparisonBasis === "recorder_backed") {
+    diagnostics.push(
+      createDiagnostic(
+        "flogo.run_comparison.recorder_evidence_preferred",
+        "Compared recorder-backed runtime artifacts using Flow recorder state where available.",
+        "info",
+        undefined,
+        {
+          leftSnapshots: left.runtimeEvidence?.snapshots?.length ?? 0,
+          rightSnapshots: right.runtimeEvidence?.snapshots?.length ?? 0,
+          leftRecordedSteps: left.runtimeEvidence?.steps?.length ?? 0,
+          rightRecordedSteps: right.runtimeEvidence?.steps?.length ?? 0
+        }
+      )
+    );
+  }
+
   if (!areRunComparisonValuesEqual(left.diagnostics, right.diagnostics)) {
     diagnostics.push(
       createDiagnosticDiff(
@@ -1181,6 +1538,36 @@ function buildSummaryDiagnosticDiffs(left: ComparableRun, right: ComparableRun, 
         "Replay override usage differs between the compared runs.",
         left.replayMetadata.overridesApplied,
         right.replayMetadata.overridesApplied
+      )
+    );
+  }
+
+  if (
+    left.runtimeEvidence?.recorderBacked &&
+    right.runtimeEvidence?.recorderBacked &&
+    (left.runtimeEvidence.snapshots?.length ?? 0) !== (right.runtimeEvidence.snapshots?.length ?? 0)
+  ) {
+    diagnostics.push(
+      createDiagnosticDiff(
+        "flogo.run_comparison.recorder_snapshot_count_changed",
+        "Recorder snapshot counts differ between the compared runs.",
+        left.runtimeEvidence.snapshots?.length ?? 0,
+        right.runtimeEvidence.snapshots?.length ?? 0
+      )
+    );
+  }
+
+  if (
+    left.runtimeEvidence?.recorderBacked &&
+    right.runtimeEvidence?.recorderBacked &&
+    (left.runtimeEvidence.steps?.length ?? 0) !== (right.runtimeEvidence.steps?.length ?? 0)
+  ) {
+    diagnostics.push(
+      createDiagnosticDiff(
+        "flogo.run_comparison.recorder_step_count_changed",
+        "Recorder step counts differ between the compared runs.",
+        left.runtimeEvidence.steps?.length ?? 0,
+        right.runtimeEvidence.steps?.length ?? 0
       )
     );
   }
@@ -1289,19 +1676,43 @@ export function compareRuns(
   }
 
   const summaryDiagnostics = buildSummaryDiagnosticDiffs(left, right, request.compare.includeDiagnostics);
+  const comparisonBasis = chooseRunComparisonBasis(left, right);
+  const restComparison = buildRestEnvelopeComparison(left, right);
+  const timerComparison = buildTimerRuntimeComparison(left, right);
   const result = RunComparisonResultSchema.parse({
     left: RunComparisonArtifactRefSchema.parse({
       artifactId: left.artifactId,
       kind: left.kind,
       summaryStatus: left.summaryStatus,
-      flowId: left.flowId
+      flowId: left.flowId,
+      evidenceKind: left.evidenceKind,
+      normalizedStepEvidence: (left.runtimeEvidence?.normalizedSteps?.length ?? 0) > 0,
+      restTriggerRuntimeEvidence: runtimeEvidenceHasRestTriggerRuntime(left.runtimeEvidence),
+      restTriggerRuntimeKind: left.runtimeEvidence?.restTriggerRuntime?.kind,
+      cliTriggerRuntimeEvidence: runtimeEvidenceHasCLITriggerRuntime(left.runtimeEvidence),
+      cliTriggerRuntimeKind: left.runtimeEvidence?.cliTriggerRuntime?.kind,
+      timerTriggerRuntimeEvidence: runtimeEvidenceHasTimerTriggerRuntime(left.runtimeEvidence),
+      timerTriggerRuntimeKind: left.runtimeEvidence?.timerTriggerRuntime?.kind,
+      comparisonBasisPreference: left.comparisonBasis
     } satisfies RunComparisonArtifactRef),
     right: RunComparisonArtifactRefSchema.parse({
       artifactId: right.artifactId,
       kind: right.kind,
       summaryStatus: right.summaryStatus,
-      flowId: right.flowId
+      flowId: right.flowId,
+      evidenceKind: right.evidenceKind,
+      normalizedStepEvidence: (right.runtimeEvidence?.normalizedSteps?.length ?? 0) > 0,
+      restTriggerRuntimeEvidence: runtimeEvidenceHasRestTriggerRuntime(right.runtimeEvidence),
+      restTriggerRuntimeKind: right.runtimeEvidence?.restTriggerRuntime?.kind,
+      cliTriggerRuntimeEvidence: runtimeEvidenceHasCLITriggerRuntime(right.runtimeEvidence),
+      cliTriggerRuntimeKind: right.runtimeEvidence?.cliTriggerRuntime?.kind,
+      timerTriggerRuntimeEvidence: runtimeEvidenceHasTimerTriggerRuntime(right.runtimeEvidence),
+      timerTriggerRuntimeKind: right.runtimeEvidence?.timerTriggerRuntime?.kind,
+      comparisonBasisPreference: right.comparisonBasis
     } satisfies RunComparisonArtifactRef),
+    comparisonBasis,
+    restComparison,
+    timerComparison,
     summary: {
       statusChanged: left.summaryStatus !== right.summaryStatus,
       inputDiff: createValueDiff(left.input, right.input),
@@ -5390,6 +5801,16 @@ function dedupeDiagnostics(diagnostics: Diagnostic[]) {
     result.push(diagnostic);
   }
   return result;
+}
+
+function cloneDiagnostics(diagnostics?: Diagnostic[]) {
+  return diagnostics ? diagnostics.map((diagnostic) => ({ ...diagnostic })) : [];
+}
+
+function dedupeStrings(values: string[]) {
+  return Array.from(new Set(values.filter((value) => value.trim().length > 0))).sort((left, right) =>
+    left.localeCompare(right)
+  );
 }
 
 function inferPropertyType(app: FlogoApp, propertyName: string) {

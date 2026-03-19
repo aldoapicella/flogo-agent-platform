@@ -376,6 +376,11 @@ These describe:
 - task-level execution steps in runtime order,
 - shallow task input/output snapshots,
 - optional flow-state and activity-state capture,
+- optional normalized recorder-backed step evidence in `RunTrace.runtimeEvidence.normalizedSteps` for the supported runtime-backed slice, with raw recorder output retained in `RunTrace.runtimeEvidence.steps`,
+- optional `RunTrace.evidenceKind` provenance so runtime-backed traces and simulated fallbacks remain distinguishable in stored artifacts,
+- optional `RunTrace.runtimeEvidence.restTriggerRuntime` request, mapped flow input/output, reply, and mapping evidence for the supported REST trigger runtime slice,
+- optional `RunTrace.runtimeEvidence.timerTriggerRuntime` timer settings, mapped flow input/output, and tick evidence for the supported timer runtime slice,
+- optional `RunTrace.runtimeEvidence.cliTriggerRuntime` trigger settings, command identity, args, flags, mapped flow input/output, and reply/stdout evidence for the supported CLI trigger runtime slice,
 - failed-trace summaries with structured diagnostics,
 - response artifact references for `run_trace_plan` and `run_trace`.
 
@@ -394,6 +399,10 @@ These describe:
 - replay from either explicit base input or stored `run_trace` input,
 - deep-merged override application,
 - nested runtime-trace output for successful replay execution,
+- the same normalized runtime step evidence can be carried through the nested trace on the supported direct-flow slice, the supported REST slice, the supported CLI slice, and the supported timer slice,
+- replay artifacts can now carry a live REST trigger request/reply envelope in `RunTrace.runtimeEvidence.restTriggerRuntime` for the supported REST slice,
+- replay artifacts can also carry `RunTrace.runtimeEvidence.timerTriggerRuntime` for the supported timer slice, preserving timer settings and observed tick evidence through the nested trace,
+- replay artifacts can also carry `RunTrace.runtimeEvidence.cliTriggerRuntime` for the supported CLI slice, preserving trigger settings, command identity, args/flags, and reply/stdout evidence through the nested trace,
 - structured failed-replay summaries with diagnostics,
 - response artifact references for `replay_plan` and `replay_report`.
 
@@ -414,6 +423,12 @@ These describe:
 
 - validate-only comparison feasibility checks,
 - comparison of stored `run_trace` and `replay_report` artifacts,
+- comparison basis selection that can prefer normalized runtime evidence on the supported slice and fall back to recorder-backed evidence otherwise,
+- comparison can also prefer a REST envelope basis when both artifacts are REST runtime-backed and then diff request method/path/query/headers/body/path params, mapped flow input, and reply status/body/headers/cookies,
+- comparison can also prefer `timer_runtime_startup` when both artifacts carry timer runtime evidence and then diff timer settings, mapped flow input/output, and observed tick evidence,
+- REST runtime metadata is preserved on comparison inputs when present, but dedicated request/reply diffing only applies when both sides are REST runtime-backed,
+- CLI runtime metadata is preserved on comparison inputs when present, but CLI-backed runs still compare through the existing normalized or recorder-backed bases rather than a dedicated CLI envelope diff in this slice,
+- timer runtime metadata is preserved on comparison inputs when present, but dedicated timer startup diffing only applies when both sides are timer runtime-backed,
 - summary-level status/input/output/error/step-count diffs,
 - task-level diffs paired by `taskId`,
 - nested value diffs for task inputs, outputs, flow state, and activity state,
@@ -676,8 +691,9 @@ Examples:
 - `trigger_binding_plan` and `trigger_binding_result` are now produced by the trigger-binding slice.
 - `subflow_extraction_plan`, `subflow_extraction_result`, `subflow_inlining_plan`, and `subflow_inlining_result` are now produced by the subflow-refactor slice.
 - `iterator_plan`, `iterator_result`, `retry_policy_plan`, `retry_policy_result`, `dowhile_plan`, `dowhile_result`, `error_path_plan`, and `error_path_result` are now produced by the advanced control-flow synthesis slice.
-- `run_trace_plan` and `run_trace` are now produced by the direct/runtime helper-backed trace capture path.
-- `replay_plan` and `replay_report` are now produced by the direct/helper-backed replay path.
+- `run_trace_plan` and `run_trace` are now produced by the direct/runtime helper-backed trace capture path, with `run_trace` artifacts carrying `trace.evidenceKind`, `trace.runtimeEvidence`, and matching artifact metadata for the narrow recorder-backed direct-flow, REST runtime, and timer runtime slices.
+- `replay_plan` and `replay_report` are now produced by the direct/helper-backed replay path; replay is runtime-backed on the same narrow supported direct-flow slice plus the narrow REST and timer runtime slices, and otherwise remains simulated fallback, with `result.runtimeEvidence` making that distinction explicit.
+- `run_comparison_plan` and `run_comparison` are now produced from stored `run_trace` and `replay_report` artifacts, preferring recorder-backed runtime evidence and normalized step evidence when available, preferring REST envelope comparison or timer startup comparison when the matching artifacts carry those runtime slices, and falling back to nested-trace or summary-only replay payloads otherwise.
 - `contrib_bundle` remains a defined artifact kind whose producing feature is not implemented yet.
 - graph projections in Prisma exist, but the current runtime does not fully maintain them.
 - task persistence is live, but workspace snapshots and blob-backed artifact content are still planned work.

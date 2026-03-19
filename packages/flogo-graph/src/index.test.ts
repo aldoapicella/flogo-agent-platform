@@ -578,10 +578,593 @@ describe("flogo graph", () => {
       }
     );
 
+    expect(response.result?.comparisonBasis).toBe("simulated_fallback");
     expect(response.result?.summary.outputDiff.kind).toBe("changed");
     expect(response.result?.steps).toHaveLength(1);
     expect(response.result?.steps[0]?.taskId).toBe("prepare");
     expect(response.result?.steps[0]?.outputDiff?.kind).toBe("changed");
+  });
+
+  it("prefers normalized runtime evidence when both artifacts provide it", () => {
+    const response = compareRuns(
+      {
+        leftArtifactId: "left-trace",
+        rightArtifactId: "right-replay"
+      },
+      {
+        artifactId: "left-trace",
+        kind: "run_trace",
+        payload: {
+          trace: {
+            appName: "demo",
+            flowId: "orchestrate",
+            evidenceKind: "runtime_backed",
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "independent_action",
+              restTriggerRuntime: {
+                kind: "rest",
+                request: {
+                  method: "POST",
+                  path: "/hello",
+                  headers: {
+                    "content-type": "application/json"
+                  },
+                  queryParams: {},
+                  pathParams: {},
+                  body: {
+                    payload: "recorded-left"
+                  }
+                },
+                flowInput: {
+                  payload: "recorded-left"
+                },
+                flowOutput: {
+                  message: "recorded-left"
+                },
+                reply: {
+                  status: 200,
+                  headers: {
+                    "content-type": "application/json"
+                  },
+                  body: {
+                    message: "recorded-left"
+                  },
+                  data: {
+                    message: "recorded-left"
+                  }
+                },
+                mapping: {
+                  requestMappingMode: "auto",
+                  replyMappingMode: "auto",
+                  mappedFlowInput: {
+                    payload: "$trigger.content"
+                  },
+                  mappedFlowOutput: {
+                    data: "$flow.message"
+                  },
+                  requestMappings: {
+                    payload: "$trigger.content"
+                  },
+                  replyMappings: {
+                    data: "$flow.message"
+                  },
+                  unavailableFields: [],
+                  diagnostics: []
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              normalizedSteps: [
+                {
+                  taskId: "prepare",
+                  status: "completed",
+                  resolvedInputs: {
+                    payload: "recorded-left"
+                  },
+                  producedOutputs: {
+                    message: "recorded-left"
+                  },
+                  unavailableFields: [],
+                  diagnostics: []
+                }
+              ],
+              flowStart: {
+                flow_inputs: {
+                  payload: "recorded-left"
+                }
+              },
+              flowDone: {
+                flow_outputs: {
+                  message: "recorded-left"
+                }
+              },
+              steps: [{ id: "step-left" }]
+            },
+            summary: {
+              flowId: "orchestrate",
+              status: "completed",
+              input: {
+                payload: "summary-left"
+              },
+              output: {
+                message: "summary-left"
+              },
+              stepCount: 0,
+              diagnostics: []
+            },
+            steps: [],
+            diagnostics: []
+          }
+        }
+      },
+      {
+        artifactId: "right-replay",
+        kind: "replay_report",
+        payload: {
+          result: {
+            summary: {
+              flowId: "orchestrate",
+              status: "completed",
+              inputSource: "explicit_input",
+              baseInput: {
+                payload: "summary-right"
+              },
+              effectiveInput: {
+                payload: "summary-right"
+              },
+              overridesApplied: false,
+              diagnostics: []
+            },
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "independent_action_replay",
+              restTriggerRuntime: {
+                kind: "rest",
+                request: {
+                  method: "POST",
+                  path: "/hello",
+                  headers: {
+                    "content-type": "application/json"
+                  },
+                  queryParams: {},
+                  pathParams: {},
+                  body: {
+                    payload: "recorded-right"
+                  }
+                },
+                flowInput: {
+                  payload: "recorded-right"
+                },
+                flowOutput: {
+                  message: "recorded-right"
+                },
+                reply: {
+                  status: 200,
+                  headers: {
+                    "content-type": "application/json"
+                  },
+                  body: {
+                    message: "recorded-right"
+                  },
+                  data: {
+                    message: "recorded-right"
+                  }
+                },
+                mapping: {
+                  requestMappingMode: "auto",
+                  replyMappingMode: "auto",
+                  mappedFlowInput: {
+                    payload: "$trigger.content"
+                  },
+                  mappedFlowOutput: {
+                    data: "$flow.message"
+                  },
+                  requestMappings: {
+                    payload: "$trigger.content"
+                  },
+                  replyMappings: {
+                    data: "$flow.message"
+                  },
+                  unavailableFields: [],
+                  diagnostics: []
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              normalizedSteps: [
+                {
+                  taskId: "prepare",
+                  status: "completed",
+                  resolvedInputs: {
+                    payload: "recorded-right"
+                  },
+                  producedOutputs: {
+                    message: "recorded-right"
+                  },
+                  unavailableFields: [],
+                  diagnostics: []
+                }
+              ],
+              flowStart: {
+                flow_inputs: {
+                  payload: "recorded-right"
+                }
+              },
+              flowDone: {
+                flow_outputs: {
+                  message: "recorded-right"
+                }
+              },
+              steps: [{ id: "step-right-a" }, { id: "step-right-b" }]
+            }
+          }
+        }
+      }
+    );
+
+    expect(response.result?.comparisonBasis).toBe("rest_runtime_envelope");
+    expect(response.result?.left.evidenceKind).toBe("runtime_backed");
+    expect(response.result?.right.evidenceKind).toBe("runtime_backed");
+    expect(response.result?.left.normalizedStepEvidence).toBe(true);
+    expect(response.result?.right.normalizedStepEvidence).toBe(true);
+    expect(response.result?.left.restTriggerRuntimeEvidence).toBe(true);
+    expect(response.result?.right.restTriggerRuntimeEvidence).toBe(true);
+    expect(response.result?.left.restTriggerRuntimeKind).toBe("rest");
+    expect(response.result?.right.restTriggerRuntimeKind).toBe("rest");
+    expect(response.result?.restComparison?.comparisonBasis).toBe("rest_runtime_envelope");
+    expect(response.result?.restComparison?.requestEnvelopeCompared).toBe(true);
+    expect(response.result?.restComparison?.mappedFlowInputCompared).toBe(true);
+    expect(response.result?.restComparison?.replyEnvelopeCompared).toBe(true);
+    expect(response.result?.restComparison?.normalizedStepEvidenceCompared).toBe(true);
+    expect(response.result?.restComparison?.requestEnvelopeDiff).toEqual(
+      expect.objectContaining({
+        kind: "changed"
+      })
+    );
+    expect(response.result?.restComparison?.mappedFlowInputDiff).toEqual(
+      expect.objectContaining({
+        kind: "changed"
+      })
+    );
+    expect(response.result?.restComparison?.replyEnvelopeDiff).toEqual(
+      expect.objectContaining({
+        kind: "changed"
+      })
+    );
+    expect(response.result?.restComparison?.normalizedStepCountDiff).toEqual({
+      kind: "changed",
+      left: 1,
+      right: 2
+    });
+    expect(response.result?.summary.inputDiff).toEqual({
+      kind: "changed",
+      left: { payload: "recorded-left" },
+      right: { payload: "recorded-right" }
+    });
+    expect(response.result?.summary.outputDiff).toEqual({
+      kind: "changed",
+      left: { message: "recorded-left" },
+      right: { message: "recorded-right" }
+    });
+    expect(response.result?.summary.diagnosticDiffs.some((diagnostic) => diagnostic.code === "flogo.run_comparison.rest_runtime_envelope_preferred")).toBe(
+      true
+    );
+    expect(response.result?.summary.stepCountDiff).toEqual({
+      kind: "changed",
+      left: 1,
+      right: 2
+    });
+  });
+
+  it("prefers timer startup evidence when both artifacts provide it", () => {
+    const response = compareRuns(
+      {
+        leftArtifactId: "left-trace",
+        rightArtifactId: "right-replay"
+      },
+      {
+        artifactId: "left-trace",
+        kind: "run_trace",
+        payload: {
+          trace: {
+            appName: "demo",
+            flowId: "heartbeat",
+            evidenceKind: "runtime_backed",
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "timer_trigger",
+              timerTriggerRuntime: {
+                kind: "timer",
+                settings: {
+                  runMode: "repeat",
+                  startDelay: "10s",
+                  repeatInterval: "30s"
+                },
+                flowInput: {},
+                flowOutput: {
+                  status: "tick-left"
+                },
+                tick: {
+                  firedAt: "2026-03-18T00:00:30Z",
+                  tickCount: 1
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              steps: [{ id: "tick-left" }]
+            },
+            summary: {
+              flowId: "heartbeat",
+              status: "completed",
+              input: {},
+              output: {
+                status: "tick-left"
+              },
+              stepCount: 1,
+              diagnostics: []
+            },
+            steps: [
+              {
+                taskId: "tick",
+                status: "completed",
+                output: {
+                  status: "tick-left"
+                },
+                diagnostics: []
+              }
+            ],
+            diagnostics: []
+          }
+        }
+      },
+      {
+        artifactId: "right-replay",
+        kind: "replay_report",
+        payload: {
+          result: {
+            summary: {
+              flowId: "heartbeat",
+              status: "completed",
+              inputSource: "explicit_input",
+              baseInput: {},
+              effectiveInput: {},
+              overridesApplied: false,
+              diagnostics: []
+            },
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "timer_trigger_replay",
+              timerTriggerRuntime: {
+                kind: "timer",
+                settings: {
+                  runMode: "repeat",
+                  startDelay: "10s",
+                  repeatInterval: "30s"
+                },
+                flowInput: {},
+                flowOutput: {
+                  status: "tick-right"
+                },
+                tick: {
+                  firedAt: "2026-03-18T00:00:31Z",
+                  tickCount: 1
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              steps: [{ id: "tick-right" }]
+            },
+            trace: {
+              appName: "demo",
+              flowId: "heartbeat",
+              summary: {
+                flowId: "heartbeat",
+                status: "completed",
+                input: {},
+                output: {
+                  status: "tick-right"
+                },
+                stepCount: 1,
+                diagnostics: []
+              },
+              steps: [
+                {
+                  taskId: "tick",
+                  status: "completed",
+                  output: {
+                    status: "tick-right"
+                  },
+                  diagnostics: []
+                }
+              ],
+              diagnostics: []
+            }
+          }
+        }
+      }
+    );
+
+    expect(response.result?.comparisonBasis).toBe("timer_runtime_startup");
+    expect(response.result?.timerComparison?.comparisonBasis).toBe("timer_runtime_startup");
+    expect(response.result?.timerComparison?.settingsCompared).toBe(true);
+    expect(response.result?.timerComparison?.flowInputCompared).toBe(true);
+    expect(response.result?.timerComparison?.flowOutputCompared).toBe(true);
+  expect(response.result?.timerComparison?.tickCompared).toBe(true);
+  expect(response.result?.timerComparison?.flowOutputDiff?.kind).toBe("changed");
+  });
+
+  it("preserves CLI runtime evidence flags on compared artifacts", () => {
+    const response = compareRuns(
+      {
+        leftArtifactId: "left-cli-trace",
+        rightArtifactId: "right-cli-replay"
+      },
+      {
+        artifactId: "left-cli-trace",
+        kind: "run_trace",
+        payload: {
+          trace: {
+            appName: "cli-app",
+            flowId: "hello",
+            evidenceKind: "runtime_backed",
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "cli_trigger",
+              cliTriggerRuntime: {
+                kind: "cli",
+                settings: {
+                  singleCmd: true
+                },
+                handler: {
+                  command: "say"
+                },
+                args: ["hello"],
+                flags: {
+                  loud: true
+                },
+                flowInput: {
+                  args: ["hello"]
+                },
+                reply: {
+                  data: "cli-ok",
+                  stdout: "cli-ok"
+                },
+                unavailableFields: ["flowOutput"],
+                diagnostics: []
+              },
+              normalizedSteps: [
+                {
+                  taskId: "prepare",
+                  status: "completed",
+                  diagnostics: [],
+                  unavailableFields: []
+                }
+              ]
+            },
+            summary: {
+              flowId: "hello",
+              status: "completed",
+              input: {
+                args: ["hello"]
+              },
+              output: {},
+              stepCount: 1,
+              diagnostics: []
+            },
+            steps: [
+              {
+                taskId: "prepare",
+                status: "completed",
+                diagnostics: []
+              }
+            ],
+            diagnostics: []
+          }
+        }
+      },
+      {
+        artifactId: "right-cli-replay",
+        kind: "replay_report",
+        payload: {
+          result: {
+            summary: {
+              flowId: "hello",
+              status: "completed",
+              inputSource: "explicit_input",
+              baseInput: {
+                args: ["hello"]
+              },
+              effectiveInput: {
+                args: ["hello"]
+              },
+              overridesApplied: false,
+              diagnostics: []
+            },
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "cli_trigger_replay",
+              cliTriggerRuntime: {
+                kind: "cli",
+                settings: {
+                  singleCmd: true
+                },
+                handler: {
+                  command: "say"
+                },
+                args: ["hello"],
+                flags: {
+                  loud: false
+                },
+                flowInput: {
+                  args: ["hello"]
+                },
+                reply: {
+                  data: "cli-ok",
+                  stdout: "cli-ok"
+                },
+                unavailableFields: ["flowOutput"],
+                diagnostics: []
+              },
+              normalizedSteps: [
+                {
+                  taskId: "prepare",
+                  status: "completed",
+                  diagnostics: [],
+                  unavailableFields: []
+                }
+              ]
+            },
+            trace: {
+              appName: "cli-app",
+              flowId: "hello",
+              summary: {
+                flowId: "hello",
+                status: "completed",
+                input: {
+                  args: ["hello"]
+                },
+                output: {},
+                stepCount: 1,
+                diagnostics: []
+              },
+              steps: [
+                {
+                  taskId: "prepare",
+                  status: "completed",
+                  diagnostics: []
+                }
+              ],
+              diagnostics: []
+            }
+          }
+        }
+      }
+    );
+
+    expect(response.result?.left.cliTriggerRuntimeEvidence).toBe(true);
+    expect(response.result?.right.cliTriggerRuntimeEvidence).toBe(true);
+    expect(response.result?.left.cliTriggerRuntimeKind).toBe("cli");
+    expect(response.result?.right.cliTriggerRuntimeKind).toBe("cli");
+    expect(response.result?.comparisonBasis).toBe("normalized_runtime_evidence");
   });
 
   it("rejects run comparison for invalid artifact kinds", () => {
@@ -689,6 +1272,10 @@ describe("flogo graph", () => {
     });
 
     expect(response.result.applied).toBe(false);
+    expect(response.result.plan.profile.kind).toBe("rest");
+    expect(response.result.plan.profile.replyMode).toBe("json");
+    expect(response.result.plan.profile.requestMappingMode).toBe("auto");
+    expect(response.result.plan.profile.replyMappingMode).toBe("auto");
     expect(response.result.plan.triggerRef).toBe("#rest");
     expect(response.result.plan.generatedMappings.input.payload).toBe("$trigger.content");
     expect(response.result.plan.generatedMappings.output.data).toBe("$flow.message");

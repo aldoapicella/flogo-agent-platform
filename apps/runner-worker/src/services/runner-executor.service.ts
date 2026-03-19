@@ -14,17 +14,26 @@ import {
   type ContribDescriptorResponse,
   type ErrorPathTemplateResponse,
   type FlowContractsResponse,
+  ReplayResponseSchema,
   type RunComparisonResponse,
   type ReplayResponse,
+  RunTraceResponseSchema,
   type RunTraceResponse,
   type IteratorSynthesisResponse,
   type MappingTestResponse,
   type Diagnostic,
+  type RestEnvelopeComparison,
+  type RestReplayEvidence,
   type DoWhileSynthesisResponse,
   type GovernanceReport,
   type MappingPreviewResult,
+  type NormalizedRuntimeStepEvidence,
   type PropertyPlanResponse,
+  type RunComparisonBasis,
+  type RunTrace,
   type RetryPolicyResponse,
+  RuntimeEvidenceSchema,
+  type RuntimeEvidence,
   type SubflowExtractionResponse,
   type SubflowInliningResponse,
   type TriggerBindingResponse,
@@ -201,6 +210,306 @@ function createAnalysisArtifact(
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeRuntimeEvidenceSteps(
+  traceSteps: RunTrace["steps"] = [],
+  runtimeEvidence?: RuntimeEvidence
+): NormalizedRuntimeStepEvidence[] {
+  if (Array.isArray(runtimeEvidence?.normalizedSteps) && runtimeEvidence.normalizedSteps.length > 0) {
+    return runtimeEvidence.normalizedSteps;
+  }
+
+  return traceSteps.map((step) => ({
+    taskId: step.taskId,
+    taskName: step.taskName,
+    activityRef: step.activityRef,
+    type: step.type,
+    status: step.status,
+    error: step.error,
+    startedAt: step.startedAt,
+    finishedAt: step.finishedAt,
+    resolvedInputs: step.input,
+    producedOutputs: step.output,
+    flowStateAfter: step.flowState,
+    diagnostics: step.diagnostics,
+    unavailableFields: []
+  }));
+}
+
+function comparisonBasisPreference(
+  runtimeEvidence?: RuntimeEvidence,
+  evidenceKind?: unknown
+): RunComparisonBasis | undefined {
+  if (runtimeEvidence?.restTriggerRuntime) {
+    return "rest_runtime_envelope";
+  }
+  if (runtimeEvidence?.timerTriggerRuntime) {
+    return "timer_runtime_startup";
+  }
+  if ((runtimeEvidence?.normalizedSteps?.length ?? 0) > 0) {
+    return "normalized_runtime_evidence";
+  }
+  if (runtimeEvidence?.recorderBacked) {
+    return "recorder_backed";
+  }
+  if (evidenceKind === "runtime_backed" || runtimeEvidence?.kind === "runtime_backed") {
+    return "runtime_backed";
+  }
+  if (evidenceKind === "simulated_fallback" || runtimeEvidence?.kind === "simulated_fallback") {
+    return "simulated_fallback";
+  }
+  return undefined;
+}
+
+function inferComparableArtifactComparisonBasis(artifact: unknown): RunComparisonBasis | undefined {
+  if (!isRecord(artifact)) {
+    return undefined;
+  }
+
+  const kind = artifact.kind;
+  const payload = artifact.payload;
+
+  if (kind === "run_trace") {
+    const parsed = RunTraceResponseSchema.safeParse(payload);
+    if (!parsed.success || !parsed.data.trace) {
+      return undefined;
+    }
+    const runtimeEvidence = normalizeRuntimeEvidence(
+      parsed.data.trace.runtimeEvidence,
+      parsed.data.trace.evidenceKind,
+      parsed.data.trace.steps
+    );
+    return (
+      parsed.data.trace.comparisonBasisPreference ??
+      comparisonBasisPreference(runtimeEvidence, parsed.data.trace.evidenceKind)
+    );
+  }
+
+  if (kind === "replay_report") {
+    const parsed = ReplayResponseSchema.safeParse(payload);
+    if (!parsed.success) {
+      return undefined;
+    }
+    const runtimeEvidence = normalizeRuntimeEvidence(
+      parsed.data.result.runtimeEvidence ?? parsed.data.result.trace?.runtimeEvidence,
+      parsed.data.result.trace?.evidenceKind,
+      parsed.data.result.trace?.steps
+    );
+    return (
+      parsed.data.result.comparisonBasisPreference ??
+      parsed.data.result.trace?.comparisonBasisPreference ??
+      comparisonBasisPreference(runtimeEvidence, parsed.data.result.trace?.evidenceKind)
+    );
+  }
+
+  return undefined;
+}
+
+function normalizeRuntimeEvidence(
+  runtimeEvidence: unknown,
+  evidenceKind?: unknown,
+  traceSteps: RunTrace["steps"] = []
+): RuntimeEvidence | undefined {
+  const runtimeEvidenceRecord = isRecord(runtimeEvidence) ? runtimeEvidence : undefined;
+  const parsedRuntimeEvidence = RuntimeEvidenceSchema.safeParse(runtimeEvidence);
+  const baseRuntimeEvidence = parsedRuntimeEvidence.success
+    ? parsedRuntimeEvidence.data
+    : runtimeEvidenceRecord
+      ? ({
+          ...runtimeEvidenceRecord
+        } as RuntimeEvidence)
+      : undefined;
+  const kind =
+    (baseRuntimeEvidence?.kind ?? evidenceKind) === "runtime_backed" ||
+    (baseRuntimeEvidence?.kind ?? evidenceKind) === "simulated_fallback"
+      ? (baseRuntimeEvidence?.kind ?? evidenceKind)
+      : undefined;
+
+  if (!kind) {
+    return undefined;
+  }
+
+  const normalizedSteps = normalizeRuntimeEvidenceSteps(traceSteps, baseRuntimeEvidence);
+  return RuntimeEvidenceSchema.parse({
+    ...baseRuntimeEvidence,
+    kind,
+    runtimeMode:
+      baseRuntimeEvidence?.runtimeMode ?? (kind === "runtime_backed" ? "independent_action" : undefined),
+    normalizedSteps: normalizedSteps.length > 0 ? normalizedSteps : baseRuntimeEvidence?.normalizedSteps
+  });
+}
+
+function restTriggerRuntimeMetadata(prefix: "trace" | "replay", runtimeEvidence?: RuntimeEvidence) {
+  const restTriggerRuntime = runtimeEvidence?.restTriggerRuntime;
+  if (!restTriggerRuntime) {
+    return {};
+  }
+
+  return {
+    [`${prefix}RestTriggerRuntimeEvidence`]: true,
+    [`${prefix}RestTriggerRuntimeKind`]: restTriggerRuntime.kind,
+    [`${prefix}RestTriggerRuntimeMethod`]: restTriggerRuntime.request?.method,
+    [`${prefix}RestTriggerRuntimePath`]: restTriggerRuntime.request?.path,
+    [`${prefix}RestTriggerRuntimeReplyStatus`]: restTriggerRuntime.reply?.status,
+    [`${prefix}RestTriggerRuntimeHasMappedFlowInput`]: Object.keys(restTriggerRuntime.flowInput ?? {}).length > 0,
+    [`${prefix}RestTriggerRuntimeHasMappedFlowOutput`]: Object.keys(restTriggerRuntime.flowOutput ?? {}).length > 0
+  };
+}
+
+function cliTriggerRuntimeMetadata(prefix: "trace" | "replay", runtimeEvidence?: RuntimeEvidence) {
+  const cliTriggerRuntime = runtimeEvidence?.cliTriggerRuntime;
+  if (!cliTriggerRuntime) {
+    return {};
+  }
+
+  return {
+    [`${prefix}CLITriggerRuntimeEvidence`]: true,
+    [`${prefix}CLITriggerRuntimeKind`]: cliTriggerRuntime.kind,
+    [`${prefix}CLITriggerRuntimeCommand`]: cliTriggerRuntime.handler?.command,
+    [`${prefix}CLITriggerRuntimeSingleCmd`]: cliTriggerRuntime.settings?.singleCmd,
+    [`${prefix}CLITriggerRuntimeHasArgs`]: (cliTriggerRuntime.args?.length ?? 0) > 0,
+    [`${prefix}CLITriggerRuntimeHasFlags`]: Object.keys(cliTriggerRuntime.flags ?? {}).length > 0,
+    [`${prefix}CLITriggerRuntimeHasMappedFlowInput`]: Object.keys(cliTriggerRuntime.flowInput ?? {}).length > 0,
+    [`${prefix}CLITriggerRuntimeHasMappedFlowOutput`]: Object.keys(cliTriggerRuntime.flowOutput ?? {}).length > 0,
+    [`${prefix}CLITriggerRuntimeHasReply`]: Boolean(cliTriggerRuntime.reply?.data ?? cliTriggerRuntime.reply?.stdout)
+  };
+}
+
+function timerTriggerRuntimeMetadata(prefix: "trace" | "replay", runtimeEvidence?: RuntimeEvidence) {
+  const timerTriggerRuntime = runtimeEvidence?.timerTriggerRuntime;
+  if (!timerTriggerRuntime) {
+    return {};
+  }
+
+  return {
+    [`${prefix}TimerTriggerRuntimeEvidence`]: true,
+    [`${prefix}TimerTriggerRuntimeKind`]: timerTriggerRuntime.kind,
+    [`${prefix}TimerTriggerRuntimeRunMode`]: timerTriggerRuntime.settings?.runMode,
+    [`${prefix}TimerTriggerRuntimeStartDelay`]: timerTriggerRuntime.settings?.startDelay,
+    [`${prefix}TimerTriggerRuntimeRepeatInterval`]: timerTriggerRuntime.settings?.repeatInterval,
+    [`${prefix}TimerTriggerRuntimeTickObserved`]: Boolean(timerTriggerRuntime.tick),
+    [`${prefix}TimerTriggerRuntimeHasMappedFlowInput`]: Object.keys(timerTriggerRuntime.flowInput ?? {}).length > 0,
+    [`${prefix}TimerTriggerRuntimeHasMappedFlowOutput`]: Object.keys(timerTriggerRuntime.flowOutput ?? {}).length > 0
+  };
+}
+
+function buildRestReplayEvidence(runtimeEvidence?: RuntimeEvidence): RestReplayEvidence | undefined {
+  const restTriggerRuntime = runtimeEvidence?.restTriggerRuntime;
+  if (!restTriggerRuntime) {
+    return undefined;
+  }
+
+  return {
+    comparisonBasis: "rest_runtime_envelope",
+    runtimeMode: runtimeEvidence?.runtimeMode,
+    requestEnvelopeObserved: Boolean(restTriggerRuntime.request),
+    mappedFlowInputObserved: Boolean(restTriggerRuntime.flowInput && Object.keys(restTriggerRuntime.flowInput).length > 0),
+    mappedFlowOutputObserved: Boolean(restTriggerRuntime.flowOutput && Object.keys(restTriggerRuntime.flowOutput).length > 0),
+    replyEnvelopeObserved: Boolean(restTriggerRuntime.reply),
+    unsupportedFields: Array.from(
+      new Set([...(restTriggerRuntime.unavailableFields ?? []), ...(restTriggerRuntime.mapping?.unavailableFields ?? [])])
+    ),
+    diagnostics: [...(restTriggerRuntime.diagnostics ?? [])]
+  };
+}
+
+function restReplayMetadata(restReplay?: RestReplayEvidence) {
+  if (!restReplay) {
+    return {};
+  }
+
+  return {
+    restReplay,
+    replayRestReplayComparisonBasis: restReplay.comparisonBasis,
+    replayRestRuntimeMode: restReplay.runtimeMode,
+    replayRestRequestEnvelopeObserved: restReplay.requestEnvelopeObserved,
+    replayRestMappedFlowInputObserved: restReplay.mappedFlowInputObserved,
+    replayRestMappedFlowOutputObserved: restReplay.mappedFlowOutputObserved,
+    replayRestReplyEnvelopeObserved: restReplay.replyEnvelopeObserved,
+    replayRestUnsupportedFields: restReplay.unsupportedFields,
+      replayRestDiagnostics: restReplay.diagnostics
+  };
+}
+
+function timerReplayMetadata(runtimeEvidence?: RuntimeEvidence) {
+  const timerTriggerRuntime = runtimeEvidence?.timerTriggerRuntime;
+  if (!timerTriggerRuntime) {
+    return {};
+  }
+
+  return {
+    timerReplay: {
+      comparisonBasis: "timer_runtime_startup" as const,
+      runtimeMode: runtimeEvidence?.runtimeMode,
+      settingsObserved: Boolean(timerTriggerRuntime.settings),
+      flowInputObserved: Boolean(timerTriggerRuntime.flowInput && Object.keys(timerTriggerRuntime.flowInput).length > 0),
+      flowOutputObserved: Boolean(timerTriggerRuntime.flowOutput && Object.keys(timerTriggerRuntime.flowOutput).length > 0),
+      tickObserved: Boolean(timerTriggerRuntime.tick),
+      unsupportedFields: [...(timerTriggerRuntime.unavailableFields ?? [])],
+      diagnostics: [...(timerTriggerRuntime.diagnostics ?? [])]
+    }
+  };
+}
+
+function restComparisonMetadata(restComparison?: RestEnvelopeComparison) {
+  if (!restComparison) {
+    return {};
+  }
+
+  return {
+    restComparison,
+    restComparisonBasis: restComparison.comparisonBasis,
+    restRequestEnvelopeCompared: restComparison.requestEnvelopeCompared,
+    restMappedFlowInputCompared: restComparison.mappedFlowInputCompared,
+    restReplyEnvelopeCompared: restComparison.replyEnvelopeCompared,
+    restNormalizedStepEvidenceCompared: restComparison.normalizedStepEvidenceCompared,
+    restRequestEnvelopeDiff: restComparison.requestEnvelopeDiff,
+    restMappedFlowInputDiff: restComparison.mappedFlowInputDiff,
+    restReplyEnvelopeDiff: restComparison.replyEnvelopeDiff,
+    restNormalizedStepCountDiff: restComparison.normalizedStepCountDiff,
+      restComparisonUnsupportedFields: restComparison.unsupportedFields,
+      restComparisonDiagnostics: restComparison.diagnostics
+  };
+}
+
+function timerComparisonMetadata(timerComparison?: {
+  comparisonBasis: "timer_runtime_startup";
+  runtimeMode?: string;
+  settingsCompared: boolean;
+  flowInputCompared: boolean;
+  flowOutputCompared: boolean;
+  tickCompared: boolean;
+  settingsDiff?: unknown;
+  flowInputDiff?: unknown;
+  flowOutputDiff?: unknown;
+  tickDiff?: unknown;
+  unsupportedFields: string[];
+  diagnostics: unknown[];
+}) {
+  if (!timerComparison) {
+    return {};
+  }
+
+  return {
+    timerComparison,
+    timerComparisonBasis: timerComparison.comparisonBasis,
+    timerRuntimeMode: timerComparison.runtimeMode,
+    timerSettingsCompared: timerComparison.settingsCompared,
+    timerFlowInputCompared: timerComparison.flowInputCompared,
+    timerFlowOutputCompared: timerComparison.flowOutputCompared,
+    timerTickCompared: timerComparison.tickCompared,
+    timerSettingsDiff: timerComparison.settingsDiff,
+    timerFlowInputDiff: timerComparison.flowInputDiff,
+    timerFlowOutputDiff: timerComparison.flowOutputDiff,
+    timerTickDiff: timerComparison.tickDiff,
+    timerComparisonUnsupportedFields: timerComparison.unsupportedFields,
+    timerComparisonDiagnostics: timerComparison.diagnostics
+  };
+}
+
 async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
   if (
     spec.stepType !== "preview_mapping" &&
@@ -269,7 +578,6 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
         ...(spec.analysisPayload?.replaceExisting === true ? ["--replace-existing"] : []),
         ...(typeof spec.analysisPayload?.handlerName === "string" ? ["--handler-name", String(spec.analysisPayload.handlerName)] : []),
         ...(typeof spec.analysisPayload?.triggerId === "string" ? ["--trigger-id", String(spec.analysisPayload.triggerId)] : []),
-        ...(typeof spec.analysisPayload?.triggerName === "string" ? ["--trigger-name", String(spec.analysisPayload.triggerName)] : [])
       ),
       cleanup: async () => {
         await fs.rm(tempDir, { recursive: true, force: true });
@@ -514,14 +822,46 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
     if (spec.stepType === "capture_run_trace") {
       const response = JSON.parse(stdout) as RunTraceResponse;
       const validateOnly = spec.analysisPayload?.validateOnly === true || !response.trace;
+      const runtimeEvidence = normalizeRuntimeEvidence(
+        response.trace?.runtimeEvidence,
+        response.trace?.evidenceKind,
+        response.trace?.steps
+      );
+      const traceComparisonBasisPreference = comparisonBasisPreference(
+        runtimeEvidence,
+        response.trace?.evidenceKind
+      );
+      const trace = response.trace
+        ? {
+            ...response.trace,
+            comparisonBasisPreference: traceComparisonBasisPreference,
+            runtimeEvidence: runtimeEvidence ?? response.trace.runtimeEvidence
+          }
+        : response.trace;
       return [
         createAnalysisArtifact(
           spec,
           validateOnly ? "run_trace_plan" : "run_trace",
           `run-trace-${String(spec.analysisPayload?.flowId ?? "flow")}`,
           {
-            trace: response.trace,
+            trace,
             validation: response.validation,
+            traceEvidenceKind: trace?.evidenceKind ?? runtimeEvidence?.kind,
+            traceComparisonBasisPreference:
+              trace?.comparisonBasisPreference ?? traceComparisonBasisPreference,
+            runtimeEvidence: trace?.runtimeEvidence ?? runtimeEvidence,
+            traceNormalizedStepCount: Array.isArray(trace?.runtimeEvidence?.normalizedSteps)
+              ? trace.runtimeEvidence.normalizedSteps.length
+              : Array.isArray(runtimeEvidence?.normalizedSteps)
+                ? runtimeEvidence.normalizedSteps.length
+                : 0,
+            traceRecorderBacked: trace?.runtimeEvidence?.recorderBacked ?? runtimeEvidence?.recorderBacked,
+            traceRecorderMode: trace?.runtimeEvidence?.recorderMode ?? runtimeEvidence?.recorderMode,
+            traceRuntimeMode: trace?.runtimeEvidence?.runtimeMode ?? runtimeEvidence?.runtimeMode,
+            traceFallbackReason: trace?.runtimeEvidence?.fallbackReason ?? runtimeEvidence?.fallbackReason,
+            ...restTriggerRuntimeMetadata("trace", trace?.runtimeEvidence ?? runtimeEvidence),
+            ...cliTriggerRuntimeMetadata("trace", trace?.runtimeEvidence ?? runtimeEvidence),
+            ...timerTriggerRuntimeMetadata("trace", trace?.runtimeEvidence ?? runtimeEvidence),
             diagnostics
           }
         )
@@ -531,13 +871,53 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
     if (spec.stepType === "replay_flow") {
       const response = JSON.parse(stdout) as ReplayResponse;
       const validateOnly = spec.analysisPayload?.validateOnly === true || !response.result.trace;
+      const runtimeEvidence = normalizeRuntimeEvidence(
+        response.result.runtimeEvidence ?? response.result.trace?.runtimeEvidence,
+        response.result.trace?.evidenceKind,
+        response.result.trace?.steps
+      );
+      const replayComparisonBasisPreference = comparisonBasisPreference(
+        runtimeEvidence,
+        response.result.trace?.evidenceKind
+      );
+      const restReplay = response.result.restReplay ?? buildRestReplayEvidence(runtimeEvidence);
+      const resultTrace = response.result.trace
+        ? {
+            ...response.result.trace,
+            comparisonBasisPreference: replayComparisonBasisPreference,
+            runtimeEvidence: runtimeEvidence ?? response.result.trace.runtimeEvidence
+          }
+        : response.result.trace;
+      const result = {
+        ...response.result,
+        comparisonBasisPreference: replayComparisonBasisPreference,
+        restReplay,
+        trace: resultTrace,
+        runtimeEvidence: runtimeEvidence ?? response.result.runtimeEvidence
+      };
       return [
         createAnalysisArtifact(
           spec,
           validateOnly ? "replay_plan" : "replay_report",
           `replay-${String(spec.analysisPayload?.flowId ?? "flow")}`,
           {
-            result: response.result,
+            result,
+            replayEvidenceKind: result.runtimeEvidence?.kind,
+            replayComparisonBasisPreference: result.comparisonBasisPreference,
+            replayNormalizedStepCount: Array.isArray(result.runtimeEvidence?.normalizedSteps)
+              ? result.runtimeEvidence.normalizedSteps.length
+              : 0,
+            replayRecorderBacked: result.runtimeEvidence?.recorderBacked,
+            replayRecorderMode: result.runtimeEvidence?.recorderMode,
+            replayRuntimeMode: result.runtimeEvidence?.runtimeMode,
+            replayFallbackReason: result.runtimeEvidence?.fallbackReason,
+            runtimeEvidence: result.runtimeEvidence,
+            traceEvidenceKind: result.trace?.evidenceKind ?? result.runtimeEvidence?.kind,
+            ...restReplayMetadata(result.restReplay),
+            ...timerReplayMetadata(result.runtimeEvidence),
+            ...restTriggerRuntimeMetadata("replay", result.runtimeEvidence),
+            ...cliTriggerRuntimeMetadata("replay", result.runtimeEvidence),
+            ...timerTriggerRuntimeMetadata("replay", result.runtimeEvidence),
             diagnostics
           }
         )
@@ -547,14 +927,54 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
     if (spec.stepType === "compare_runs") {
       const response = JSON.parse(stdout) as RunComparisonResponse;
       const validateOnly = spec.analysisPayload?.validateOnly === true || !response.result;
+      const leftComparisonBasisPreference =
+        response.result?.left.comparisonBasisPreference ??
+        inferComparableArtifactComparisonBasis(spec.analysisPayload?.leftArtifact);
+      const rightComparisonBasisPreference =
+        response.result?.right.comparisonBasisPreference ??
+        inferComparableArtifactComparisonBasis(spec.analysisPayload?.rightArtifact);
+      const result = response.result
+        ? {
+            ...response.result,
+            left: {
+              ...response.result.left,
+              comparisonBasisPreference: leftComparisonBasisPreference
+            },
+            right: {
+              ...response.result.right,
+              comparisonBasisPreference: rightComparisonBasisPreference
+            }
+          }
+        : response.result;
       return [
         createAnalysisArtifact(
           spec,
           validateOnly ? "run_comparison_plan" : "run_comparison",
           `run-comparison-${String(spec.analysisPayload?.leftArtifactId ?? "left")}-${String(spec.analysisPayload?.rightArtifactId ?? "right")}`,
           {
-            result: response.result,
+            result,
             validation: response.validation,
+            comparisonBasis: result?.comparisonBasis,
+            leftComparisonBasisPreference,
+            rightComparisonBasisPreference,
+            leftEvidenceKind: result?.left.evidenceKind,
+            rightEvidenceKind: result?.right.evidenceKind,
+            leftNormalizedStepEvidence: result?.left.normalizedStepEvidence,
+            rightNormalizedStepEvidence: result?.right.normalizedStepEvidence,
+            leftRestTriggerRuntimeEvidence: result?.left.restTriggerRuntimeEvidence,
+            rightRestTriggerRuntimeEvidence: result?.right.restTriggerRuntimeEvidence,
+            leftRestTriggerRuntimeKind: result?.left.restTriggerRuntimeKind,
+            rightRestTriggerRuntimeKind: result?.right.restTriggerRuntimeKind,
+            leftCLITriggerRuntimeEvidence: result?.left.cliTriggerRuntimeEvidence,
+            rightCLITriggerRuntimeEvidence: result?.right.cliTriggerRuntimeEvidence,
+            leftCLITriggerRuntimeKind: result?.left.cliTriggerRuntimeKind,
+            rightCLITriggerRuntimeKind: result?.right.cliTriggerRuntimeKind,
+            leftTimerTriggerRuntimeEvidence: result?.left.timerTriggerRuntimeEvidence,
+            rightTimerTriggerRuntimeEvidence: result?.right.timerTriggerRuntimeEvidence,
+            leftTimerTriggerRuntimeKind: result?.left.timerTriggerRuntimeKind,
+            rightTimerTriggerRuntimeKind: result?.right.timerTriggerRuntimeKind,
+            ...restComparisonMetadata(result?.restComparison),
+            ...timerComparisonMetadata(result?.timerComparison),
             diagnostics
           }
         )
