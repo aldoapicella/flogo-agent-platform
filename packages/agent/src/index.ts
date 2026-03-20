@@ -66,6 +66,8 @@ function getAnalysisMode(
   | "activity_scaffold"
   | "action_scaffold"
   | "trigger_scaffold"
+  | "validate_contrib"
+  | "package_contrib"
   | "mapping_preview"
   | "mapping_test"
   | "property_plan"
@@ -94,6 +96,8 @@ function getAnalysisMode(
     mode === "activity_scaffold" ||
     mode === "action_scaffold" ||
     mode === "trigger_scaffold" ||
+    mode === "validate_contrib" ||
+    mode === "package_contrib" ||
     mode === "mapping_preview" ||
     mode === "mapping_test" ||
     mode === "property_plan" ||
@@ -186,6 +190,10 @@ export class TaskPlanner {
       steps.push({ id: "action-scaffold", label: "Scaffold a custom Flogo action bundle with isolated build/test proof", tool: "runner.scaffoldAction" });
     } else if (analysisMode === "trigger_scaffold") {
       steps.push({ id: "trigger-scaffold", label: "Scaffold a custom Flogo trigger bundle with isolated build/test proof", tool: "runner.scaffoldTrigger" });
+    } else if (analysisMode === "validate_contrib") {
+      steps.push({ id: "validate-contrib", label: "Re-run isolated validation, test, and build proof for an existing Flogo contribution bundle", tool: "runner.validateContrib" });
+    } else if (analysisMode === "package_contrib") {
+      steps.push({ id: "package-contrib", label: "Package an existing Flogo contribution bundle after isolated validation, test, and build proof", tool: "runner.packageContrib" });
     } else if (analysisMode === "mapping_preview") {
       steps.push({ id: "mapping", label: "Preview mappings and suggest coercions", tool: "runner.previewMapping" });
       steps.push({ id: "properties", label: "Plan app properties and environment usage", tool: "flogo.planProperties" });

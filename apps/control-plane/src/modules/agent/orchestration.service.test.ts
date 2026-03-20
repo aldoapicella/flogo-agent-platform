@@ -57,6 +57,16 @@ class FakeTaskStoreService {
     return this.tasks.get(taskId)?.artifacts ?? [];
   }
 
+  async getArtifact(artifactId: string): Promise<ArtifactRef | undefined> {
+    for (const task of this.tasks.values()) {
+      const artifact = task.artifacts.find((entry) => entry.id === artifactId);
+      if (artifact) {
+        return artifact;
+      }
+    }
+    return undefined;
+  }
+
   async appendEvent(taskId: string, type: TaskEvent["type"], message: string, payload?: Record<string, unknown>): Promise<TaskEvent> {
     const event = TaskEventSchema.parse({
       id: randomUUID(),
@@ -119,7 +129,7 @@ class FakeAppAnalysisStorageService {
     projectId: string;
     taskId: string;
     artifactId: string;
-    kind: "contrib_bundle" | "build_log" | "test_report";
+    kind: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "build_log" | "test_report";
     payload: Record<string, unknown>;
   }) {
     this.uploads.push(args);
@@ -213,6 +223,129 @@ describe("OrchestrationService", () => {
     );
   });
 
+  it("resolves contrib_bundle artifact ids for validate/package authoring tasks before orchestration", async () => {
+    const storage = new FakeAppAnalysisStorageService();
+    const taskStore = new FakeTaskStoreService();
+    const service = new OrchestrationService(
+      new ToolsetService(),
+      new OrchestratorClientService(),
+      new TaskEventsService(),
+      taskStore as any,
+      { prepareRunComparisonTaskInputs: async (_projectId: string, _appId: string, inputs: Record<string, unknown>) => inputs } as any,
+      storage as AppAnalysisStorageService
+    );
+
+    const sourceTask = await service.submitTask({
+      type: "create",
+      projectId: "demo",
+      summary: "Scaffold an action bundle",
+      appPath: "examples/hello-rest/flogo.json"
+    });
+
+    await service.syncTaskState(sourceTask.id, {
+      artifact: {
+        id: "bundle-artifact-1",
+        type: "contrib_bundle",
+        name: "action-bundle-flowaction",
+        uri: "memory://task-1/action-bundle-flowaction.json",
+        metadata: {
+          result: {
+            bundle: {
+              kind: "action",
+              packageName: "flowaction",
+              modulePath: "example.com/acme/flow-action",
+              bundleRoot: "/tmp/flogo-action-flowaction",
+              descriptor: {
+                ref: "example.com/acme/flow-action",
+                alias: "flowaction",
+                type: "action",
+                name: "flow-action",
+                version: "0.1.0",
+                title: "Flow Action",
+                settings: [],
+                inputs: [],
+                outputs: [],
+                examples: [],
+                compatibilityNotes: ["Generated scaffold"],
+                source: "action_scaffold"
+              },
+              files: []
+            },
+            validation: { ok: true, stages: [], summary: "ok", artifacts: [] },
+            build: { kind: "build", ok: true, command: ["go", "build", "./..."], exitCode: 0, summary: "ok", output: "" },
+            test: { kind: "test", ok: true, command: ["go", "test", "./..."], exitCode: 0, summary: "ok", output: "" }
+          }
+        }
+      }
+    });
+
+    const validationTask = await service.submitTask({
+      type: "review",
+      projectId: "demo",
+      summary: "Validate the scaffolded contribution bundle",
+      appPath: "examples/hello-rest/flogo.json",
+      inputs: {
+        mode: "validate_contrib",
+        bundleArtifactId: "bundle-artifact-1"
+      }
+    });
+
+    expect(validationTask.request.inputs["bundleArtifactId"]).toBe("bundle-artifact-1");
+    expect(validationTask.request.inputs["bundleArtifact"]).toMatchObject({
+      id: "bundle-artifact-1",
+      type: "contrib_bundle"
+    });
+  });
+
+  it("persists packaged contribution artifacts through blob-backed task artifact storage", async () => {
+    const storage = new FakeAppAnalysisStorageService();
+    const service = new OrchestrationService(
+      new ToolsetService(),
+      new OrchestratorClientService(),
+      new TaskEventsService(),
+      new FakeTaskStoreService() as any,
+      { prepareRunComparisonTaskInputs: async (_projectId: string, _appId: string, inputs: Record<string, unknown>) => inputs } as any,
+      storage as AppAnalysisStorageService
+    );
+
+    const task = await service.submitTask({
+      type: "create",
+      projectId: "demo",
+      summary: "Package an action bundle",
+      appPath: "examples/hello-rest/flogo.json"
+    });
+
+    await service.syncTaskState(task.id, {
+      artifact: {
+        id: "artifact-package-1",
+        type: "contrib_package",
+        name: "action-package-flowaction",
+        uri: "memory://task-1/action-package-flowaction.json",
+        metadata: {
+          result: {
+            bundle: {
+              kind: "action",
+              packageName: "flowaction",
+              modulePath: "example.com/acme/flow-action"
+            },
+            package: {
+              format: "zip",
+              fileName: "flowaction.zip"
+            }
+          }
+        }
+      }
+    });
+
+    expect(storage.uploads).toHaveLength(1);
+    expect(storage.uploads[0]).toMatchObject({
+      projectId: "demo",
+      taskId: task.id,
+      artifactId: "artifact-package-1",
+      kind: "contrib_package"
+    });
+  });
+
   it("fails loudly when contribution artifact storage is not configured", async () => {
     const service = new OrchestrationService(
       new ToolsetService(),
@@ -247,6 +380,6 @@ describe("OrchestrationService", () => {
           }
         }
       })
-    ).rejects.toThrow(/Contribution artifact storage is not configured/);
+    ).rejects.toThrow(/contribution scaffold, validate, or package tasks/i);
   });
 });

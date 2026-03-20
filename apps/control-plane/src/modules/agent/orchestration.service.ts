@@ -6,6 +6,7 @@ import {
   type ApprovalDecision,
   type ArtifactRef,
   type OrchestratorStatus,
+  type TaskRequest,
   TaskEventPublishSchema,
   TaskRequestSchema,
   TaskResultSchema,
@@ -43,18 +44,7 @@ export class OrchestrationService {
 
   async submitTask(value: unknown): Promise<StoredTask> {
     const parsedRequest = TaskRequestSchema.parse(value);
-    const request =
-      (parsedRequest.inputs["mode"] === "run_comparison" || parsedRequest.inputs["mode"] === "run_comparison_plan") &&
-      parsedRequest.appId
-        ? {
-            ...parsedRequest,
-            inputs: await this.flogoAppsService.prepareRunComparisonTaskInputs(
-              parsedRequest.projectId,
-              parsedRequest.appId,
-              parsedRequest.inputs
-            )
-          }
-        : parsedRequest;
+    const request = await this.prepareTaskRequest(parsedRequest);
     const plan = await this.orchestrator.planTask(request);
     const id = request.taskId ?? randomUUID();
     const steps: TaskStep[] = plan.steps.map((step, index) => ({
@@ -291,6 +281,38 @@ export class OrchestrationService {
     return task;
   }
 
+  private async prepareTaskRequest(parsedRequest: TaskRequest) {
+    let inputs = parsedRequest.inputs;
+    const mode = parsedRequest.inputs["mode"];
+
+    if ((mode === "run_comparison" || mode === "run_comparison_plan") && parsedRequest.appId) {
+      inputs = await this.flogoAppsService.prepareRunComparisonTaskInputs(
+        parsedRequest.projectId,
+        parsedRequest.appId,
+        parsedRequest.inputs
+      );
+    }
+
+    if ((mode === "validate_contrib" || mode === "package_contrib") && typeof inputs["bundleArtifactId"] === "string" && !inputs["bundleArtifact"] && !inputs["result"]) {
+      const artifact = await this.taskStore.getArtifact(inputs["bundleArtifactId"] as string);
+      if (!artifact) {
+        throw new Error(`Contribution bundle artifact ${String(inputs["bundleArtifactId"])} was not found`);
+      }
+      if (artifact.type !== "contrib_bundle") {
+        throw new Error(`Artifact ${artifact.id} is ${artifact.type}, expected contrib_bundle`);
+      }
+      inputs = {
+        ...inputs,
+        bundleArtifact: artifact
+      };
+    }
+
+    return {
+      ...parsedRequest,
+      inputs
+    };
+  }
+
   private async persistArtifactIfNeeded(taskId: string, artifact: ArtifactRef): Promise<ArtifactRef> {
     if (
       !this.shouldPersistTaskArtifact(artifact) ||
@@ -301,7 +323,7 @@ export class OrchestrationService {
 
     if (!this.storage.isConfigured()) {
       throw new Error(
-        "Contribution artifact storage is not configured. Set APP_ANALYSIS_STORAGE_CONNECTION_STRING, AZURITE_CONNECTION_STRING, or DURABLE_STORAGE_CONNECTION_STRING before running Activity/Trigger scaffolding."
+        "Contribution artifact storage is not configured. Set APP_ANALYSIS_STORAGE_CONNECTION_STRING, AZURITE_CONNECTION_STRING, or DURABLE_STORAGE_CONNECTION_STRING before running contribution scaffold, validate, or package tasks."
       );
     }
 
@@ -335,9 +357,18 @@ export class OrchestrationService {
 
   private shouldPersistTaskArtifact(
     artifact: ArtifactRef
-  ): artifact is ArtifactRef & { type: "contrib_bundle" | "build_log" | "test_report"; metadata: Record<string, unknown> } {
+  ): artifact is ArtifactRef & {
+    type: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "build_log" | "test_report";
+    metadata: Record<string, unknown>;
+  } {
     return (
-      (artifact.type === "contrib_bundle" || artifact.type === "build_log" || artifact.type === "test_report") &&
+      (
+        artifact.type === "contrib_bundle" ||
+        artifact.type === "contrib_validation_report" ||
+        artifact.type === "contrib_package" ||
+        artifact.type === "build_log" ||
+        artifact.type === "test_report"
+      ) &&
       isRecord(artifact.metadata)
     );
   }

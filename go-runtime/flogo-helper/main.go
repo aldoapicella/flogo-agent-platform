@@ -1,9 +1,11 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -447,6 +449,72 @@ type triggerScaffoldResult struct {
 
 type triggerScaffoldResponse struct {
 	Result triggerScaffoldResult `json:"result"`
+}
+
+type contributionScaffoldBundle struct {
+	Kind        string                 `json:"kind"`
+	ModulePath  string                 `json:"modulePath"`
+	PackageName string                 `json:"packageName"`
+	BundleRoot  string                 `json:"bundleRoot"`
+	Descriptor  contribDescriptor      `json:"descriptor"`
+	Files       []generatedContribFile `json:"files"`
+	ReadmePath  string                 `json:"readmePath,omitempty"`
+}
+
+type contributionScaffoldResult struct {
+	Bundle     contributionScaffoldBundle `json:"bundle"`
+	Validation validationReport           `json:"validation"`
+	Build      contribProofStep           `json:"build"`
+	Test       contribProofStep           `json:"test"`
+}
+
+type contributionValidateRequest struct {
+	Result         contributionScaffoldResult `json:"result"`
+	Source         string                     `json:"source,omitempty"`
+	SourceArtifact string                     `json:"sourceArtifactId,omitempty"`
+}
+
+type contributionValidateResult struct {
+	Bundle         contributionScaffoldBundle `json:"bundle"`
+	Validation     validationReport           `json:"validation"`
+	Build          contribProofStep           `json:"build"`
+	Test           contribProofStep           `json:"test"`
+	Source         string                     `json:"source,omitempty"`
+	SourceArtifact string                     `json:"sourceArtifactId,omitempty"`
+}
+
+type contributionValidateResponse struct {
+	Result contributionValidateResult `json:"result"`
+}
+
+type contributionPackageRequest struct {
+	Result         contributionScaffoldResult `json:"result"`
+	Source         string                     `json:"source,omitempty"`
+	SourceArtifact string                     `json:"sourceArtifactId,omitempty"`
+	Format         string                     `json:"format,omitempty"`
+}
+
+type contributionPackageArchive struct {
+	Format   string `json:"format"`
+	FileName string `json:"fileName"`
+	Path     string `json:"path"`
+	Bytes    int    `json:"bytes"`
+	SHA256   string `json:"sha256"`
+	Base64   string `json:"base64"`
+}
+
+type contributionPackageResult struct {
+	Bundle         contributionScaffoldBundle `json:"bundle"`
+	Validation     validationReport           `json:"validation"`
+	Build          contribProofStep           `json:"build"`
+	Test           contribProofStep           `json:"test"`
+	Source         string                     `json:"source,omitempty"`
+	SourceArtifact string                     `json:"sourceArtifactId,omitempty"`
+	Package        contributionPackageArchive `json:"package"`
+}
+
+type contributionPackageResponse struct {
+	Result contributionPackageResult `json:"result"`
 }
 
 type runTraceCaptureOptions struct {
@@ -2772,7 +2840,7 @@ var supportedRuntimeActivityRefs = map[string]bool{
 
 func main() {
 	if len(os.Args) < 3 {
-		fail("expected a command such as 'catalog contribs', 'inspect descriptor', 'preview mapping', 'contrib scaffold-activity', 'contrib scaffold-action', or 'contrib scaffold-trigger'")
+		fail("expected a command such as 'catalog contribs', 'inspect descriptor', 'preview mapping', 'contrib scaffold-activity', 'contrib scaffold-action', 'contrib scaffold-trigger', 'contrib validate', or 'contrib package'")
 	}
 
 	command := strings.Join(os.Args[1:3], " ")
@@ -2798,6 +2866,22 @@ func main() {
 			fail("missing required --request flag")
 		}
 		encode(scaffoldTrigger(loadTriggerScaffoldRequest(requestPath)))
+		return
+	}
+	if command == "contrib validate" {
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(validateContribution(loadContributionValidateRequest(requestPath)))
+		return
+	}
+	if command == "contrib package" {
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(packageContribution(loadContributionPackageRequest(requestPath)))
 		return
 	}
 
@@ -3127,6 +3211,37 @@ func loadTriggerScaffoldRequest(inputPath string) triggerScaffoldRequest {
 	return request
 }
 
+func loadContributionValidateRequest(inputPath string) contributionValidateRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var request contributionValidateRequest
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+
+	return request
+}
+
+func loadContributionPackageRequest(inputPath string) contributionPackageRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var request contributionPackageRequest
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+	if strings.TrimSpace(request.Format) == "" {
+		request.Format = "zip"
+	}
+
+	return request
+}
+
 const scaffoldedContributionCoreVersion = "v1.6.17"
 const scaffoldedContributionGoVersion = "1.24.0"
 
@@ -3251,6 +3366,232 @@ func scaffoldTrigger(request triggerScaffoldRequest) triggerScaffoldResponse {
 			Test:       testProof,
 		},
 	}
+}
+
+func toContributionScaffoldBundle(bundle activityScaffoldBundle) contributionScaffoldBundle {
+	return contributionScaffoldBundle{
+		Kind:        bundle.Kind,
+		ModulePath:  bundle.ModulePath,
+		PackageName: bundle.PackageName,
+		BundleRoot:  bundle.BundleRoot,
+		Descriptor:  bundle.Descriptor,
+		Files:       bundle.Files,
+		ReadmePath:  bundle.ReadmePath,
+	}
+}
+
+func toContributionScaffoldBundleFromAction(bundle actionScaffoldBundle) contributionScaffoldBundle {
+	return contributionScaffoldBundle{
+		Kind:        bundle.Kind,
+		ModulePath:  bundle.ModulePath,
+		PackageName: bundle.PackageName,
+		BundleRoot:  bundle.BundleRoot,
+		Descriptor:  bundle.Descriptor,
+		Files:       bundle.Files,
+		ReadmePath:  bundle.ReadmePath,
+	}
+}
+
+func toContributionScaffoldBundleFromTrigger(bundle triggerScaffoldBundle) contributionScaffoldBundle {
+	return contributionScaffoldBundle{
+		Kind:        bundle.Kind,
+		ModulePath:  bundle.ModulePath,
+		PackageName: bundle.PackageName,
+		BundleRoot:  bundle.BundleRoot,
+		Descriptor:  bundle.Descriptor,
+		Files:       bundle.Files,
+		ReadmePath:  bundle.ReadmePath,
+	}
+}
+
+func contributionLabel(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case "activity":
+		return "Activity"
+	case "action":
+		return "Action"
+	case "trigger":
+		return "Trigger"
+	default:
+		return "Contribution"
+	}
+}
+
+func contributionDiagnosticPrefix(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case "activity":
+		return "flogo.contrib.activity"
+	case "action":
+		return "flogo.contrib.action"
+	case "trigger":
+		return "flogo.contrib.trigger"
+	default:
+		return "flogo.contrib"
+	}
+}
+
+func normalizeContributionEvidenceSource(source string, sourceArtifact string) string {
+	normalized := strings.TrimSpace(source)
+	if normalized == "inline_result" || normalized == "bundle_artifact" {
+		return normalized
+	}
+	if strings.TrimSpace(sourceArtifact) != "" {
+		return "bundle_artifact"
+	}
+	return "inline_result"
+}
+
+func validateContributionScaffoldResult(result contributionScaffoldResult) error {
+	problems := []string{}
+	kind := strings.TrimSpace(result.Bundle.Kind)
+	switch kind {
+	case "activity", "action", "trigger":
+	default:
+		problems = append(problems, fmt.Sprintf("unsupported contribution bundle kind %q", result.Bundle.Kind))
+	}
+	if strings.TrimSpace(result.Bundle.ModulePath) == "" {
+		problems = append(problems, "bundle.modulePath is required")
+	}
+	if strings.TrimSpace(result.Bundle.PackageName) == "" {
+		problems = append(problems, "bundle.packageName is required")
+	}
+	if strings.TrimSpace(result.Bundle.BundleRoot) == "" {
+		problems = append(problems, "bundle.bundleRoot is required")
+	} else {
+		info, err := os.Stat(result.Bundle.BundleRoot)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("bundle.bundleRoot %q was not found", result.Bundle.BundleRoot))
+		} else if !info.IsDir() {
+			problems = append(problems, "bundle.bundleRoot must be a directory")
+		}
+	}
+	if strings.TrimSpace(result.Bundle.Descriptor.Type) != "" && result.Bundle.Descriptor.Type != kind {
+		problems = append(problems, fmt.Sprintf("descriptor.type %q does not match bundle kind %q", result.Bundle.Descriptor.Type, kind))
+	}
+	if len(result.Bundle.Files) == 0 {
+		problems = append(problems, "bundle.files must contain at least one generated file")
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("%s", strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+func validateContribution(request contributionValidateRequest) contributionValidateResponse {
+	if err := validateContributionScaffoldResult(request.Result); err != nil {
+		fail(err.Error())
+	}
+
+	validation, buildProof, testProof := runContributionScaffoldProof(
+		request.Result.Bundle.BundleRoot,
+		contributionLabel(request.Result.Bundle.Kind),
+		contributionDiagnosticPrefix(request.Result.Bundle.Kind),
+	)
+
+	return contributionValidateResponse{
+		Result: contributionValidateResult{
+			Bundle:         request.Result.Bundle,
+			Validation:     validation,
+			Build:          buildProof,
+			Test:           testProof,
+			Source:         normalizeContributionEvidenceSource(request.Source, request.SourceArtifact),
+			SourceArtifact: strings.TrimSpace(request.SourceArtifact),
+		},
+	}
+}
+
+func packageContribution(request contributionPackageRequest) contributionPackageResponse {
+	if err := validateContributionScaffoldResult(request.Result); err != nil {
+		fail(err.Error())
+	}
+
+	format := strings.TrimSpace(request.Format)
+	if format == "" {
+		format = "zip"
+	}
+	if format != "zip" {
+		fail(fmt.Sprintf("unsupported contribution package format %q", format))
+	}
+
+	validation, buildProof, testProof := runContributionScaffoldProof(
+		request.Result.Bundle.BundleRoot,
+		contributionLabel(request.Result.Bundle.Kind),
+		contributionDiagnosticPrefix(request.Result.Bundle.Kind),
+	)
+
+	archive, err := createContributionPackageArchive(request.Result.Bundle, format)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	return contributionPackageResponse{
+		Result: contributionPackageResult{
+			Bundle:         request.Result.Bundle,
+			Validation:     validation,
+			Build:          buildProof,
+			Test:           testProof,
+			Source:         normalizeContributionEvidenceSource(request.Source, request.SourceArtifact),
+			SourceArtifact: strings.TrimSpace(request.SourceArtifact),
+			Package:        archive,
+		},
+	}
+}
+
+func createContributionPackageArchive(bundle contributionScaffoldBundle, format string) (contributionPackageArchive, error) {
+	fileName := fmt.Sprintf("%s-%s.%s", bundle.Kind, bundle.PackageName, format)
+	file, err := os.CreateTemp("", fmt.Sprintf("%s-%s-*."+format, bundle.Kind, bundle.PackageName))
+	if err != nil {
+		return contributionPackageArchive{}, err
+	}
+	defer file.Close()
+	archivePath := file.Name()
+
+	zipWriter := zip.NewWriter(file)
+	err = filepath.Walk(bundle.BundleRoot, func(currentPath string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			return nil
+		}
+		relPath, err := filepath.Rel(bundle.BundleRoot, currentPath)
+		if err != nil {
+			return err
+		}
+		entryPath := filepath.ToSlash(relPath)
+		entryWriter, err := zipWriter.Create(entryPath)
+		if err != nil {
+			return err
+		}
+		contents, err := os.ReadFile(currentPath)
+		if err != nil {
+			return err
+		}
+		_, err = entryWriter.Write(contents)
+		return err
+	})
+	if err != nil {
+		_ = zipWriter.Close()
+		return contributionPackageArchive{}, err
+	}
+	if err := zipWriter.Close(); err != nil {
+		return contributionPackageArchive{}, err
+	}
+
+	archiveBytes, err := os.ReadFile(archivePath)
+	if err != nil {
+		return contributionPackageArchive{}, err
+	}
+	sum := sha256.Sum256(archiveBytes)
+
+	return contributionPackageArchive{
+		Format:   format,
+		FileName: fileName,
+		Path:     filepath.ToSlash(archivePath),
+		Bytes:    len(archiveBytes),
+		SHA256:   fmt.Sprintf("%x", sum),
+		Base64:   base64.StdEncoding.EncodeToString(archiveBytes),
+	}, nil
 }
 
 func validateActivityScaffoldRequest(request activityScaffoldRequest) error {

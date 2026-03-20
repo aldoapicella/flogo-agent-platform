@@ -5,7 +5,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function artifactSummary(artifact: ArtifactRef) {
-  if (artifact.type !== "contrib_bundle" || !isRecord(artifact.metadata)) {
+  if (
+    (artifact.type !== "contrib_bundle" && artifact.type !== "contrib_validation_report" && artifact.type !== "contrib_package") ||
+    !isRecord(artifact.metadata)
+  ) {
     return null;
   }
 
@@ -29,6 +32,10 @@ function artifactSummary(artifact: ArtifactRef) {
   const validationOk = typeof validation?.ok === "boolean" ? validation.ok : undefined;
   const buildOk = typeof build?.ok === "boolean" ? build.ok : undefined;
   const testOk = typeof test?.ok === "boolean" ? test.ok : undefined;
+  const packageResult = result && isRecord(result.package) ? result.package : undefined;
+  const packageFormat = typeof packageResult?.format === "string" ? packageResult.format : undefined;
+  const packageFileName = typeof packageResult?.fileName === "string" ? packageResult.fileName : undefined;
+  const packageBytes = typeof packageResult?.bytes === "number" ? packageResult.bytes : undefined;
   const durablePayload = typeof storage?.durablePayload === "boolean" ? storage.durablePayload : undefined;
   const blobPath = typeof storage?.blobPath === "string" ? storage.blobPath : undefined;
 
@@ -41,7 +48,10 @@ function artifactSummary(artifact: ArtifactRef) {
     !blobPath &&
     validationOk === undefined &&
     buildOk === undefined &&
-    testOk === undefined
+    testOk === undefined &&
+    !packageFormat &&
+    !packageFileName &&
+    packageBytes === undefined
   ) {
     return null;
   }
@@ -54,6 +64,9 @@ function artifactSummary(artifact: ArtifactRef) {
       {generatedFileSummary ? <div>generated files: {generatedFileSummary}</div> : null}
       {durablePayload !== undefined ? <div>durable payload: {durablePayload ? "blob-backed" : "no"}</div> : null}
       {blobPath ? <div>blob path: {blobPath}</div> : null}
+      {packageFormat ? <div>package format: {packageFormat}</div> : null}
+      {packageFileName ? <div>package file: {packageFileName}</div> : null}
+      {packageBytes !== undefined ? <div>package bytes: {packageBytes}</div> : null}
       {validationOk !== undefined ? <div>validation: {validationOk ? "passed" : "failed"}</div> : null}
       {testOk !== undefined ? <div>test proof: {testOk ? "passed" : "failed"}</div> : null}
       {buildOk !== undefined ? <div>build proof: {buildOk ? "passed" : "failed"}</div> : null}

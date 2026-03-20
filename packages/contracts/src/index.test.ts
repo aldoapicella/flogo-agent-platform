@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   ActionScaffoldRequestSchema,
   ActionScaffoldResponseSchema,
+  ContributionPackageRequestSchema,
+  ContributionPackageResponseSchema,
+  ContributionValidateRequestSchema,
+  ContributionValidateResponseSchema,
   TriggerScaffoldRequestSchema,
   TriggerScaffoldResponseSchema
 } from "./index.js";
@@ -192,5 +196,196 @@ describe("TriggerScaffoldResponseSchema", () => {
     expect(parsed.result.bundle.descriptor.handlerSettings[0]?.name).toBe("route");
     expect(parsed.result.bundle.descriptor.reply[0]?.name).toBe("status");
     expect(parsed.result.bundle.kind).toBe("trigger");
+  });
+});
+
+describe("ContributionValidateRequestSchema", () => {
+  it("accepts an existing scaffold result for shared contribution validation", () => {
+    const parsed = ContributionValidateRequestSchema.parse({
+      result: {
+        bundle: {
+          kind: "activity",
+          modulePath: "example.com/acme/echo",
+          packageName: "echoactivity",
+          bundleRoot: "/tmp/flogo-activity-echoactivity",
+          descriptor: {
+            ref: "example.com/acme/echo",
+            alias: "echoactivity",
+            type: "activity",
+            name: "echo-message",
+            version: "0.1.0",
+            title: "Echo Message",
+            settings: [],
+            inputs: [],
+            outputs: [],
+            examples: [],
+            compatibilityNotes: ["Generated scaffold"],
+            source: "activity_scaffold"
+          },
+          files: [{ path: "/tmp/flogo-activity-echoactivity/descriptor.json", kind: "descriptor", bytes: 180, content: "{}" }]
+        },
+        validation: {
+          ok: true,
+          stages: [{ stage: "structural", ok: true, diagnostics: [] }],
+          summary: "ok",
+          artifacts: []
+        },
+        build: {
+          kind: "build",
+          ok: true,
+          command: ["go", "build", "./..."],
+          exitCode: 0,
+          summary: "ok",
+          output: ""
+        },
+        test: {
+          kind: "test",
+          ok: true,
+          command: ["go", "test", "./..."],
+          exitCode: 0,
+          summary: "ok",
+          output: ""
+        }
+      }
+    });
+
+    expect(parsed.result?.bundle.kind).toBe("activity");
+  });
+
+  it("requires one bundle locator or inline result", () => {
+    expect(() => ContributionValidateRequestSchema.parse({})).toThrow(/Provide bundleArtifactId, bundleArtifact, or result/);
+  });
+});
+
+describe("ContributionValidateResponseSchema", () => {
+  it("parses a validation response for a trigger bundle artifact source", () => {
+    const parsed = ContributionValidateResponseSchema.parse({
+      result: {
+        bundle: {
+          kind: "trigger",
+          modulePath: "example.com/acme/webhook",
+          packageName: "webhooktrigger",
+          bundleRoot: "/tmp/flogo-trigger-webhooktrigger",
+          descriptor: {
+            ref: "example.com/acme/webhook",
+            alias: "webhooktrigger",
+            type: "trigger",
+            name: "webhook-trigger",
+            version: "0.1.0",
+            title: "Webhook Trigger",
+            settings: [],
+            handlerSettings: [],
+            outputs: [],
+            reply: [],
+            examples: [],
+            compatibilityNotes: ["Generated scaffold"],
+            source: "trigger_scaffold"
+          },
+          files: [{ path: "/tmp/flogo-trigger-webhooktrigger/descriptor.json", kind: "descriptor", bytes: 180, content: "{}" }]
+        },
+        validation: {
+          ok: true,
+          stages: [{ stage: "structural", ok: true, diagnostics: [] }],
+          summary: "ok",
+          artifacts: []
+        },
+        build: {
+          kind: "build",
+          ok: true,
+          command: ["go", "build", "./..."],
+          exitCode: 0,
+          summary: "ok",
+          output: ""
+        },
+        test: {
+          kind: "test",
+          ok: true,
+          command: ["go", "test", "./..."],
+          exitCode: 0,
+          summary: "ok",
+          output: ""
+        },
+        source: "bundle_artifact",
+        sourceArtifactId: "artifact-trigger"
+      }
+    });
+
+    expect(parsed.result.source).toBe("bundle_artifact");
+    expect(parsed.result.bundle.kind).toBe("trigger");
+  });
+});
+
+describe("ContributionPackageRequestSchema", () => {
+  it("accepts bundle-artifact packaging requests with a default zip format", () => {
+    const parsed = ContributionPackageRequestSchema.parse({
+      bundleArtifactId: "artifact-1"
+    });
+
+    expect(parsed.bundleArtifactId).toBe("artifact-1");
+    expect(parsed.format).toBe("zip");
+  });
+});
+
+describe("ContributionPackageResponseSchema", () => {
+  it("parses a packaged action bundle response", () => {
+    const parsed = ContributionPackageResponseSchema.parse({
+      result: {
+        bundle: {
+          kind: "action",
+          modulePath: "example.com/acme/flow-action",
+          packageName: "flowaction",
+          bundleRoot: "/tmp/flogo-action-flowaction",
+          descriptor: {
+            ref: "example.com/acme/flow-action",
+            alias: "flowaction",
+            type: "action",
+            name: "flow-action",
+            version: "0.1.0",
+            title: "Flow Action",
+            settings: [],
+            inputs: [],
+            outputs: [],
+            examples: [],
+            compatibilityNotes: ["Generated scaffold"],
+            source: "action_scaffold"
+          },
+          files: [{ path: "/tmp/flogo-action-flowaction/descriptor.json", kind: "descriptor", bytes: 180, content: "{}" }]
+        },
+        validation: {
+          ok: true,
+          stages: [{ stage: "structural", ok: true, diagnostics: [] }],
+          summary: "ok",
+          artifacts: []
+        },
+        build: {
+          kind: "build",
+          ok: true,
+          command: ["go", "build", "./..."],
+          exitCode: 0,
+          summary: "ok",
+          output: ""
+        },
+        test: {
+          kind: "test",
+          ok: true,
+          command: ["go", "test", "./..."],
+          exitCode: 0,
+          summary: "ok",
+          output: ""
+        },
+        source: "inline_result",
+        package: {
+          format: "zip",
+          fileName: "flowaction.zip",
+          path: "/tmp/flowaction.zip",
+          bytes: 2048,
+          sha256: "abc123",
+          base64: "ZmFrZS16aXA="
+        }
+      }
+    });
+
+    expect(parsed.result.bundle.kind).toBe("action");
+    expect(parsed.result.package.format).toBe("zip");
   });
 });

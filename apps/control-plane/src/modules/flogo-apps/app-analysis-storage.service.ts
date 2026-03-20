@@ -75,7 +75,7 @@ export class AppAnalysisStorageService {
     projectId: string;
     taskId: string;
     artifactId: string;
-    kind: "contrib_bundle" | "build_log" | "test_report";
+    kind: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "build_log" | "test_report";
     payload: Record<string, unknown>;
   }): Promise<StoredJsonArtifact> {
     const blobPath = `task-artifacts/${args.projectId}/${args.taskId}/${args.kind}/${args.artifactId}.json`;

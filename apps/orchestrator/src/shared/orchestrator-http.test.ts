@@ -257,4 +257,94 @@ describe("orchestrator-http", () => {
     expect(spec.analysisPayload?.inputs).toEqual([{ name: "payload", type: "object", required: true }]);
     expect(spec.analysisPayload?.outputs).toEqual([{ name: "result", type: "object" }]);
   });
+
+  it("routes validate_contrib mode to the shared contribution validation runner step", () => {
+    const start: OrchestratorStartRequest = {
+      taskId: "task-validate-contrib",
+      request: {
+        type: "review",
+        projectId: "demo",
+        requestedBy: "operator",
+        summary: "Validate a scaffolded contribution bundle",
+        inputs: {
+          mode: "validate_contrib",
+          bundleArtifactId: "artifact-1",
+          bundleArtifact: {
+            id: "artifact-1",
+            type: "contrib_bundle",
+            name: "action-bundle-flowaction",
+            uri: "memory://task/action-bundle-flowaction.json",
+            metadata: {
+              result: {
+                bundle: {
+                  kind: "action",
+                  packageName: "flowaction"
+                }
+              }
+            }
+          }
+        },
+        constraints: {
+          allowDependencyChanges: false,
+          allowCustomCode: false,
+          targetEnv: "dev",
+          requireApproval: true
+        }
+      },
+      requiredApprovals: [],
+      planSummary: "Validate contribution bundle",
+      steps: []
+    };
+
+    expect(resolveWorkflowRunnerSteps(start)).toEqual(["validate_contrib"]);
+
+    const spec = buildRunnerJobSpec(start, "validate_contrib");
+
+    expect(spec.jobKind).toBe("contrib_validation");
+    expect(spec.analysisKind).toBe("validate_contrib");
+    expect(spec.analysisPayload).toMatchObject({
+      bundleArtifactId: "artifact-1"
+    });
+    expect(spec.analysisPayload?.bundleArtifact).toMatchObject({
+      id: "artifact-1",
+      type: "contrib_bundle"
+    });
+  });
+
+  it("routes package_contrib mode to the shared contribution packaging runner step", () => {
+    const start: OrchestratorStartRequest = {
+      taskId: "task-package-contrib",
+      request: {
+        type: "review",
+        projectId: "demo",
+        requestedBy: "operator",
+        summary: "Package a scaffolded contribution bundle",
+        inputs: {
+          mode: "package_contrib",
+          bundleArtifactId: "artifact-2",
+          format: "zip"
+        },
+        constraints: {
+          allowDependencyChanges: false,
+          allowCustomCode: false,
+          targetEnv: "dev",
+          requireApproval: true
+        }
+      },
+      requiredApprovals: [],
+      planSummary: "Package contribution bundle",
+      steps: []
+    };
+
+    expect(resolveWorkflowRunnerSteps(start)).toEqual(["package_contrib"]);
+
+    const spec = buildRunnerJobSpec(start, "package_contrib");
+
+    expect(spec.jobKind).toBe("contrib_package");
+    expect(spec.analysisKind).toBe("package_contrib");
+    expect(spec.analysisPayload).toMatchObject({
+      bundleArtifactId: "artifact-2",
+      format: "zip"
+    });
+  });
 });

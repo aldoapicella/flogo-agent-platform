@@ -11,6 +11,13 @@ import {
   ActionScaffoldRequestSchema,
   ActionScaffoldResponseSchema,
   type ActionScaffoldResponse,
+  ContributionPackageRequestSchema,
+  ContributionPackageResponseSchema,
+  type ContributionPackageResponse,
+  ContributionScaffoldResultSchema,
+  ContributionValidateRequestSchema,
+  ContributionValidateResponseSchema,
+  type ContributionValidateResponse,
   TriggerScaffoldRequestSchema,
   TriggerScaffoldResponseSchema,
   type TriggerScaffoldResponse,
@@ -163,6 +170,10 @@ function createCommand(spec: RunnerJobSpec): string[] {
       return createHelperCommand("contrib", "scaffold-action");
     case "scaffold_trigger":
       return createHelperCommand("contrib", "scaffold-trigger");
+    case "validate_contrib":
+      return createHelperCommand("contrib", "validate");
+    case "package_contrib":
+      return createHelperCommand("contrib", "package");
     default:
       return ["echo", `runner:${spec.stepType}`];
   }
@@ -223,6 +234,8 @@ function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
     stepType === "scaffold_activity" ||
     stepType === "scaffold_action" ||
     stepType === "scaffold_trigger" ||
+    stepType === "validate_contrib" ||
+    stepType === "package_contrib" ||
     stepType === "diagnose_app"
   );
 }
@@ -282,6 +295,49 @@ type ContributionScaffoldResultLike = {
   };
 };
 
+type ContributionValidateResultLike = ContributionScaffoldResultLike & {
+  source: "inline_result" | "bundle_artifact";
+  sourceArtifactId?: string;
+};
+
+type ContributionPackageResultLike = ContributionValidateResultLike & {
+  package: {
+    format: "zip";
+    fileName: string;
+    path: string;
+    bytes: number;
+    sha256: string;
+    base64: string;
+  };
+};
+
+function resolveContributionScaffoldResultFromPayload(
+  analysisPayload: Record<string, unknown> | undefined
+): { result: ContributionScaffoldResultLike; source: "inline_result" | "bundle_artifact"; sourceArtifactId?: string } {
+  const parsedResult = ContributionScaffoldResultSchema.safeParse(analysisPayload?.result);
+  if (parsedResult.success) {
+    return {
+      result: parsedResult.data as ContributionScaffoldResultLike,
+      source: "inline_result"
+    };
+  }
+
+  const bundleArtifact = isRecord(analysisPayload?.bundleArtifact) ? analysisPayload.bundleArtifact : undefined;
+  if (bundleArtifact) {
+    const metadata = isRecord(bundleArtifact.metadata) ? bundleArtifact.metadata : undefined;
+    const artifactResult = ContributionScaffoldResultSchema.safeParse(metadata?.result);
+    if (artifactResult.success) {
+      return {
+        result: artifactResult.data as ContributionScaffoldResultLike,
+        source: "bundle_artifact",
+        sourceArtifactId: typeof bundleArtifact.id === "string" ? bundleArtifact.id : undefined
+      };
+    }
+  }
+
+  throw new Error("Contribution validation/package requires a scaffold result or contrib_bundle artifact metadata.result payload");
+}
+
 function createContributionScaffoldArtifacts(
   spec: RunnerJobSpec,
   result: ContributionScaffoldResultLike,
@@ -321,6 +377,89 @@ function createContributionScaffoldArtifacts(
       output: result.test.output,
       summary: result.test.summary,
       contributionKind: scaffoldKind
+    })
+  ];
+}
+
+function createContributionValidationArtifacts(
+  spec: RunnerJobSpec,
+  result: ContributionValidateResultLike,
+  diagnostics: Diagnostic[]
+): ArtifactRef[] {
+  const contributionKind = result.bundle.kind;
+  const proof = {
+    validation: result.validation,
+    build: result.build,
+    test: result.test
+  };
+
+  return [
+    createAnalysisArtifact(spec, "contrib_validation_report", `${contributionKind}-validation-${result.bundle.packageName}`, {
+      result,
+      bundle: result.bundle,
+      validation: result.validation,
+      build: result.build,
+      test: result.test,
+      proof,
+      source: result.source,
+      sourceArtifactId: result.sourceArtifactId,
+      diagnostics
+    }),
+    createNamedArtifact(spec.taskId, "build_log", `${spec.taskId}-${contributionKind}-build.log`, {
+      command: result.build.command,
+      ok: result.build.ok,
+      output: result.build.output,
+      summary: result.build.summary,
+      contributionKind
+    }),
+    createNamedArtifact(spec.taskId, "test_report", `${spec.taskId}-${contributionKind}-test.json`, {
+      command: result.test.command,
+      ok: result.test.ok,
+      output: result.test.output,
+      summary: result.test.summary,
+      contributionKind
+    })
+  ];
+}
+
+function createContributionPackageArtifacts(
+  spec: RunnerJobSpec,
+  result: ContributionPackageResultLike,
+  diagnostics: Diagnostic[]
+): ArtifactRef[] {
+  const contributionKind = result.bundle.kind;
+  const proof = {
+    validation: result.validation,
+    build: result.build,
+    test: result.test
+  };
+
+  return [
+    createAnalysisArtifact(spec, "contrib_package", `${contributionKind}-package-${result.bundle.packageName}`, {
+      result,
+      bundle: result.bundle,
+      package: result.package,
+      validation: result.validation,
+      build: result.build,
+      test: result.test,
+      proof,
+      source: result.source,
+      sourceArtifactId: result.sourceArtifactId,
+      diagnostics
+    }),
+    createNamedArtifact(spec.taskId, "build_log", `${spec.taskId}-${contributionKind}-build.log`, {
+      command: result.build.command,
+      ok: result.build.ok,
+      output: result.build.output,
+      summary: result.build.summary,
+      contributionKind
+    }),
+    createNamedArtifact(spec.taskId, "test_report", `${spec.taskId}-${contributionKind}-test.json`, {
+      command: result.test.command,
+      ok: result.test.ok,
+      output: result.test.output,
+      summary: result.test.summary,
+      contributionKind
     })
   ];
 }
@@ -714,6 +853,8 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     && spec.stepType !== "scaffold_activity"
     && spec.stepType !== "scaffold_action"
     && spec.stepType !== "scaffold_trigger"
+    && spec.stepType !== "validate_contrib"
+    && spec.stepType !== "package_contrib"
   ) {
     return {
       command: createCommand(spec)
@@ -904,6 +1045,43 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     await fs.writeFile(requestPath, JSON.stringify(request, null, 2), "utf8");
     return {
       command: createHelperCommand("contrib", "scaffold-trigger", "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "validate_contrib") {
+    const request = ContributionValidateRequestSchema.parse(spec.analysisPayload ?? {});
+    const resolved = resolveContributionScaffoldResultFromPayload(spec.analysisPayload);
+    const requestPath = path.join(tempDir, "contrib-validate-request.json");
+    await fs.writeFile(requestPath, JSON.stringify({
+      result: resolved.result,
+      source: resolved.source,
+      sourceArtifactId: resolved.sourceArtifactId,
+      bundleArtifactId: request.bundleArtifactId
+    }, null, 2), "utf8");
+    return {
+      command: createHelperCommand("contrib", "validate", "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "package_contrib") {
+    const request = ContributionPackageRequestSchema.parse(spec.analysisPayload ?? {});
+    const resolved = resolveContributionScaffoldResultFromPayload(spec.analysisPayload);
+    const requestPath = path.join(tempDir, "contrib-package-request.json");
+    await fs.writeFile(requestPath, JSON.stringify({
+      result: resolved.result,
+      source: resolved.source,
+      sourceArtifactId: resolved.sourceArtifactId,
+      bundleArtifactId: request.bundleArtifactId,
+      format: request.format
+    }, null, 2), "utf8");
+    return {
+      command: createHelperCommand("contrib", "package", "--request", requestPath),
       cleanup: async () => {
         await fs.rm(tempDir, { recursive: true, force: true });
       }
@@ -1312,6 +1490,16 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
     if (spec.stepType === "scaffold_trigger") {
       const response = TriggerScaffoldResponseSchema.parse(JSON.parse(stdout) as TriggerScaffoldResponse);
       return createContributionScaffoldArtifacts(spec, response.result, diagnostics);
+    }
+
+    if (spec.stepType === "validate_contrib") {
+      const response = ContributionValidateResponseSchema.parse(JSON.parse(stdout) as ContributionValidateResponse);
+      return createContributionValidationArtifacts(spec, response.result as ContributionValidateResultLike, diagnostics);
+    }
+
+    if (spec.stepType === "package_contrib") {
+      const response = ContributionPackageResponseSchema.parse(JSON.parse(stdout) as ContributionPackageResponse);
+      return createContributionPackageArtifacts(spec, response.result as ContributionPackageResultLike, diagnostics);
     }
   } catch (error) {
     diagnostics.push({

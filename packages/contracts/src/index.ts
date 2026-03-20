@@ -67,7 +67,9 @@ export const ArtifactTypeSchema = z.enum([
   "run_comparison_plan",
   "run_comparison",
   "diagnosis_report",
-  "contrib_bundle"
+  "contrib_bundle",
+  "contrib_validation_report",
+  "contrib_package"
 ]);
 export type ArtifactType = z.infer<typeof ArtifactTypeSchema>;
 
@@ -476,6 +478,9 @@ export const ContribDescriptorResponseSchema = z.object({
 });
 export type ContribDescriptorResponse = z.infer<typeof ContribDescriptorResponseSchema>;
 
+export const ContributionKindSchema = z.enum(["activity", "action", "trigger"]);
+export type ContributionKind = z.infer<typeof ContributionKindSchema>;
+
 export const ActivityScaffoldRequestSchema = z.object({
   activityName: z.string().min(1),
   modulePath: z.string().min(1),
@@ -620,6 +625,13 @@ export const TriggerScaffoldBundleSchema = z.object({
 });
 export type TriggerScaffoldBundle = z.infer<typeof TriggerScaffoldBundleSchema>;
 
+export const ContributionScaffoldBundleSchema = z.discriminatedUnion("kind", [
+  ActivityScaffoldBundleSchema,
+  ActionScaffoldBundleSchema,
+  TriggerScaffoldBundleSchema
+]);
+export type ContributionScaffoldBundle = z.infer<typeof ContributionScaffoldBundleSchema>;
+
 export const ActivityScaffoldResultSchema = z.object({
   bundle: ActivityScaffoldBundleSchema,
   validation: ValidationReportSchema,
@@ -658,6 +670,93 @@ export const TriggerScaffoldResponseSchema = z.object({
   result: TriggerScaffoldResultSchema
 });
 export type TriggerScaffoldResponse = z.infer<typeof TriggerScaffoldResponseSchema>;
+
+export const ContributionScaffoldResultSchema = z.object({
+  bundle: ContributionScaffoldBundleSchema,
+  validation: ValidationReportSchema,
+  build: ContribProofStepSchema,
+  test: ContribProofStepSchema
+});
+export type ContributionScaffoldResult = z.infer<typeof ContributionScaffoldResultSchema>;
+
+export const ContributionBundleArtifactSchema = ArtifactRefSchema.extend({
+  type: z.literal("contrib_bundle"),
+  metadata: z.record(z.string(), z.unknown())
+});
+export type ContributionBundleArtifact = z.infer<typeof ContributionBundleArtifactSchema>;
+
+const contributionBundleInputShape = {
+  bundleArtifactId: z.string().min(1).optional(),
+  bundleArtifact: ContributionBundleArtifactSchema.optional(),
+  result: ContributionScaffoldResultSchema.optional()
+} as const;
+
+function validateContributionBundleInput(
+  value: {
+    bundleArtifactId?: string;
+    bundleArtifact?: ContributionBundleArtifact;
+    result?: ContributionScaffoldResult;
+  },
+  ctx: z.RefinementCtx
+) {
+  if (!value.bundleArtifactId && !value.bundleArtifact && !value.result) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide bundleArtifactId, bundleArtifact, or result.",
+      path: ["bundleArtifactId"]
+    });
+  }
+}
+
+export const ContributionValidateRequestSchema = z.object(contributionBundleInputShape).superRefine(validateContributionBundleInput);
+export type ContributionValidateRequest = z.infer<typeof ContributionValidateRequestSchema>;
+
+export const ContributionEvidenceSourceSchema = z.enum(["inline_result", "bundle_artifact"]);
+export type ContributionEvidenceSource = z.infer<typeof ContributionEvidenceSourceSchema>;
+
+export const ContributionValidateResultSchema = z.object({
+  bundle: ContributionScaffoldBundleSchema,
+  validation: ValidationReportSchema,
+  build: ContribProofStepSchema,
+  test: ContribProofStepSchema,
+  source: ContributionEvidenceSourceSchema,
+  sourceArtifactId: z.string().optional()
+});
+export type ContributionValidateResult = z.infer<typeof ContributionValidateResultSchema>;
+
+export const ContributionValidateResponseSchema = z.object({
+  result: ContributionValidateResultSchema
+});
+export type ContributionValidateResponse = z.infer<typeof ContributionValidateResponseSchema>;
+
+export const ContributionPackageFormatSchema = z.enum(["zip"]);
+export type ContributionPackageFormat = z.infer<typeof ContributionPackageFormatSchema>;
+
+export const ContributionPackageArchiveSchema = z.object({
+  format: ContributionPackageFormatSchema.default("zip"),
+  fileName: z.string(),
+  path: z.string(),
+  bytes: z.number().int().nonnegative(),
+  sha256: z.string().min(1),
+  base64: z.string().min(1)
+});
+export type ContributionPackageArchive = z.infer<typeof ContributionPackageArchiveSchema>;
+
+export const ContributionPackageRequestSchema = z.object({
+  ...contributionBundleInputShape,
+  format: ContributionPackageFormatSchema.default("zip")
+}).superRefine(validateContributionBundleInput);
+export type ContributionPackageRequest = z.infer<typeof ContributionPackageRequestSchema>;
+
+export const ContributionPackageResultSchema = ContributionValidateResultSchema.extend({
+  package: ContributionPackageArchiveSchema
+});
+export type ContributionPackageResult = z.infer<typeof ContributionPackageResultSchema>;
+
+export const ContributionPackageResponseSchema = z.object({
+  result: ContributionPackageResultSchema
+});
+export type ContributionPackageResponse = z.infer<typeof ContributionPackageResponseSchema>;
 
 export const MappingKindSchema = z.enum(["literal", "expression", "object", "array"]);
 export type MappingKind = z.infer<typeof MappingKindSchema>;
@@ -2012,6 +2111,8 @@ export const RunnerStepTypeSchema = z.enum([
   "scaffold_activity",
   "scaffold_action",
   "scaffold_trigger",
+  "validate_contrib",
+  "package_contrib",
   "diagnose_app"
 ]);
 export type RunnerStepType = z.infer<typeof RunnerStepTypeSchema>;
@@ -2043,6 +2144,8 @@ export const RunnerJobKindSchema = z.enum([
   "activity_scaffold",
   "action_scaffold",
   "trigger_scaffold",
+  "contrib_validation",
+  "contrib_package",
   "diagnosis"
 ]);
 export type RunnerJobKind = z.infer<typeof RunnerJobKindSchema>;
@@ -2073,6 +2176,8 @@ export const AnalysisKindSchema = z.enum([
   "activity_scaffold",
   "action_scaffold",
   "trigger_scaffold",
+  "validate_contrib",
+  "package_contrib",
   "diagnosis"
 ]);
 export type AnalysisKind = z.infer<typeof AnalysisKindSchema>;

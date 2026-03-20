@@ -72,6 +72,8 @@ Important current `inputs` conventions:
 - `mode = "activity_scaffold"` for analysis-only Flogo Activity bundle scaffolding
 - `mode = "action_scaffold"` for analysis-only Flogo Action bundle scaffolding
 - `mode = "trigger_scaffold"` for analysis-only Flogo Trigger bundle scaffolding
+- `mode = "validate_contrib"` for analysis-only shared contribution validation/build/test proof
+- `mode = "package_contrib"` for analysis-only shared contribution packaging after proof
 - `mode = "governance"` for analysis-only alias/orphan/version validation
 - `mode = "composition_compare"` for analysis-only JSON vs programmatic comparison
 
@@ -189,6 +191,8 @@ Current artifact kinds:
 - `run_comparison`
 - `diagnosis_report`
 - `contrib_bundle`
+- `contrib_validation_report`
+- `contrib_package`
 
 ## Flogo-native contracts
 
@@ -276,6 +280,29 @@ These describe:
 - generated Go trigger implementation, metadata, module, test, and readme files,
 - isolated `go test` and `go build` proof results,
 - persisted contribution bundle artifacts without auto-installing the bundle into an app.
+
+### Shared contribution validation and packaging contracts
+
+Important schemas:
+
+- `ContributionScaffoldBundle`
+- `ContributionScaffoldResult`
+- `ContributionBundleArtifact`
+- `ContributionValidateRequest`
+- `ContributionValidateResult`
+- `ContributionValidateResponse`
+- `ContributionPackageRequest`
+- `ContributionPackageArchive`
+- `ContributionPackageResult`
+- `ContributionPackageResponse`
+
+These describe:
+
+- one shared bundle/result model across scaffolded Activity, Action, and Trigger bundles,
+- validation requests that can consume either a persisted `contrib_bundle` artifact or an inline scaffold result,
+- packaging requests that reuse the same shared proof path,
+- conservative package metadata for one reviewable archive output,
+- persisted validation/package artifacts without auto-installing the bundle into an app.
 
 ### Mapping contracts
 
@@ -728,7 +755,7 @@ Current runtime behavior is mixed:
 
 - persisted metadata is stored in PostgreSQL,
 - inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test payloads are stored as Blob/Azurite-backed JSON objects,
-- Activity/Trigger/Action `contrib_bundle`, `build_log`, and `test_report` task artifacts are also stored as Blob/Azurite-backed JSON objects while retaining Prisma metadata for task detail rendering,
+- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `build_log`, and `test_report` task artifacts are also stored as Blob/Azurite-backed JSON objects while retaining Prisma metadata for task detail rendering,
 - many broader task artifacts still use logical or local URIs.
 
 This matters for operators:
@@ -736,7 +763,7 @@ This matters for operators:
 - task and analysis history survive restart,
 - artifact metadata survives restart,
 - app-analysis payloads are object-storage-backed,
-- contribution-authoring bundle and proof payloads are object-storage-backed,
+- contribution-authoring bundle, validation, package, and proof payloads are object-storage-backed,
 - broader runtime artifact payload locations may still be logical rather than object-storage-backed.
 
 ## App resolution model
@@ -764,7 +791,9 @@ Examples:
 - `run_comparison_plan` and `run_comparison` are now produced from stored `run_trace` and `replay_report` artifacts, preferring recorder-backed runtime evidence and normalized step evidence when available, preferring REST envelope comparison or timer startup comparison when the matching artifacts carry those runtime slices, and falling back to nested-trace or summary-only replay payloads otherwise.
 - `diagnosis_report` is now produced by the analysis-only diagnosis loop; it summarizes problem category, subtype, supporting evidence references, recommended next action, recommended patch, confidence, and evidence quality while linking back to any nested trace, replay, or comparison artifacts used during the proof path, and its confidence payload is now explicitly calibrated against runtime-backed vs mixed vs artifact-backed vs simulated fallback evidence plus contract-inference-only cases.
 - `contrib_bundle` is now produced by the narrow Phase 4 Activity, Action, and Trigger scaffold slices, carries descriptor metadata, generated file summaries, and isolated build/test proof results for reviewable contribution bundles, and is uploaded through the same Blob/Azurite storage seam used for app-analysis payloads.
+- `contrib_validation_report` is now produced by the shared contribution validation slice, carries shared proof results plus bundle/source metadata for Activity, Action, and Trigger bundles, and is uploaded through the same Blob/Azurite storage seam.
+- `contrib_package` is now produced by the shared contribution packaging slice, carries conservative package metadata plus shared proof results for Activity, Action, and Trigger bundles, and is uploaded through the same Blob/Azurite storage seam.
 - graph projections in Prisma exist, but the current runtime does not fully maintain them.
-- task persistence is live, app-analysis payload storage is live, and contribution-authoring bundle/proof payload storage is live, but workspace snapshots and broader blob-backed runtime artifact content are still planned work.
+- task persistence is live, app-analysis payload storage is live, and contribution-authoring bundle/validation/package/proof payload storage is live, but workspace snapshots and broader blob-backed runtime artifact content are still planned work.
 
 These are intentional roadmap placeholders, not accidental drift.

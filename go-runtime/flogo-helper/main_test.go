@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"os"
@@ -415,6 +416,129 @@ func TestValidateTriggerScaffoldRequestRejectsUnsupportedFieldTypes(t *testing.T
 	}
 	if !strings.Contains(err.Error(), "unsupported trigger scaffold field type") {
 		t.Fatalf("expected unsupported field type error, got %v", err)
+	}
+}
+
+func TestValidateContributionReusesSharedProofForScaffoldedBundles(t *testing.T) {
+	response := scaffoldAction(actionScaffoldRequest{
+		ActionName:  "Flow Action",
+		ModulePath:  "example.com/acme/flow-action",
+		Title:       "Flow Action",
+		Description: "Executes reusable flow work.",
+		Version:     "0.1.0",
+		Inputs: []contribField{
+			{Name: "payload", Type: "object", Required: true},
+		},
+		Outputs: []contribField{
+			{Name: "result", Type: "object"},
+		},
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	validation := validateContribution(contributionValidateRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundleFromAction(result.Bundle),
+			Validation: result.Validation,
+			Build:      result.Build,
+			Test:       result.Test,
+		},
+		Source:         "bundle_artifact",
+		SourceArtifact: "artifact-1",
+	})
+
+	if validation.Result.Bundle.Kind != "action" {
+		t.Fatalf("expected action bundle kind, got %+v", validation.Result.Bundle)
+	}
+	if validation.Result.Source != "bundle_artifact" {
+		t.Fatalf("expected bundle artifact source, got %+v", validation.Result)
+	}
+	if validation.Result.SourceArtifact != "artifact-1" {
+		t.Fatalf("expected source artifact id to round-trip, got %+v", validation.Result)
+	}
+	if !validation.Result.Validation.Ok || !validation.Result.Build.Ok || !validation.Result.Test.Ok {
+		t.Fatalf("expected shared contribution validation proof to pass, got %+v", validation.Result)
+	}
+}
+
+func TestValidateContributionScaffoldResultRejectsMalformedBundle(t *testing.T) {
+	err := validateContributionScaffoldResult(contributionScaffoldResult{
+		Bundle: contributionScaffoldBundle{
+			Kind:        "action",
+			PackageName: "broken",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected malformed contribution bundle validation to fail")
+	}
+	if !strings.Contains(err.Error(), "bundle.modulePath is required") {
+		t.Fatalf("expected missing bundle.modulePath error, got %v", err)
+	}
+}
+
+func TestPackageContributionGeneratesReviewableArchive(t *testing.T) {
+	response := scaffoldTrigger(triggerScaffoldRequest{
+		TriggerName: "Webhook Trigger",
+		ModulePath:  "example.com/acme/webhook",
+		Title:       "Webhook Trigger",
+		Description: "Dispatches a scaffolded event into one configured handler.",
+		Version:     "0.1.0",
+		Outputs: []contribField{
+			{Name: "payload", Type: "object"},
+		},
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	packaged := packageContribution(contributionPackageRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundleFromTrigger(result.Bundle),
+			Validation: result.Validation,
+			Build:      result.Build,
+			Test:       result.Test,
+		},
+		Source:         "inline_result",
+		SourceArtifact: "",
+		Format:         "zip",
+	})
+
+	if packaged.Result.Bundle.Kind != "trigger" {
+		t.Fatalf("expected trigger package result, got %+v", packaged.Result.Bundle)
+	}
+	if packaged.Result.Package.Format != "zip" {
+		t.Fatalf("expected zip package format, got %+v", packaged.Result.Package)
+	}
+	if packaged.Result.Package.FileName == "" || packaged.Result.Package.Path == "" {
+		t.Fatalf("expected package file metadata, got %+v", packaged.Result.Package)
+	}
+	if packaged.Result.Package.Bytes <= 0 || packaged.Result.Package.SHA256 == "" || packaged.Result.Package.Base64 == "" {
+		t.Fatalf("expected populated package archive metadata, got %+v", packaged.Result.Package)
+	}
+	if _, err := os.Stat(packaged.Result.Package.Path); err != nil {
+		t.Fatalf("expected package archive to exist on disk: %v", err)
+	}
+	reader, err := zip.OpenReader(packaged.Result.Package.Path)
+	if err != nil {
+		t.Fatalf("open package archive: %v", err)
+	}
+	defer reader.Close()
+
+	names := []string{}
+	for _, file := range reader.File {
+		names = append(names, file.Name)
+	}
+	if !containsString(names, "descriptor.json") || !containsString(names, "trigger.go") || !containsString(names, "README.md") {
+		t.Fatalf("expected package archive to include scaffolded files, got %v", names)
 	}
 }
 

@@ -237,3 +237,57 @@ describe("TaskPlanner action scaffold mode", () => {
     expect(plan.steps.some((step) => step.tool === "runner.buildApp")).toBe(false);
   });
 });
+
+describe("TaskPlanner shared contribution lifecycle modes", () => {
+  it("treats explicit contribution validation mode as analysis-only authoring work", () => {
+    const planner = new TaskPlanner();
+    const plan = planner.plan({
+      type: "review",
+      projectId: "demo",
+      requestedBy: "operator",
+      summary: "Validate a scaffolded Flogo contribution bundle",
+      inputs: {
+        mode: "validate_contrib",
+        bundleArtifactId: "artifact-1"
+      },
+      constraints: {
+        allowDependencyChanges: false,
+        allowCustomCode: false,
+        targetEnv: "dev",
+        requireApproval: true
+      }
+    });
+
+    expect(plan.steps.map((step) => step.tool)).toEqual([
+      "flogo.parseApp",
+      "flogo.validateApp",
+      "runner.validateContrib"
+    ]);
+  });
+
+  it("treats explicit contribution packaging mode as analysis-only authoring work", () => {
+    const planner = new TaskPlanner();
+    const plan = planner.plan({
+      type: "review",
+      projectId: "demo",
+      requestedBy: "operator",
+      summary: "Package a scaffolded Flogo contribution bundle",
+      inputs: {
+        mode: "package_contrib",
+        bundleArtifactId: "artifact-1"
+      },
+      constraints: {
+        allowDependencyChanges: false,
+        allowCustomCode: false,
+        targetEnv: "dev",
+        requireApproval: true
+      }
+    });
+
+    expect(plan.steps.map((step) => step.tool)).toEqual([
+      "flogo.parseApp",
+      "flogo.validateApp",
+      "runner.packageContrib"
+    ]);
+  });
+});

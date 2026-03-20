@@ -140,4 +140,86 @@ describe("ArtifactList", () => {
     expect(html).toContain("durable payload: blob-backed");
     expect(html).toContain("build proof: passed");
   });
+
+  it("renders shared contribution validation report summaries", () => {
+    const html = renderToStaticMarkup(
+      <ArtifactList
+        artifacts={[
+          {
+            id: "artifact-4",
+            type: "contrib_validation_report",
+            name: "action-validation-flowaction",
+            uri: "memory://task-4/action-validation-flowaction",
+            metadata: {
+              storage: {
+                kind: "blob",
+                blobPath: "task-artifacts/demo/task-4/contrib_validation_report/artifact-4.json",
+                durablePayload: true
+              },
+              result: {
+                bundle: {
+                  kind: "action",
+                  packageName: "flowaction",
+                  modulePath: "example.com/acme/flow-action",
+                  files: [{ kind: "descriptor" }, { kind: "implementation" }, { kind: "test" }]
+                },
+                validation: { ok: true },
+                build: { ok: true },
+                test: { ok: true }
+              }
+            }
+          }
+        ]}
+      />
+    );
+
+    expect(html).toContain("contribution type: action");
+    expect(html).toContain("generated files: descriptor, implementation, test");
+    expect(html).toContain("validation: passed");
+    expect(html).toContain("durable payload: blob-backed");
+  });
+
+  it("renders packaged contribution summaries with package metadata", () => {
+    const html = renderToStaticMarkup(
+      <ArtifactList
+        artifacts={[
+          {
+            id: "artifact-5",
+            type: "contrib_package",
+            name: "trigger-package-webhooktrigger",
+            uri: "memory://task-5/trigger-package-webhooktrigger",
+            metadata: {
+              storage: {
+                kind: "blob",
+                blobPath: "task-artifacts/demo/task-5/contrib_package/artifact-5.json",
+                durablePayload: true
+              },
+              result: {
+                bundle: {
+                  kind: "trigger",
+                  packageName: "webhooktrigger",
+                  modulePath: "example.com/acme/webhook",
+                  files: [{ kind: "descriptor" }, { kind: "implementation" }, { kind: "test" }]
+                },
+                package: {
+                  format: "zip",
+                  fileName: "webhooktrigger.zip",
+                  bytes: 2048
+                },
+                validation: { ok: true },
+                build: { ok: true },
+                test: { ok: true }
+              }
+            }
+          }
+        ]}
+      />
+    );
+
+    expect(html).toContain("contribution type: trigger");
+    expect(html).toContain("package file: webhooktrigger.zip");
+    expect(html).toContain("package format: zip");
+    expect(html).toContain("package bytes: 2048");
+    expect(html).toContain("blob path: task-artifacts/demo/task-5/contrib_package/artifact-5.json");
+  });
 });

@@ -205,6 +205,17 @@ export class TaskStoreService {
     return artifacts.map((artifact) => this.toArtifactRef(artifact));
   }
 
+  async getArtifact(artifactId: string): Promise<ArtifactRef | undefined> {
+    const prisma = this.prisma as any;
+    const artifact = (await prisma.artifact.findUnique({
+      where: {
+        id: artifactId
+      }
+    })) as DbArtifact | null;
+
+    return artifact ? this.toArtifactRef(artifact) : undefined;
+  }
+
   async listTaskEvents(taskId: string): Promise<TaskEvent[]> {
     const prisma = this.prisma as any;
     const events = (await prisma.taskEvent.findMany({

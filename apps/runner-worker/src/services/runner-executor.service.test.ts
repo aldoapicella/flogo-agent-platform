@@ -582,6 +582,270 @@ describe("RunnerExecutorService", () => {
     ).rejects.toThrow(/Unsupported trigger scaffold field type/);
   });
 
+  it("executes helper-backed shared contribution validation from a persisted contrib_bundle artifact", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          bundle: {
+            kind: "action",
+            modulePath: "example.com/acme/flow-action",
+            packageName: "flowaction",
+            bundleRoot: "/tmp/flogo-action-flowaction",
+            descriptor: {
+              ref: "example.com/acme/flow-action",
+              alias: "flowaction",
+              type: "action",
+              name: "flow-action",
+              version: "0.1.0",
+              title: "Flow Action",
+              settings: [],
+              inputs: [],
+              outputs: [],
+              examples: [],
+              compatibilityNotes: ["Generated scaffold"],
+              source: "action_scaffold"
+            },
+            files: [{ path: "/tmp/flogo-action-flowaction/descriptor.json", kind: "descriptor", bytes: 160, content: "{}" }],
+            readmePath: "/tmp/flogo-action-flowaction/README.md"
+          },
+          validation: {
+            ok: true,
+            summary: "Contribution bundle passed shared validation proof.",
+            stages: [
+              { stage: "structural", ok: true, diagnostics: [] },
+              { stage: "regression", ok: true, diagnostics: [] },
+              { stage: "build", ok: true, diagnostics: [] }
+            ],
+            artifacts: []
+          },
+          build: {
+            kind: "build",
+            ok: true,
+            command: ["go", "build", "./..."],
+            exitCode: 0,
+            summary: "go build ./... succeeded",
+            output: ""
+          },
+          test: {
+            kind: "test",
+            ok: true,
+            command: ["go", "test", "./..."],
+            exitCode: 0,
+            summary: "go test ./... succeeded",
+            output: ""
+          },
+          source: "bundle_artifact",
+          sourceArtifactId: "bundle-artifact-1"
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-validate-contrib",
+      jobKind: "contrib_validation",
+      stepType: "validate_contrib",
+      analysisKind: "validate_contrib",
+      snapshotUri: ".",
+      appPath: "flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://validate-contrib",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        bundleArtifactId: "bundle-artifact-1",
+        bundleArtifact: {
+          id: "bundle-artifact-1",
+          type: "contrib_bundle",
+          name: "action-bundle-flowaction",
+          uri: "memory://task/action-bundle-flowaction.json",
+          metadata: {
+            result: {
+              bundle: {
+                kind: "action",
+                modulePath: "example.com/acme/flow-action",
+                packageName: "flowaction",
+                bundleRoot: "/tmp/flogo-action-flowaction",
+                descriptor: {
+                  ref: "example.com/acme/flow-action",
+                  alias: "flowaction",
+                  type: "action",
+                  name: "flow-action",
+                  version: "0.1.0",
+                  title: "Flow Action",
+                  settings: [],
+                  inputs: [],
+                  outputs: [],
+                  examples: [],
+                  compatibilityNotes: ["Generated scaffold"],
+                  source: "action_scaffold"
+                },
+                files: []
+              },
+              validation: { ok: true, stages: [], summary: "ok", artifacts: [] },
+              build: { kind: "build", ok: true, command: ["go", "build", "./..."], exitCode: 0, summary: "ok", output: "" },
+              test: { kind: "test", ok: true, command: ["go", "test", "./..."], exitCode: 0, summary: "ok", output: "" }
+            }
+          }
+        }
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    const validationArtifact = result.artifacts.find((artifact) => artifact.type === "contrib_validation_report");
+    expect(result.ok).toBe(true);
+    expect(validationArtifact).toBeDefined();
+    expect((validationArtifact?.metadata as { result?: { source?: string; sourceArtifactId?: string; bundle?: { kind?: string } } } | undefined)?.result?.source).toBe("bundle_artifact");
+    expect((validationArtifact?.metadata as { result?: { sourceArtifactId?: string; bundle?: { kind?: string } } } | undefined)?.result?.sourceArtifactId).toBe("bundle-artifact-1");
+    expect((validationArtifact?.metadata as { result?: { bundle?: { kind?: string } } } | undefined)?.result?.bundle?.kind).toBe("action");
+  });
+
+  it("executes helper-backed shared contribution packaging and publishes a reviewable package artifact", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          bundle: {
+            kind: "trigger",
+            modulePath: "example.com/acme/webhook",
+            packageName: "webhooktrigger",
+            bundleRoot: "/tmp/flogo-trigger-webhooktrigger",
+            descriptor: {
+              ref: "example.com/acme/webhook",
+              alias: "webhooktrigger",
+              type: "trigger",
+              name: "webhook-trigger",
+              version: "0.1.0",
+              title: "Webhook Trigger",
+              settings: [],
+              handlerSettings: [],
+              outputs: [],
+              reply: [],
+              examples: [],
+              compatibilityNotes: ["Generated scaffold"],
+              source: "trigger_scaffold"
+            },
+            files: [{ path: "/tmp/flogo-trigger-webhooktrigger/descriptor.json", kind: "descriptor", bytes: 180, content: "{}" }],
+            readmePath: "/tmp/flogo-trigger-webhooktrigger/README.md"
+          },
+          validation: {
+            ok: true,
+            summary: "Contribution bundle passed shared validation proof.",
+            stages: [
+              { stage: "structural", ok: true, diagnostics: [] },
+              { stage: "regression", ok: true, diagnostics: [] },
+              { stage: "build", ok: true, diagnostics: [] }
+            ],
+            artifacts: []
+          },
+          build: {
+            kind: "build",
+            ok: true,
+            command: ["go", "build", "./..."],
+            exitCode: 0,
+            summary: "go build ./... succeeded",
+            output: ""
+          },
+          test: {
+            kind: "test",
+            ok: true,
+            command: ["go", "test", "./..."],
+            exitCode: 0,
+            summary: "go test ./... succeeded",
+            output: ""
+          },
+          source: "inline_result",
+          package: {
+            format: "zip",
+            fileName: "webhooktrigger.zip",
+            path: "/tmp/webhooktrigger.zip",
+            bytes: 2048,
+            sha256: "abc123",
+            base64: "ZmFrZS16aXA="
+          }
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-package-contrib",
+      jobKind: "contrib_package",
+      stepType: "package_contrib",
+      analysisKind: "package_contrib",
+      snapshotUri: ".",
+      appPath: "flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://package-contrib",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        result: {
+          bundle: {
+            kind: "trigger",
+            modulePath: "example.com/acme/webhook",
+            packageName: "webhooktrigger",
+            bundleRoot: "/tmp/flogo-trigger-webhooktrigger",
+            descriptor: {
+              ref: "example.com/acme/webhook",
+              alias: "webhooktrigger",
+              type: "trigger",
+              name: "webhook-trigger",
+              version: "0.1.0",
+              title: "Webhook Trigger",
+              settings: [],
+              handlerSettings: [],
+              outputs: [],
+              reply: [],
+              examples: [],
+              compatibilityNotes: ["Generated scaffold"],
+              source: "trigger_scaffold"
+            },
+            files: []
+          },
+          validation: { ok: true, stages: [], summary: "ok", artifacts: [] },
+          build: { kind: "build", ok: true, command: ["go", "build", "./..."], exitCode: 0, summary: "ok", output: "" },
+          test: { kind: "test", ok: true, command: ["go", "test", "./..."], exitCode: 0, summary: "ok", output: "" }
+        },
+        format: "zip"
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    const packageArtifact = result.artifacts.find((artifact) => artifact.type === "contrib_package");
+    expect(result.ok).toBe(true);
+    expect(packageArtifact).toBeDefined();
+    expect((packageArtifact?.metadata as { result?: { package?: { format?: string; fileName?: string }; bundle?: { kind?: string } } } | undefined)?.result?.package?.format).toBe("zip");
+    expect((packageArtifact?.metadata as { result?: { package?: { fileName?: string } } } | undefined)?.result?.package?.fileName).toBe("webhooktrigger.zip");
+    expect((packageArtifact?.metadata as { result?: { bundle?: { kind?: string } } } | undefined)?.result?.bundle?.kind).toBe("trigger");
+  });
+
+  it("rejects malformed shared contribution validation input before dispatching the helper", async () => {
+    const service = new RunnerExecutorService();
+
+    await expect(
+      service.execute({
+        taskId: "task-invalid-validate-contrib",
+        jobKind: "contrib_validation",
+        stepType: "validate_contrib",
+        analysisKind: "validate_contrib",
+        snapshotUri: ".",
+        appPath: "flogo.json",
+        env: {},
+        envSecretRefs: {},
+        timeoutSeconds: 60,
+        artifactOutputUri: "memory://invalid-validate-contrib",
+        jobTemplateName: "flogo-runner",
+        analysisPayload: {},
+        command: [],
+        containerArgs: []
+      })
+    ).rejects.toThrow(/Provide bundleArtifactId, bundleArtifact, or result/);
+  });
+
   it("executes helper-backed timer trace capture and persists timer runtime metadata", async () => {
     process.env.FLOGO_HELPER_BIN = await createHelperScript(
       JSON.stringify({

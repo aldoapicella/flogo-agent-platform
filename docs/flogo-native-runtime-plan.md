@@ -511,13 +511,13 @@ Focus:
 
 Current status:
 
-- partially implemented in three narrow slices: custom Activity scaffolding, custom Trigger scaffolding, and a narrower custom Action scaffolding slice now exist as analysis-oriented task modes that generate descriptor metadata plus Go/module/test/readme files and run isolated `go test` / `go build` proof before persisting reviewable artifacts,
-- the resulting `contrib_bundle`, `build_log`, and `test_report` artifacts are now persisted through the control-plane task pipeline and uploaded through the Blob/Azurite storage seam used for app-analysis payloads,
-- generalized contribution validation/package/install flows and automatic install/update into apps remain later work.
+- partially implemented in three narrow scaffold slices plus one shared authoring-generalization slice: custom Activity scaffolding, custom Trigger scaffolding, and a narrower custom Action scaffolding slice now exist as analysis-oriented task modes that generate descriptor metadata plus Go/module/test/readme files, and shared `validate_contrib` / `package_contrib` task modes can now re-run proof and package one existing scaffold bundle reviewably,
+- the resulting `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `build_log`, and `test_report` artifacts are now persisted through the control-plane task pipeline and uploaded through the Blob/Azurite storage seam used for app-analysis payloads,
+- install/update flows and automatic install/update into apps remain later work.
 
 ## Current Implementation Baseline
 
-The current codebase has a completed Phase 1 foundation, an implemented Phase 2 design surface with the limitations noted above, a partially runtime-backed Phase 3 runtime-evidence surface with a landed Phase 3.2 recorder-backed/narrow-replay foundation on one supported slice, and a narrow Phase 4 Activity/Trigger/Action authoring foundation rather than only placeholders.
+The current codebase has a completed Phase 1 foundation, an implemented Phase 2 design surface with the limitations noted above, a partially runtime-backed Phase 3 runtime-evidence surface with a landed Phase 3.2 recorder-backed/narrow-replay foundation on one supported slice, and a narrow Phase 4 Activity/Trigger/Action authoring foundation plus shared validate/package groundwork rather than only placeholders.
 
 ### Implemented now
 
@@ -576,7 +576,9 @@ Analysis-only planner modes:
 - `inputs.mode = "activity_scaffold"`
 - `inputs.mode = "action_scaffold"`
 - `inputs.mode = "trigger_scaffold"`
-Runner job kinds and execution steps for flow contracts, runtime trace capture, replay, run comparison, diagnosis, trigger binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, contribution evidence, governance, composition comparison, mapping preview, and narrow Activity/Action/Trigger scaffolding
+- `inputs.mode = "validate_contrib"`
+- `inputs.mode = "package_contrib"`
+Runner job kinds and execution steps for flow contracts, runtime trace capture, replay, run comparison, diagnosis, trigger binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, contribution evidence, governance, composition comparison, mapping preview, and narrow Activity/Action/Trigger scaffold/validate/package authoring
 Go helper commands:
 - `flows contracts`
 - `triggers bind`
@@ -601,11 +603,13 @@ Go helper commands:
 - `contrib scaffold-activity`
 - `contrib scaffold-action`
 - `contrib scaffold-trigger`
+- `contrib validate`
+- `contrib package`
 
 ### Not implemented yet
 
 - Core-native programmatic app composition
-- broader contrib build/test/package/install flows beyond the new Activity/Trigger/Action scaffold foundation
+- broader contribution install/update flows beyond the new Activity/Trigger/Action scaffold plus shared validate/package foundation
 - deployment profile generation
 - TensorFlow or specialized activity planning
 
@@ -615,14 +619,14 @@ Use this section as the working tracker for future implementation slices.
 
 | Area | Scope | Status | Code reference | Next step |
 | --- | --- | --- | --- | --- |
-| Shared contracts | Inventory, descriptor, contribution-evidence, governance, composition, mapping-preview, mapping-test, property-plan, flow-contract, trigger-binding, subflow-refactor, advanced control-flow, run-trace, replay, run-comparison, diagnosis, and activity/action/trigger-authoring contracts | Partial | `packages/contracts/src/index.ts` | Add package/install authoring contracts later |
+| Shared contracts | Inventory, descriptor, contribution-evidence, governance, composition, mapping-preview, mapping-test, property-plan, flow-contract, trigger-binding, subflow-refactor, advanced control-flow, run-trace, replay, run-comparison, diagnosis, and shared activity/action/trigger-authoring contracts | Partial | `packages/contracts/src/index.ts` | Add install/update planning contracts later |
 | Graph engine | Contribution inventory, catalog, evidence inspection, alias validation, governance validation, composition comparison, mapping preview, mapping tests, coercion suggestions, property planning, flow contract inference, trigger-binding planning/application, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, run-trace/replay preflight validation, run-comparison diffing, and diagnosis report classification | Partial | `packages/flogo-graph/src/index.ts` | Deepen diagnosis-specific evidence ranking and classification coverage |
-| Tool layer | Flogo core/mapping tools split plus flow-contract, trigger-binding, subflow-refactor, advanced control-flow dispatch, runtime trace dispatch, replay dispatch, run-comparison dispatch, diagnosis dispatch, and Activity/Action/Trigger scaffold dispatch | Partial | `packages/tools/src/*.ts` | Add package/install authoring tool modules later |
-| Planner | Analysis-only modes, runtime trace/replay/run-comparison/diagnosis planning-execution routing, Flogo-aware step selection, and narrow activity/action/trigger-scaffold authoring routes | Partial | `packages/agent/src/index.ts` | Expand authoring heuristics beyond the current scaffold families later |
-| Control-plane APIs | Graph, inventory, catalog, descriptor inspection, contribution evidence inspection, flow contracts, runtime trace, replay, run comparison, trigger binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, governance, composition comparison, mapping preview, mapping test, property plan, activity scaffold tasks, trigger scaffold tasks, app artifact listing | Partial | `apps/control-plane/src/modules/flogo-apps/*` | Add dedicated contribution-authoring APIs later if needed |
-| Persistence | Prisma-backed task/event/artifact state plus hidden app-analysis records, Blob-backed analysis payloads, and Blob-backed contribution authoring bundle/proof payloads | Partial | `apps/control-plane/src/modules/agent/task-store.service.ts`, `apps/control-plane/src/modules/flogo-apps/app-analysis-storage.service.ts` | Extend Blob-backed storage to broader runtime/task artifacts beyond the current analysis and contribution-authoring slices |
-| Runner-worker | Flow-contract, runtime trace, replay, run comparison, trigger-binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, property-plan, diagnosis, and Activity/Action/Trigger scaffold execution support | Partial | `apps/runner-worker/src/services/*` | Add package/install authoring job kinds later |
-| Go helper | Flow-contract, runtime trace, replay, run comparison, trigger-binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, property planning, and Activity/Action/Trigger scaffolding/build-proof | Partial | `go-runtime/flogo-helper/main.go` | Expand contribution authoring beyond the current scaffold families later |
+| Tool layer | Flogo core/mapping tools split plus flow-contract, trigger-binding, subflow-refactor, advanced control-flow dispatch, runtime trace dispatch, replay dispatch, run-comparison dispatch, diagnosis dispatch, and shared contribution scaffold/validate/package dispatch | Partial | `packages/tools/src/*.ts` | Add install/update authoring tool modules later |
+| Planner | Analysis-only modes, runtime trace/replay/run-comparison/diagnosis planning-execution routing, Flogo-aware step selection, and narrow activity/action/trigger scaffold plus shared validate/package authoring routes | Partial | `packages/agent/src/index.ts` | Expand authoring heuristics beyond the current scaffold families later |
+| Control-plane APIs | Graph, inventory, catalog, descriptor inspection, contribution evidence inspection, flow contracts, runtime trace, replay, run comparison, trigger binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, governance, composition comparison, mapping preview, mapping test, property plan, activity/action/trigger scaffold tasks, shared contribution validate/package tasks, app artifact listing | Partial | `apps/control-plane/src/modules/flogo-apps/*` | Add dedicated contribution-authoring APIs later if needed |
+| Persistence | Prisma-backed task/event/artifact state plus hidden app-analysis records, Blob-backed analysis payloads, and Blob-backed contribution authoring bundle/validation/package payloads | Partial | `apps/control-plane/src/modules/agent/task-store.service.ts`, `apps/control-plane/src/modules/flogo-apps/app-analysis-storage.service.ts` | Extend Blob-backed storage to broader runtime/task artifacts beyond the current analysis and contribution-authoring slices |
+| Runner-worker | Flow-contract, runtime trace, replay, run comparison, trigger-binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, property-plan, diagnosis, and shared contribution scaffold/validate/package execution support | Partial | `apps/runner-worker/src/services/*` | Add install/update authoring job kinds later |
+| Go helper | Flow-contract, runtime trace, replay, run comparison, trigger-binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, property planning, and shared Activity/Action/Trigger scaffold/validate/package execution | Partial | `go-runtime/flogo-helper/main.go` | Expand contribution authoring into reviewable install/update planning later |
 | Web console | Task detail runtime-evidence inspection plus diagnosis-summary rendering for trace, replay, compare, and diagnosis artifacts | Partial | `apps/web-console` | Add richer compare workflows and a deeper diagnosis workbench |
 | Eval coverage | Existing create/update/debug/review baseline plus dedicated runtime-evidence and diagnosis-confidence suites for the current real runtime slices and targeted Activity/Action/Trigger scaffold coverage | Partial | `packages/evals` | Add broader UI-facing workflow evals and later package/install authoring cases |
 
@@ -639,7 +643,7 @@ When implementing a Flogo-native feature:
 
 ## Recommended Next Slice
 
-The next implementation slice after the current baseline should generalize contribution authoring from the new Activity/Action/Trigger foundation into shared validate/build/test/package flows before adding install/update behavior.
+The next implementation slice after the current baseline should build reviewable install/update planning on top of the new shared scaffold/validate/package contribution lifecycle.
 
 Recommended next items:
 

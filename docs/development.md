@@ -186,10 +186,12 @@ Contribution authoring now has narrow Activity, Action, and Trigger scaffold com
 go run ./go-runtime/flogo-helper contrib scaffold-activity --request activity-scaffold-request.json
 go run ./go-runtime/flogo-helper contrib scaffold-action --request action-scaffold-request.json
 go run ./go-runtime/flogo-helper contrib scaffold-trigger --request trigger-scaffold-request.json
+go run ./go-runtime/flogo-helper contrib validate --request contrib-validate-request.json
+go run ./go-runtime/flogo-helper contrib package --request contrib-package-request.json
 ```
 
-Those scaffold commands are analysis-oriented. They generate reviewable contribution bundles in a temporary workspace, run isolated `go mod tidy`, `go test ./...`, and `go build ./...`, and return persisted `contrib_bundle`, `build_log`, and `test_report` artifacts through the runner path.
-The control-plane now requires the shared Blob/Azurite storage seam to be configured before Activity, Action, or Trigger scaffold tasks are synced; it fails loudly rather than silently keeping those authoring artifacts on `memory://` URIs.
+Those contribution commands are analysis-oriented. The scaffold commands generate reviewable contribution bundles in a temporary workspace, and the validate/package commands accept one existing scaffold result or persisted `contrib_bundle` artifact. All five commands reuse isolated `go mod tidy`, `go test ./...`, and `go build ./...` proof, with packaging additionally emitting one conservative review archive.
+The control-plane now requires the shared Blob/Azurite storage seam to be configured before contribution scaffold, validate, or package tasks are synced; it fails loudly rather than silently keeping those authoring artifacts on `memory://` URIs.
 
 #### Model integration
 
@@ -403,7 +405,7 @@ Current important test areas:
 - Shared packages are consumed from `dist`, so stale package builds can look like app-level type errors.
 - `next build` and Vitest can hit environment-specific `spawn EPERM` failures in restricted Windows shells even when the code is type-correct.
 - Some artifact URIs are still logical/local rather than Blob-backed.
-- App-analysis inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test artifacts are Blob/Azurite-backed, and Activity/Trigger/Action `contrib_bundle`, `build_log`, and `test_report` artifacts now use the same storage seam; broader runtime artifacts are not yet.
+- App-analysis inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test artifacts are Blob/Azurite-backed, and Activity/Trigger/Action contribution `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `build_log`, and `test_report` artifacts now use the same storage seam; broader runtime artifacts are not yet.
 - The Go helper currently covers the completed Phase 1 inventory/catalog/descriptor/contribution-evidence/governance/composition-compare/mapping-preview/mapping-test/property-plan slice plus the current Phase 2 flow-contract, trigger-binding, subflow-refactor, and advanced control-flow synthesis commands, the current Phase 3 runtime trace/replay/compare slices, and narrow Phase 4 Activity/Action/Trigger scaffold commands.
 
 If the environment blocks build/test execution, validate the same commands again in CI or an unrestricted local shell before assuming the code is broken.

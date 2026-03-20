@@ -424,6 +424,42 @@ export class RunnerTools {
     });
   }
 
+  async validateContrib(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "validate_contrib",
+      jobKind: "contrib_validation",
+      analysisKind: "validate_contrib"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued contribution validation job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
+  async packageContrib(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "package_contrib",
+      jobKind: "contrib_package",
+      analysisKind: "package_contrib"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued contribution packaging job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
   async validateGovernance(spec: unknown): Promise<ToolResponse> {
     const parsed = RunnerJobSpecSchema.parse(spec);
     const result = await this.dispatcher.dispatch({
