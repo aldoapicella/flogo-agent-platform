@@ -66,6 +66,7 @@ export const ArtifactTypeSchema = z.enum([
   "replay_report",
   "run_comparison_plan",
   "run_comparison",
+  "diagnosis_report",
   "contrib_bundle"
 ]);
 export type ArtifactType = z.infer<typeof ArtifactTypeSchema>;
@@ -1137,6 +1138,187 @@ export const RunComparisonResponseSchema = z.object({
 });
 export type RunComparisonResponse = z.infer<typeof RunComparisonResponseSchema>;
 
+export const DiagnosisTriggerFamilySchema = z.enum(["direct_flow", "rest", "timer", "cli", "channel", "unknown"]);
+export type DiagnosisTriggerFamily = z.infer<typeof DiagnosisTriggerFamilySchema>;
+
+export const DiagnosisSymptomSchema = z.enum([
+  "wrong_response",
+  "scheduled_flow_issue",
+  "cli_argument_issue",
+  "internal_event_issue",
+  "mapping_mismatch",
+  "flow_contract_issue",
+  "step_failure",
+  "replay_mismatch",
+  "unexpected_output",
+  "unsupported_shape",
+  "validation_failure"
+]);
+export type DiagnosisSymptom = z.infer<typeof DiagnosisSymptomSchema>;
+
+export const DiagnosisOperationSchema = z.enum([
+  "static_validation",
+  "mapping_preview",
+  "mapping_test",
+  "flow_contract_analysis",
+  "trigger_binding_analysis",
+  "run_trace",
+  "replay",
+  "compare_runs"
+]);
+export type DiagnosisOperation = z.infer<typeof DiagnosisOperationSchema>;
+
+export const DiagnosisProblemCategorySchema = z.enum([
+  "model",
+  "reference",
+  "mapping",
+  "trigger",
+  "activity",
+  "runtime",
+  "behavioral"
+]);
+export type DiagnosisProblemCategory = z.infer<typeof DiagnosisProblemCategorySchema>;
+
+export const DiagnosisSubtypeSchema = z.enum([
+  "contract_validation_failure",
+  "parse_or_resolution_failure",
+  "input_resolution_mismatch",
+  "reply_mapping_mismatch",
+  "rest_envelope_mismatch",
+  "timer_startup_mismatch",
+  "cli_boundary_mismatch",
+  "channel_boundary_mismatch",
+  "step_failure",
+  "behavioral_regression",
+  "fallback_to_simulation",
+  "unsupported_shape",
+  "insufficient_evidence"
+]);
+export type DiagnosisSubtype = z.infer<typeof DiagnosisSubtypeSchema>;
+
+export const DiagnosisEvidenceQualitySchema = z.enum([
+  "runtime_backed",
+  "simulated_fallback",
+  "artifact_backed",
+  "mixed"
+]);
+export type DiagnosisEvidenceQuality = z.infer<typeof DiagnosisEvidenceQualitySchema>;
+
+export const DiagnosisConfidenceLevelSchema = z.enum(["certain", "high", "medium", "low"]);
+export type DiagnosisConfidenceLevel = z.infer<typeof DiagnosisConfidenceLevelSchema>;
+
+export const DiagnosisConfidenceBasisSchema = z.enum([
+  "direct_observation",
+  "boundary_envelope",
+  "normalized_step",
+  "recorder_backed",
+  "comparison",
+  "validation",
+  "contract_inference",
+  "mixed_evidence",
+  "fallback_reason",
+  "summary_only"
+]);
+export type DiagnosisConfidenceBasis = z.infer<typeof DiagnosisConfidenceBasisSchema>;
+
+export const DiagnosisEvidenceRefSchema = z.object({
+  artifactId: z.string().optional(),
+  artifactType: ArtifactTypeSchema.optional(),
+  fieldPath: z.string(),
+  source: z.enum(["trace", "replay", "comparison", "validation", "mapping", "flow_contract", "trigger_binding", "inference"]),
+  direct: z.boolean().default(false),
+  observedValue: z.unknown().optional(),
+  expectedValue: z.unknown().optional(),
+  diff: z.unknown().optional()
+});
+export type DiagnosisEvidenceRef = z.infer<typeof DiagnosisEvidenceRefSchema>;
+
+export const DiagnosisConfidenceSchema = z.object({
+  level: DiagnosisConfidenceLevelSchema,
+  score: z.number().min(0).max(1),
+  bases: z.array(DiagnosisConfidenceBasisSchema).default([]),
+  supportingSignals: z.array(z.string()).default([]),
+  missingSignals: z.array(z.string()).default([]),
+  conflictingSignals: z.array(z.string()).default([])
+});
+export type DiagnosisConfidence = z.infer<typeof DiagnosisConfidenceSchema>;
+
+export const DiagnosisPlanSchema = z.object({
+  symptom: DiagnosisSymptomSchema,
+  triggerFamily: DiagnosisTriggerFamilySchema.default("unknown"),
+  selectedOperations: z.array(DiagnosisOperationSchema).default([]),
+  rationale: z.array(z.string()).default([]),
+  limitations: z.array(z.string()).default([])
+});
+export type DiagnosisPlan = z.infer<typeof DiagnosisPlanSchema>;
+
+export const DiagnosisAffectedScopeSchema = z.object({
+  triggerFamily: DiagnosisTriggerFamilySchema.optional(),
+  triggerId: z.string().optional(),
+  handlerName: z.string().optional(),
+  flowId: z.string().optional(),
+  taskId: z.string().optional(),
+  mappingPath: z.string().optional(),
+  nodeId: z.string().optional()
+});
+export type DiagnosisAffectedScope = z.infer<typeof DiagnosisAffectedScopeSchema>;
+
+export const DiagnosisPatchRecommendationSchema = z.object({
+  problem: z.string(),
+  evidence: z.array(z.string()).default([]),
+  proposedPatch: z.string(),
+  expectedImpact: z.string(),
+  confidence: DiagnosisConfidenceSchema,
+  caveats: z.array(z.string()).default([])
+});
+export type DiagnosisPatchRecommendation = z.infer<typeof DiagnosisPatchRecommendationSchema>;
+
+export const DiagnosisReportSchema = z.object({
+  plan: DiagnosisPlanSchema,
+  problemCategory: DiagnosisProblemCategorySchema,
+  subtype: DiagnosisSubtypeSchema,
+  likelyRootCause: z.string(),
+  supportingEvidence: z.array(DiagnosisEvidenceRefSchema).default([]),
+  affected: DiagnosisAffectedScopeSchema.default({}),
+  recommendedNextAction: z.string(),
+  recommendedPatch: DiagnosisPatchRecommendationSchema,
+  confidence: DiagnosisConfidenceSchema,
+  evidenceQuality: DiagnosisEvidenceQualitySchema,
+  fallbackDetected: z.boolean().default(false),
+  limitations: z.array(z.string()).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([]),
+  relatedArtifactIds: z.array(z.string()).default([])
+});
+export type DiagnosisReport = z.infer<typeof DiagnosisReportSchema>;
+
+export const DiagnosisResponseSchema = z.object({
+  report: DiagnosisReportSchema,
+  artifact: ArtifactRefSchema.optional()
+});
+export type DiagnosisResponse = z.infer<typeof DiagnosisResponseSchema>;
+
+export const DiagnosisRequestSchema = z.object({
+  symptom: DiagnosisSymptomSchema,
+  triggerFamily: DiagnosisTriggerFamilySchema.default("unknown"),
+  flowId: z.string().optional(),
+  sampleInput: z.record(z.string(), z.unknown()).default({}),
+  mappingContext: MappingPreviewContextSchema.optional(),
+  traceArtifactId: z.string().optional(),
+  baseInput: z.record(z.string(), z.unknown()).optional(),
+  overrides: z.record(z.string(), z.unknown()).default({}),
+  leftArtifactId: z.string().optional(),
+  rightArtifactId: z.string().optional(),
+  leftArtifact: z.record(z.string(), z.unknown()).optional(),
+  rightArtifact: z.record(z.string(), z.unknown()).optional(),
+  targetNodeId: z.string().optional(),
+  expectedOutput: z.record(z.string(), z.unknown()).optional(),
+  profile: z.lazy(() => TriggerProfileSchema).optional(),
+  expectedBehavior: z.string().optional(),
+  capture: RunTraceCaptureOptionsSchema.default({}),
+  compare: RunComparisonOptionsSchema.default({})
+});
+export type DiagnosisRequest = z.infer<typeof DiagnosisRequestSchema>;
+
 export const TriggerProfileKindSchema = z.enum(["rest", "timer", "cli", "channel"]);
 export type TriggerProfileKind = z.infer<typeof TriggerProfileKindSchema>;
 
@@ -1641,7 +1823,8 @@ export const RunnerStepTypeSchema = z.enum([
   "test_mapping",
   "plan_properties",
   "validate_governance",
-  "compare_composition"
+  "compare_composition",
+  "diagnose_app"
 ]);
 export type RunnerStepType = z.infer<typeof RunnerStepTypeSchema>;
 
@@ -1668,7 +1851,8 @@ export const RunnerJobKindSchema = z.enum([
   "mapping_test",
   "property_plan",
   "governance",
-  "composition_compare"
+  "composition_compare",
+  "diagnosis"
 ]);
 export type RunnerJobKind = z.infer<typeof RunnerJobKindSchema>;
 
@@ -1694,7 +1878,8 @@ export const AnalysisKindSchema = z.enum([
   "mapping_test",
   "property_plan",
   "governance",
-  "composition_compare"
+  "composition_compare",
+  "diagnosis"
 ]);
 export type AnalysisKind = z.infer<typeof AnalysisKindSchema>;
 

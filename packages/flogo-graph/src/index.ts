@@ -21,6 +21,20 @@ import {
   type ContribDescriptorResponse,
   ContribResolutionEvidenceSchema,
   type ContribResolutionEvidence,
+  DiagnosisConfidenceSchema,
+  DiagnosisPlanSchema,
+  DiagnosisReportSchema,
+  DiagnosisRequestSchema,
+  type DiagnosisConfidence,
+  type DiagnosisEvidenceQuality,
+  type DiagnosisEvidenceRef,
+  type DiagnosisOperation,
+  type DiagnosisPlan,
+  type DiagnosisProblemCategory,
+  type DiagnosisReport,
+  type DiagnosisRequest,
+  type DiagnosisSubtype,
+  type DiagnosisTriggerFamily,
   type Diagnostic,
   DeploymentProfileSchema,
   type DeploymentProfile,
@@ -62,6 +76,7 @@ import {
   type FlowContract,
   type FlowContracts,
   type ReplayRequest,
+  type ReplayResult,
   type ReplayResponse,
   type RunTrace,
   type RunTraceRequest,
@@ -111,6 +126,7 @@ import {
   GovernanceReportSchema,
   type GovernanceReport,
   MappingKindSchema,
+  type MappingPreviewResult,
   MappingTestResultSchema,
   type MappingDifference,
   type MappingPath,
@@ -1801,6 +1817,978 @@ export function compareRuns(
   });
 
   return RunComparisonResponseSchema.parse({ result });
+}
+
+type DiagnosisEvidenceInputs = {
+  validation?: ValidationReport;
+  flowContracts?: FlowContracts;
+  mappingPreview?: MappingPreviewResult;
+  mappingTest?: MappingTestResult;
+  triggerBindingPlan?: TriggerBindingPlan;
+  trace?: RunTrace;
+  replay?: ReplayResult;
+  comparison?: RunComparisonResult;
+  relatedArtifactIds?: string[];
+};
+
+function pushDiagnosisOperation(
+  operations: DiagnosisOperation[],
+  operation: DiagnosisOperation,
+  enabled: boolean
+) {
+  if (enabled && !operations.includes(operation)) {
+    operations.push(operation);
+  }
+}
+
+function hasRecordEntries(value?: Record<string, unknown>) {
+  return value ? Object.keys(value).length > 0 : false;
+}
+
+function findFirstValidationError(report?: ValidationReport) {
+  if (!report) {
+    return undefined;
+  }
+
+  for (let stageIndex = 0; stageIndex < report.stages.length; stageIndex += 1) {
+    const stage = report.stages[stageIndex];
+    const diagnosticIndex = stage.diagnostics.findIndex((diagnostic) => diagnostic.severity === "error");
+    if (diagnosticIndex >= 0) {
+      return {
+        stageIndex,
+        diagnosticIndex,
+        diagnostic: stage.diagnostics[diagnosticIndex]
+      };
+    }
+  }
+
+  return undefined;
+}
+
+function findFailedRuntimeStep(trace?: RunTrace, replay?: ReplayResult) {
+  const normalizedSteps =
+    replay?.runtimeEvidence?.normalizedSteps ??
+    replay?.trace?.runtimeEvidence?.normalizedSteps ??
+    trace?.runtimeEvidence?.normalizedSteps ??
+    [];
+  const failedNormalizedStep = normalizedSteps.find((step) => step.status === "failed");
+  if (failedNormalizedStep) {
+    return {
+      source: replay ? "replay" as const : "trace" as const,
+      taskId: failedNormalizedStep.taskId,
+      taskName: failedNormalizedStep.taskName,
+      error: failedNormalizedStep.error,
+      path: `${replay ? "replay" : "trace"}.runtimeEvidence.normalizedSteps.${failedNormalizedStep.taskId}`,
+      observedValue: failedNormalizedStep
+    };
+  }
+
+  const steps = replay?.trace?.steps ?? trace?.steps ?? [];
+  const failedStep = steps.find((step) => step.status === "failed");
+  if (failedStep) {
+    return {
+      source: replay ? "replay" as const : "trace" as const,
+      taskId: failedStep.taskId,
+      taskName: failedStep.taskName,
+      error: failedStep.error,
+      path: `${replay ? "replay" : "trace"}.steps.${failedStep.taskId}`,
+      observedValue: failedStep
+    };
+  }
+
+  return undefined;
+}
+
+function detectFallbackReason(trace?: RunTrace, replay?: ReplayResult) {
+  return replay?.runtimeEvidence?.fallbackReason ??
+    replay?.trace?.runtimeEvidence?.fallbackReason ??
+    trace?.runtimeEvidence?.fallbackReason;
+}
+
+function diagnosisFallbackDetected(inputs: DiagnosisEvidenceInputs, evidenceQuality: DiagnosisEvidenceQuality) {
+  return detectFallbackReason(inputs.trace, inputs.replay) !== undefined || evidenceQuality === "simulated_fallback";
+}
+
+function diagnosisLimitations(
+  request: DiagnosisRequest,
+  inputs: DiagnosisEvidenceInputs,
+  evidenceQuality: DiagnosisEvidenceQuality
+) {
+  const limitations = [...planDiagnosis(request).limitations];
+  const fallbackReason = detectFallbackReason(inputs.trace, inputs.replay);
+
+  if (evidenceQuality === "mixed") {
+    limitations.push("Diagnosis combined runtime-backed and fallback or artifact-backed evidence.");
+  }
+  if (evidenceQuality === "artifact_backed") {
+    limitations.push("Diagnosis relied on static or persisted artifact evidence without full runtime corroboration.");
+  }
+  if (evidenceQuality === "simulated_fallback") {
+    limitations.push("Diagnosis relied on simulated fallback evidence rather than a fully runtime-backed slice.");
+  }
+  if (fallbackReason) {
+    limitations.push(fallbackReason);
+  }
+
+  return dedupeStrings(limitations);
+}
+
+function determineEvidenceQuality(inputs: DiagnosisEvidenceInputs): DiagnosisEvidenceQuality {
+  const evidenceKinds = [
+    inputs.trace?.evidenceKind ?? inputs.trace?.runtimeEvidence?.kind,
+    inputs.replay?.trace?.evidenceKind ?? inputs.replay?.runtimeEvidence?.kind
+  ].filter((value): value is "runtime_backed" | "simulated_fallback" => value === "runtime_backed" || value === "simulated_fallback");
+
+  if (evidenceKinds.length === 0) {
+    return "artifact_backed";
+  }
+  if (evidenceKinds.every((value) => value === "runtime_backed")) {
+    return "runtime_backed";
+  }
+  if (evidenceKinds.every((value) => value === "simulated_fallback")) {
+    return "simulated_fallback";
+  }
+  return "mixed";
+}
+
+function buildDiagnosisConfidence(args: {
+  evidenceQuality: DiagnosisEvidenceQuality;
+  validationError?: boolean;
+  directEvidence?: boolean;
+  comparisonEvidence?: boolean;
+  normalizedStepEvidence?: boolean;
+  recorderBacked?: boolean;
+  contractInference?: boolean;
+  fallbackDetected?: boolean;
+  unsupportedDetected?: boolean;
+  missingSignals?: string[];
+  conflictingSignals?: string[];
+}): DiagnosisConfidence {
+  const bases = new Set<DiagnosisConfidence["bases"][number]>();
+  const supportingSignals: string[] = [];
+  const missingSignals = args.missingSignals ?? [];
+  const conflictingSignals = args.conflictingSignals ?? [];
+  let score = 0.25;
+
+  if (args.validationError) {
+    score += 0.2;
+    bases.add("validation");
+    supportingSignals.push("Static validation produced direct diagnostics.");
+  }
+
+  if (args.directEvidence) {
+    score += 0.3;
+    bases.add("direct_observation");
+    supportingSignals.push("The diagnosis is backed by directly observed runtime or artifact evidence.");
+  }
+
+  if (args.comparisonEvidence) {
+    score += 0.15;
+    bases.add("comparison");
+    supportingSignals.push("A comparison artifact corroborated the observed difference.");
+  }
+
+  if (args.normalizedStepEvidence) {
+    score += 0.1;
+    bases.add("normalized_step");
+    supportingSignals.push("Normalized per-step runtime evidence was available.");
+  }
+
+  if (args.recorderBacked) {
+    score += 0.05;
+    bases.add("recorder_backed");
+    supportingSignals.push("Recorder-backed runtime evidence was available.");
+  }
+
+  if (args.contractInference) {
+    score += 0.05;
+    bases.add("contract_inference");
+    supportingSignals.push("Reusable flow-contract evidence was available.");
+  }
+
+  if (args.evidenceQuality === "mixed") {
+    score -= 0.1;
+    bases.add("mixed_evidence");
+    conflictingSignals.push("Diagnosis combined runtime-backed and fallback or artifact-backed evidence.");
+  }
+
+  if (args.evidenceQuality === "simulated_fallback") {
+    score -= 0.2;
+    conflictingSignals.push("Diagnosis relied on simulated fallback evidence rather than a fully runtime-backed slice.");
+  }
+
+  if (args.evidenceQuality === "artifact_backed") {
+    score -= 0.1;
+    bases.add("summary_only");
+    missingSignals.push("Runtime corroboration was not captured.");
+  }
+
+  if (args.fallbackDetected) {
+    score -= 0.25;
+    bases.add("fallback_reason");
+    conflictingSignals.push("Diagnosis used simulated fallback evidence for at least part of the proof path.");
+  }
+
+  if (args.unsupportedDetected) {
+    score -= 0.15;
+    conflictingSignals.push("Unsupported-shape handling reduced the available runtime evidence.");
+  }
+
+  score -= Math.min(0.15, missingSignals.length * 0.05);
+  score -= Math.min(0.1, conflictingSignals.length * 0.05);
+  let boundedScore = Math.max(0, Math.min(1, Number(score.toFixed(2))));
+
+  if (args.evidenceQuality === "artifact_backed" || args.evidenceQuality === "mixed") {
+    boundedScore = Math.min(boundedScore, 0.69);
+  }
+  if (args.evidenceQuality === "simulated_fallback") {
+    boundedScore = Math.min(boundedScore, args.unsupportedDetected || args.fallbackDetected ? 0.44 : 0.69);
+  }
+
+  const level =
+    boundedScore >= 0.9
+      ? "certain"
+      : boundedScore >= 0.7
+        ? "high"
+        : boundedScore >= 0.45
+          ? "medium"
+          : "low";
+
+  return DiagnosisConfidenceSchema.parse({
+    level,
+    score: boundedScore,
+    bases: Array.from(bases),
+    supportingSignals,
+    missingSignals: dedupeStrings(missingSignals),
+    conflictingSignals: dedupeStrings(conflictingSignals)
+  });
+}
+
+function defaultPatchRecommendation(
+  problem: string,
+  proposedPatch: string,
+  expectedImpact: string,
+  confidence: DiagnosisConfidence,
+  evidence: string[],
+  caveats: string[] = []
+) {
+  return {
+    problem,
+    evidence,
+    proposedPatch,
+    expectedImpact,
+    confidence,
+    caveats
+  } as const;
+}
+
+function diagnosisFromValidation(
+  request: DiagnosisRequest,
+  inputs: DiagnosisEvidenceInputs,
+  evidenceQuality: DiagnosisEvidenceQuality
+): DiagnosisReport | undefined {
+  const error = findFirstValidationError(inputs.validation);
+  if (!error) {
+    return undefined;
+  }
+
+  const diagnostic = error.diagnostic;
+  let problemCategory: DiagnosisProblemCategory = "model";
+  let subtype: DiagnosisSubtype = "contract_validation_failure";
+  let proposedPatch = "Correct the invalid flow contract, import alias, or mapping reference before rerunning runtime analysis.";
+  let expectedImpact = "The app should pass validation and unblock runtime-backed trace or replay.";
+  let mappingPath = diagnostic.path;
+
+  if (diagnostic.code.startsWith("flogo.mapping.")) {
+    problemCategory = "mapping";
+    subtype = "input_resolution_mismatch";
+    proposedPatch = "Update the referenced mapping expression or reorder the task so referenced activity output exists before use.";
+    expectedImpact = "Mapped inputs should resolve deterministically at runtime and during mapping tests.";
+  } else if (
+    diagnostic.code.startsWith("flogo.semantic.missing_flow") ||
+    diagnostic.code.startsWith("flogo.semantic.missing_import") ||
+    diagnostic.code.startsWith("flogo.alias.")
+  ) {
+    problemCategory = "reference";
+    subtype = "parse_or_resolution_failure";
+    proposedPatch = "Restore the missing flow or import alias, then rerun validation and trace on the same trigger boundary.";
+    expectedImpact = "References should resolve cleanly and downstream runtime evidence should be trustworthy.";
+  }
+
+  const confidence = buildDiagnosisConfidence({
+    evidenceQuality,
+    validationError: true,
+    directEvidence: true,
+    fallbackDetected: diagnosisFallbackDetected(inputs, evidenceQuality)
+  });
+  const limitations = diagnosisLimitations(request, inputs, evidenceQuality);
+
+  return DiagnosisReportSchema.parse({
+    plan: planDiagnosis(request),
+    problemCategory,
+    subtype,
+    likelyRootCause: diagnostic.message,
+    supportingEvidence: [
+      {
+        fieldPath: `validation.stages.${error.stageIndex}.diagnostics.${error.diagnosticIndex}`,
+        source: "validation",
+        direct: true,
+        observedValue: diagnostic
+      }
+    ],
+    affected: {
+      triggerFamily: request.triggerFamily,
+      flowId: request.flowId,
+      mappingPath
+    },
+    recommendedNextAction: "Resolve the reported validation error, then rerun diagnosis to confirm the runtime path is no longer blocked.",
+    recommendedPatch: defaultPatchRecommendation(
+      diagnostic.message,
+      proposedPatch,
+      expectedImpact,
+      confidence,
+      [diagnostic.code]
+    ),
+    confidence,
+    evidenceQuality,
+    fallbackDetected: diagnosisFallbackDetected(inputs, evidenceQuality),
+    limitations,
+    diagnostics: inputs.validation?.stages.flatMap((stage) => stage.diagnostics) ?? [],
+    relatedArtifactIds: inputs.relatedArtifactIds ?? []
+  });
+}
+
+function diagnosisFromFallback(
+  request: DiagnosisRequest,
+  inputs: DiagnosisEvidenceInputs,
+  evidenceQuality: DiagnosisEvidenceQuality
+): DiagnosisReport | undefined {
+  const fallbackReason = detectFallbackReason(inputs.trace, inputs.replay);
+  if (!fallbackReason) {
+    return undefined;
+  }
+
+  const unsupportedDetected = /unsupported/i.test(fallbackReason) || request.symptom === "unsupported_shape";
+  const confidence = buildDiagnosisConfidence({
+    evidenceQuality,
+    directEvidence: true,
+    fallbackDetected: true,
+    unsupportedDetected,
+    missingSignals: ["Runtime-backed evidence was incomplete."],
+    conflictingSignals: unsupportedDetected ? ["The requested runtime shape is outside the currently supported slice."] : []
+  });
+  const limitations = diagnosisLimitations(request, inputs, evidenceQuality);
+
+  return DiagnosisReportSchema.parse({
+    plan: planDiagnosis(request),
+    problemCategory: "runtime",
+    subtype: unsupportedDetected ? "unsupported_shape" : "fallback_to_simulation",
+    likelyRootCause: fallbackReason,
+    supportingEvidence: [
+      {
+        artifactId: inputs.trace ? "trace" : inputs.replay ? "replay" : undefined,
+        fieldPath: inputs.replay?.runtimeEvidence?.fallbackReason ? "replay.runtimeEvidence.fallbackReason" : "trace.runtimeEvidence.fallbackReason",
+        source: inputs.replay ? "replay" : "trace",
+        direct: true,
+        observedValue: fallbackReason
+      }
+    ],
+    affected: {
+      triggerFamily: request.triggerFamily,
+      flowId: request.flowId
+    },
+    recommendedNextAction: unsupportedDetected
+      ? "Stay on the supported direct-flow, REST, Timer, CLI, or Channel diagnosis slice, or switch to static validation and mapping analysis for this issue."
+      : "Capture a runtime-backed trace on the supported slice before treating this diagnosis as authoritative.",
+    recommendedPatch: defaultPatchRecommendation(
+      fallbackReason,
+      unsupportedDetected
+        ? "Reshape the investigation to a supported runtime slice or use static mapping and validation tools for this flow."
+        : "Avoid applying a code fix until you have runtime-backed evidence or a deterministic mapping test confirming the failure.",
+      unsupportedDetected
+        ? "The diagnosis loop will stop overstating unsupported runtime behavior."
+        : "Subsequent diagnoses should be based on stronger runtime evidence.",
+      confidence,
+      ["runtime fallback", request.triggerFamily]
+    ),
+    confidence,
+    evidenceQuality,
+    fallbackDetected: true,
+    limitations,
+    diagnostics: [],
+    relatedArtifactIds: inputs.relatedArtifactIds ?? []
+  });
+}
+
+function diagnosisFromMapping(
+  request: DiagnosisRequest,
+  inputs: DiagnosisEvidenceInputs,
+  evidenceQuality: DiagnosisEvidenceQuality
+): DiagnosisReport | undefined {
+  const firstDifference = inputs.mappingTest?.differences[0];
+  const firstDiagnostic =
+    inputs.mappingPreview?.diagnostics.find((diagnostic) => diagnostic.severity === "error") ??
+    inputs.mappingTest?.diagnostics.find((diagnostic) => diagnostic.severity === "error");
+
+  if (!firstDifference && !firstDiagnostic) {
+    return undefined;
+  }
+
+  const problem = firstDifference?.message ?? firstDiagnostic?.message ?? "Mapping output diverged from the expected flow input or output.";
+  const mappingPath = firstDifference?.path ?? firstDiagnostic?.path;
+  const confidence = buildDiagnosisConfidence({
+    evidenceQuality,
+    directEvidence: true,
+    validationError: Boolean(firstDiagnostic),
+    fallbackDetected: diagnosisFallbackDetected(inputs, evidenceQuality)
+  });
+  const limitations = diagnosisLimitations(request, inputs, evidenceQuality);
+
+  return DiagnosisReportSchema.parse({
+    plan: planDiagnosis(request),
+    problemCategory: "mapping",
+    subtype: firstDiagnostic?.code === "flogo.mapping.reply_mapping_missing" ? "reply_mapping_mismatch" : "input_resolution_mismatch",
+    likelyRootCause: problem,
+    supportingEvidence: [
+      firstDifference
+        ? {
+            fieldPath: `mappingTest.differences.${firstDifference.path}`,
+            source: "mapping",
+            direct: true,
+            observedValue: firstDifference.actual,
+            expectedValue: firstDifference.expected,
+            diff: firstDifference
+          }
+        : {
+            fieldPath: `mappingPreview.diagnostics.${mappingPath ?? "unknown"}`,
+            source: "mapping",
+            direct: true,
+            observedValue: firstDiagnostic
+          }
+    ],
+    affected: {
+      triggerFamily: request.triggerFamily,
+      flowId: request.flowId,
+      mappingPath,
+      nodeId: request.targetNodeId
+    },
+    recommendedNextAction: "Align the mapping expression with the expected trigger, flow, or activity scope and rerun the deterministic mapping test.",
+    recommendedPatch: defaultPatchRecommendation(
+      problem,
+      "Update the affected mapping expression so it references the correct scope or field name, then lock it in with a mapping test.",
+      "Mapped values should resolve to the expected payload without relying on simulated fallback.",
+      confidence,
+      [mappingPath ?? request.targetNodeId ?? "mapping"]
+    ),
+    confidence,
+    evidenceQuality,
+    fallbackDetected: diagnosisFallbackDetected(inputs, evidenceQuality),
+    limitations,
+    diagnostics: dedupeDiagnostics([
+      ...(inputs.mappingPreview?.diagnostics ?? []),
+      ...(inputs.mappingTest?.diagnostics ?? [])
+    ]),
+    relatedArtifactIds: inputs.relatedArtifactIds ?? []
+  });
+}
+
+function diagnosisFromComparison(
+  request: DiagnosisRequest,
+  inputs: DiagnosisEvidenceInputs,
+  evidenceQuality: DiagnosisEvidenceQuality
+): DiagnosisReport | undefined {
+  const comparison = inputs.comparison;
+  if (!comparison) {
+    return undefined;
+  }
+
+  let problemCategory: DiagnosisProblemCategory = "behavioral";
+  let subtype: DiagnosisSubtype = "behavioral_regression";
+  let likelyRootCause = "Compared runs diverged in a behaviorally meaningful way.";
+  let supportingEvidence: DiagnosisEvidenceRef[] = [];
+  let proposedPatch = "Align the trigger boundary mappings or task logic that changed between the compared runs.";
+  let expectedImpact = "The compared runs should converge on the same trigger input, flow behavior, and output.";
+  let affected: {
+    triggerFamily: DiagnosisTriggerFamily;
+    flowId: string;
+    taskId?: string;
+  } = {
+    triggerFamily: request.triggerFamily,
+    flowId: comparison.left.flowId
+  };
+
+  if (
+    comparison.comparisonBasis === "rest_runtime_envelope" &&
+    (comparison.restComparison?.requestEnvelopeDiff?.kind === "changed" ||
+      comparison.restComparison?.mappedFlowInputDiff?.kind === "changed" ||
+      comparison.restComparison?.replyEnvelopeDiff?.kind === "changed")
+  ) {
+    problemCategory = "trigger";
+    subtype = "rest_envelope_mismatch";
+    likelyRootCause = "REST request, mapped flow input, or reply envelope drifted between the compared runs.";
+    proposedPatch = "Update the REST request or reply mappings so the trigger boundary matches the expected flow contract.";
+    expectedImpact = "REST-triggered runs should produce stable mapped flow input and reply envelopes.";
+    supportingEvidence = [
+      {
+        fieldPath: "comparison.restComparison.requestEnvelopeDiff",
+        source: "comparison",
+        direct: true,
+        diff: comparison.restComparison?.requestEnvelopeDiff
+      },
+      {
+        fieldPath: "comparison.restComparison.replyEnvelopeDiff",
+        source: "comparison",
+        direct: true,
+        diff: comparison.restComparison?.replyEnvelopeDiff
+      }
+    ];
+  } else if (
+    comparison.comparisonBasis === "timer_runtime_startup" &&
+    (comparison.timerComparison?.settingsDiff?.kind === "changed" || comparison.timerComparison?.tickDiff?.kind === "changed")
+  ) {
+    problemCategory = "trigger";
+    subtype = "timer_startup_mismatch";
+    likelyRootCause = "Timer startup settings or observed tick behavior drifted between the compared runs.";
+    proposedPatch = "Align the timer handler settings with the intended startDelay, repeatInterval, and mapped flow input expectations.";
+    expectedImpact = "Timer-triggered runs should start consistently and deliver the same flow boundary input.";
+    supportingEvidence = [
+      {
+        fieldPath: "comparison.timerComparison.settingsDiff",
+        source: "comparison",
+        direct: true,
+        diff: comparison.timerComparison?.settingsDiff
+      },
+      {
+        fieldPath: "comparison.timerComparison.tickDiff",
+        source: "comparison",
+        direct: true,
+        diff: comparison.timerComparison?.tickDiff
+      }
+    ];
+  } else if (
+    comparison.comparisonBasis === "channel_runtime_boundary" &&
+    (comparison.channelComparison?.channelDiff?.kind === "changed" || comparison.channelComparison?.dataDiff?.kind === "changed")
+  ) {
+    problemCategory = "trigger";
+    subtype = "channel_boundary_mismatch";
+    likelyRootCause = "Channel identity or sent event data drifted across the compared runs.";
+    proposedPatch = "Align the Channel trigger wiring and mapped input payload with the intended engine channel contract.";
+    expectedImpact = "Channel-triggered runs should consume the same channel and event data before flow execution.";
+    supportingEvidence = [
+      {
+        fieldPath: "comparison.channelComparison.channelDiff",
+        source: "comparison",
+        direct: true,
+        diff: comparison.channelComparison?.channelDiff
+      },
+      {
+        fieldPath: "comparison.channelComparison.dataDiff",
+        source: "comparison",
+        direct: true,
+        diff: comparison.channelComparison?.dataDiff
+      }
+    ];
+  } else if (comparison.steps.some((step) => step.changeKind === "changed" || step.changeKind === "removed" || step.changeKind === "added")) {
+    const changedStep = comparison.steps.find((step) => step.changeKind !== "same");
+    likelyRootCause = `Runtime behavior changed at task "${changedStep?.taskId ?? "unknown"}".`;
+    proposedPatch = "Inspect the first changed task and reconcile its input, output, or flow-state diff with the expected baseline.";
+    supportingEvidence = changedStep
+      ? [
+          {
+            fieldPath: `comparison.steps.${changedStep.taskId}`,
+            source: "comparison",
+            direct: true,
+            diff: changedStep
+          }
+        ]
+      : [];
+    affected = {
+      ...affected,
+      taskId: changedStep?.taskId
+    };
+  } else {
+    return undefined;
+  }
+
+  const confidence = buildDiagnosisConfidence({
+    evidenceQuality,
+    directEvidence: true,
+    comparisonEvidence: true,
+    fallbackDetected: diagnosisFallbackDetected(inputs, evidenceQuality),
+    normalizedStepEvidence:
+      comparison.left.normalizedStepEvidence === true || comparison.right.normalizedStepEvidence === true
+  });
+  const limitations = diagnosisLimitations(request, inputs, evidenceQuality);
+
+  return DiagnosisReportSchema.parse({
+    plan: planDiagnosis(request),
+    problemCategory,
+    subtype,
+    likelyRootCause,
+    supportingEvidence,
+    affected,
+    recommendedNextAction: "Use the reported comparison basis to correct the earliest differing boundary or task, then rerun trace and compare on the same slice.",
+    recommendedPatch: defaultPatchRecommendation(
+      likelyRootCause,
+      proposedPatch,
+      expectedImpact,
+      confidence,
+      [comparison.comparisonBasis ?? "comparison"]
+    ),
+    confidence,
+    evidenceQuality,
+    fallbackDetected: diagnosisFallbackDetected(inputs, evidenceQuality),
+    limitations,
+    diagnostics: dedupeDiagnostics([
+      ...(comparison.summary.diagnosticDiffs ?? []),
+      ...(comparison.diagnostics ?? [])
+    ]),
+    relatedArtifactIds: inputs.relatedArtifactIds ?? []
+  });
+}
+
+function diagnosisFromRuntimeStep(
+  request: DiagnosisRequest,
+  inputs: DiagnosisEvidenceInputs,
+  evidenceQuality: DiagnosisEvidenceQuality
+): DiagnosisReport | undefined {
+  const failedStep = findFailedRuntimeStep(inputs.trace, inputs.replay);
+  if (!failedStep) {
+    return undefined;
+  }
+
+  const runtimeEvidence = inputs.replay?.runtimeEvidence ?? inputs.trace?.runtimeEvidence;
+  const confidence = buildDiagnosisConfidence({
+    evidenceQuality,
+    directEvidence: true,
+    fallbackDetected: diagnosisFallbackDetected(inputs, evidenceQuality),
+    normalizedStepEvidence: Boolean(runtimeEvidence?.normalizedSteps?.length),
+    recorderBacked: runtimeEvidence?.recorderBacked === true
+  });
+  const limitations = diagnosisLimitations(request, inputs, evidenceQuality);
+
+  return DiagnosisReportSchema.parse({
+    plan: planDiagnosis(request),
+    problemCategory: "activity",
+    subtype: "step_failure",
+    likelyRootCause: failedStep.error
+      ? `Task "${failedStep.taskId}" failed with runtime error: ${failedStep.error}`
+      : `Task "${failedStep.taskId}" failed during execution.`,
+    supportingEvidence: [
+      {
+        fieldPath: failedStep.path,
+        source: failedStep.source,
+        direct: true,
+        observedValue: failedStep.observedValue
+      }
+    ],
+    affected: {
+      triggerFamily: request.triggerFamily,
+      flowId: request.flowId ?? inputs.trace?.flowId ?? inputs.replay?.trace?.flowId ?? inputs.replay?.summary.flowId,
+      taskId: failedStep.taskId
+    },
+    recommendedNextAction: "Inspect the failing task configuration and the immediately preceding mapped input before applying a code change.",
+    recommendedPatch: defaultPatchRecommendation(
+      `Task "${failedStep.taskId}" failed.`,
+      "Adjust the failing activity settings or the mapped input feeding that task, then rerun a runtime-backed trace on the same trigger boundary.",
+      "The failing task should complete, which will unblock downstream flow output.",
+      confidence,
+      [failedStep.taskId]
+    ),
+    confidence,
+    evidenceQuality,
+    fallbackDetected: diagnosisFallbackDetected(inputs, evidenceQuality),
+    limitations,
+    diagnostics: dedupeDiagnostics([
+      ...(inputs.trace?.diagnostics ?? []),
+      ...(inputs.replay?.trace?.diagnostics ?? [])
+    ]),
+    relatedArtifactIds: inputs.relatedArtifactIds ?? []
+  });
+}
+
+function diagnosisFromTriggerBoundary(
+  request: DiagnosisRequest,
+  inputs: DiagnosisEvidenceInputs,
+  evidenceQuality: DiagnosisEvidenceQuality
+): DiagnosisReport | undefined {
+  const runtimeEvidence = inputs.replay?.runtimeEvidence ?? inputs.trace?.runtimeEvidence;
+  if (!runtimeEvidence) {
+    return undefined;
+  }
+
+  if (request.triggerFamily === "cli" && runtimeEvidence.cliTriggerRuntime) {
+    const confidence = buildDiagnosisConfidence({
+      evidenceQuality,
+      directEvidence: true,
+      fallbackDetected: diagnosisFallbackDetected(inputs, evidenceQuality),
+      normalizedStepEvidence: Boolean(runtimeEvidence.normalizedSteps?.length),
+      recorderBacked: runtimeEvidence.recorderBacked === true
+    });
+    const limitations = diagnosisLimitations(request, inputs, evidenceQuality);
+    return DiagnosisReportSchema.parse({
+      plan: planDiagnosis(request),
+      problemCategory: "trigger",
+      subtype: "cli_boundary_mismatch",
+      likelyRootCause: "CLI command identity, args, flags, or reply evidence indicate the issue is at the CLI trigger boundary.",
+      supportingEvidence: [
+        {
+          fieldPath: "trace.runtimeEvidence.cliTriggerRuntime",
+          source: inputs.replay ? "replay" : "trace",
+          direct: true,
+          observedValue: runtimeEvidence.cliTriggerRuntime
+        }
+      ],
+      affected: {
+        triggerFamily: "cli",
+        flowId: request.flowId ?? inputs.trace?.flowId ?? inputs.replay?.summary.flowId,
+        handlerName: runtimeEvidence.cliTriggerRuntime.handler?.command
+      },
+      recommendedNextAction: "Verify the command, args, flags, and flow input mappings against the intended CLI contract.",
+      recommendedPatch: defaultPatchRecommendation(
+        "CLI trigger boundary mismatch",
+        "Align the CLI handler command, args, flags, or reply mapping with the expected flow inputs and outputs.",
+        "CLI invocations should map input consistently and produce the expected reply or stdout.",
+        confidence,
+        [runtimeEvidence.cliTriggerRuntime.handler?.command ?? "cli"]
+      ),
+      confidence,
+      evidenceQuality,
+      fallbackDetected: diagnosisFallbackDetected(inputs, evidenceQuality),
+      limitations,
+      diagnostics: runtimeEvidence.cliTriggerRuntime.diagnostics ?? [],
+      relatedArtifactIds: inputs.relatedArtifactIds ?? []
+    });
+  }
+
+  return undefined;
+}
+
+function diagnosisFromFlowContract(
+  request: DiagnosisRequest,
+  inputs: DiagnosisEvidenceInputs,
+  evidenceQuality: DiagnosisEvidenceQuality
+): DiagnosisReport | undefined {
+  const contract = inputs.flowContracts?.contracts.find((entry) => entry.flowId === request.flowId);
+  if (!contract) {
+    return undefined;
+  }
+
+  const providedInput = request.baseInput ?? (hasRecordEntries(request.sampleInput) ? request.sampleInput : undefined);
+  const missingRequiredInput = contract.inputs.find((input) => input.required && !(providedInput && Object.prototype.hasOwnProperty.call(providedInput, input.name)));
+  if (!missingRequiredInput) {
+    return undefined;
+  }
+
+  const confidence = buildDiagnosisConfidence({
+    evidenceQuality,
+    directEvidence: true,
+    contractInference: true,
+    fallbackDetected: diagnosisFallbackDetected(inputs, evidenceQuality)
+  });
+  const limitations = diagnosisLimitations(request, inputs, evidenceQuality);
+
+  return DiagnosisReportSchema.parse({
+    plan: planDiagnosis(request),
+    problemCategory: "model",
+    subtype: "contract_validation_failure",
+    likelyRootCause: `Flow "${contract.flowId}" requires input "${missingRequiredInput.name}" but the diagnosis request did not provide it.`,
+    supportingEvidence: [
+      {
+        fieldPath: `flowContracts.${contract.flowId}.inputs.${missingRequiredInput.name}`,
+        source: "flow_contract",
+        direct: true,
+        observedValue: missingRequiredInput
+      }
+    ],
+    affected: {
+      triggerFamily: request.triggerFamily,
+      flowId: contract.flowId
+    },
+    recommendedNextAction: "Supply the missing required flow input before relying on runtime trace or replay output.",
+    recommendedPatch: defaultPatchRecommendation(
+      "Required flow input is missing.",
+      `Update the trigger mapping or replay input so "${missingRequiredInput.name}" is provided to flow "${contract.flowId}".`,
+      "The flow should execute against a valid contract and any downstream diagnosis will be higher confidence.",
+      confidence,
+      [missingRequiredInput.name]
+    ),
+    confidence,
+    evidenceQuality,
+    fallbackDetected: diagnosisFallbackDetected(inputs, evidenceQuality),
+    limitations,
+    diagnostics: contract.diagnostics,
+    relatedArtifactIds: inputs.relatedArtifactIds ?? []
+  });
+}
+
+function insufficientEvidenceDiagnosis(
+  request: DiagnosisRequest,
+  inputs: DiagnosisEvidenceInputs,
+  evidenceQuality: DiagnosisEvidenceQuality
+): DiagnosisReport {
+  const missingSignals: string[] = [];
+  if (!request.flowId) {
+    missingSignals.push("flowId");
+  }
+  if (!hasRecordEntries(request.sampleInput) && !request.baseInput && !request.traceArtifactId) {
+    missingSignals.push("runtime input or trace artifact");
+  }
+  if (!request.targetNodeId && request.symptom === "mapping_mismatch") {
+    missingSignals.push("targetNodeId");
+  }
+
+  const confidence = buildDiagnosisConfidence({
+    evidenceQuality,
+    missingSignals,
+    fallbackDetected: detectFallbackReason(inputs.trace, inputs.replay) !== undefined
+  });
+  const limitations = dedupeStrings([
+    ...diagnosisLimitations(request, inputs, evidenceQuality),
+    ...missingSignals.map((signal) => `Missing ${signal}`)
+  ]);
+
+  return DiagnosisReportSchema.parse({
+    plan: planDiagnosis(request),
+    problemCategory: "runtime",
+    subtype: "insufficient_evidence",
+    likelyRootCause: "The available runtime and static evidence is not specific enough to support a confident root-cause diagnosis.",
+    supportingEvidence: [],
+    affected: {
+      triggerFamily: request.triggerFamily,
+      flowId: request.flowId,
+      nodeId: request.targetNodeId
+    },
+    recommendedNextAction: "Capture the narrowest supported runtime trace or deterministic mapping test for the failing boundary, then rerun diagnosis.",
+    recommendedPatch: defaultPatchRecommendation(
+      "Insufficient evidence",
+      "Do not apply a code patch yet. First gather runtime-backed evidence or a deterministic mapping assertion on the failing slice.",
+      "The next diagnosis will be grounded in stronger evidence and a safer patch recommendation.",
+      confidence,
+      missingSignals,
+      ["Diagnosis Loop v1 does not auto-fix without grounded evidence."]
+    ),
+    confidence,
+    evidenceQuality,
+    fallbackDetected: detectFallbackReason(inputs.trace, inputs.replay) !== undefined,
+    limitations,
+    diagnostics: [],
+    relatedArtifactIds: inputs.relatedArtifactIds ?? []
+  });
+}
+
+export function planDiagnosis(requestInput: DiagnosisRequest | unknown): DiagnosisPlan {
+  const request = DiagnosisRequestSchema.parse(requestInput);
+  const operations: DiagnosisOperation[] = [];
+  const rationale: string[] = [];
+  const limitations: string[] = [];
+  const hasRuntimeInput = hasRecordEntries(request.sampleInput) || Boolean(request.baseInput) || Boolean(request.traceArtifactId);
+  const canReplay = Boolean(request.traceArtifactId || request.baseInput || hasRecordEntries(request.overrides));
+  const canCompare = Boolean(request.leftArtifactId && request.rightArtifactId) || canReplay;
+
+  pushDiagnosisOperation(operations, "static_validation", true);
+
+  switch (request.symptom) {
+    case "validation_failure":
+      rationale.push("Start with structural, semantic, mapping, and dependency validation.");
+      break;
+    case "mapping_mismatch":
+      pushDiagnosisOperation(operations, "mapping_preview", Boolean(request.targetNodeId));
+      pushDiagnosisOperation(operations, "mapping_test", Boolean(request.targetNodeId && request.expectedOutput));
+      pushDiagnosisOperation(operations, "flow_contract_analysis", Boolean(request.flowId));
+      pushDiagnosisOperation(operations, "run_trace", Boolean(request.flowId && hasRuntimeInput));
+      rationale.push("Mapping issues should be checked deterministically before escalating to runtime comparison.");
+      if (!request.targetNodeId) {
+        limitations.push("Mapping diagnosis is weaker without targetNodeId.");
+      }
+      break;
+    case "flow_contract_issue":
+      pushDiagnosisOperation(operations, "flow_contract_analysis", Boolean(request.flowId));
+      rationale.push("Flow-contract issues should be grounded in reusable flow I/O evidence.");
+      if (!request.flowId) {
+        limitations.push("Flow-contract diagnosis requires flowId.");
+      }
+      break;
+    case "wrong_response":
+      pushDiagnosisOperation(operations, "trigger_binding_analysis", Boolean(request.profile && request.flowId && request.triggerFamily !== "direct_flow"));
+      pushDiagnosisOperation(operations, "run_trace", Boolean(request.flowId && hasRuntimeInput));
+      pushDiagnosisOperation(operations, "replay", Boolean(request.flowId && canReplay));
+      pushDiagnosisOperation(operations, "compare_runs", Boolean(canCompare));
+      rationale.push("Wrong response symptoms should prioritize trigger-boundary trace and replay before comparing outputs.");
+      break;
+    case "scheduled_flow_issue":
+      pushDiagnosisOperation(operations, "trigger_binding_analysis", Boolean(request.profile && request.flowId));
+      pushDiagnosisOperation(operations, "run_trace", Boolean(request.flowId && hasRuntimeInput));
+      pushDiagnosisOperation(operations, "replay", Boolean(request.flowId && canReplay));
+      rationale.push("Scheduled-flow issues should check timer startup semantics and then runtime execution.");
+      break;
+    case "cli_argument_issue":
+      pushDiagnosisOperation(operations, "trigger_binding_analysis", Boolean(request.profile && request.flowId));
+      pushDiagnosisOperation(operations, "run_trace", Boolean(request.flowId && hasRuntimeInput));
+      pushDiagnosisOperation(operations, "replay", Boolean(request.flowId && canReplay));
+      rationale.push("CLI argument issues should validate CLI trigger boundary evidence before deeper runtime comparison.");
+      break;
+    case "internal_event_issue":
+      pushDiagnosisOperation(operations, "trigger_binding_analysis", Boolean(request.profile && request.flowId));
+      pushDiagnosisOperation(operations, "run_trace", Boolean(request.flowId && hasRuntimeInput));
+      pushDiagnosisOperation(operations, "replay", Boolean(request.flowId && canReplay));
+      rationale.push("Channel issues should inspect the channel boundary and then runtime evidence.");
+      break;
+    case "step_failure":
+      pushDiagnosisOperation(operations, "run_trace", Boolean(request.flowId && hasRuntimeInput));
+      pushDiagnosisOperation(operations, "replay", Boolean(request.flowId && canReplay));
+      rationale.push("A failing step needs runtime-backed trace before recommending a patch.");
+      break;
+    case "replay_mismatch":
+      pushDiagnosisOperation(operations, "run_trace", Boolean(request.flowId && hasRuntimeInput));
+      pushDiagnosisOperation(operations, "replay", Boolean(request.flowId && canReplay));
+      pushDiagnosisOperation(operations, "compare_runs", Boolean(canCompare));
+      rationale.push("Replay mismatch diagnosis should compare a baseline run against the replayed run.");
+      break;
+    case "unexpected_output":
+      pushDiagnosisOperation(operations, "flow_contract_analysis", Boolean(request.flowId));
+      pushDiagnosisOperation(operations, "run_trace", Boolean(request.flowId && hasRuntimeInput));
+      pushDiagnosisOperation(operations, "replay", Boolean(request.flowId && canReplay));
+      rationale.push("Unexpected output should be diagnosed at the flow boundary and then at runtime.");
+      break;
+    case "unsupported_shape":
+      pushDiagnosisOperation(operations, "run_trace", Boolean(request.flowId && hasRuntimeInput));
+      rationale.push("Unsupported-shape requests should still attempt the narrowest supported runtime slice before downgrading confidence.");
+      break;
+    default:
+      break;
+  }
+
+  if (!request.flowId && operations.some((operation) => operation === "run_trace" || operation === "replay" || operation === "flow_contract_analysis")) {
+    limitations.push("Runtime trace, replay, and flow-contract analysis require flowId.");
+  }
+
+  return DiagnosisPlanSchema.parse({
+    symptom: request.symptom,
+    triggerFamily: request.triggerFamily,
+    selectedOperations: operations,
+    rationale,
+    limitations
+  });
+}
+
+export function buildAgentDiagnosisReport(
+  requestInput: DiagnosisRequest | unknown,
+  inputs: DiagnosisEvidenceInputs
+): DiagnosisReport {
+  const request = DiagnosisRequestSchema.parse(requestInput);
+  const evidenceQuality = determineEvidenceQuality(inputs);
+
+  return (
+    diagnosisFromValidation(request, inputs, evidenceQuality) ??
+    diagnosisFromMapping(request, inputs, evidenceQuality) ??
+    diagnosisFromComparison(request, inputs, evidenceQuality) ??
+    diagnosisFromRuntimeStep(request, inputs, evidenceQuality) ??
+    diagnosisFromTriggerBoundary(request, inputs, evidenceQuality) ??
+    diagnosisFromFlowContract(request, inputs, evidenceQuality) ??
+    diagnosisFromFallback(request, inputs, evidenceQuality) ??
+    insufficientEvidenceDiagnosis(request, inputs, evidenceQuality)
+  );
 }
 
 export function planTriggerBinding(

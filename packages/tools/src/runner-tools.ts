@@ -405,4 +405,22 @@ export class RunnerTools {
       retryable: false
     });
   }
+
+  async diagnoseApp(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "diagnose_app",
+      jobKind: "diagnosis",
+      analysisKind: "diagnosis"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued diagnosis job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
 }

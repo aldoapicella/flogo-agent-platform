@@ -231,12 +231,14 @@ Responsibilities:
 
 - task submission,
 - task detail viewing,
+- runtime evidence inspection for trace, replay, and compare artifacts,
+- diagnosis summary inspection,
 - approval entry points,
 - artifact and event visibility.
 
 Current limitation:
 
-- the operator UI is still a thin shell and does not yet expose dedicated catalog, mapping preview, runtime-trace, replay, or contribution-authoring views.
+- the operator UI now surfaces the current runtime-evidence artifacts and diagnosis summaries on task detail pages, but it is still a thin shell without dedicated catalog, mapping-preview, richer diagnosis, or contribution-authoring workflows.
 
 ## Shared package responsibilities
 
@@ -408,9 +410,11 @@ The platform has completed the Phase 1 capability area and has implemented Phase
 - error-path templates,
 - artifact-backed runtime trace capture with a landed recorder-backed direct helper path for the currently supported simple trace scenario,
 - artifact-backed replay with a narrow runtime-backed slice for the same supported direct-flow shape,
-- artifact-backed run comparison that prefers normalized runtime evidence when available and recorder-backed evidence otherwise,
-- trigger-driven runtime startup is now partially implemented through one narrow REST trigger trace/replay slice; broader trigger profile/runtime coverage remains planned,
-- broader runtime coverage beyond the current narrow Phase 3.2 slice remains planned,
+- artifact-backed run comparison that prefers normalized runtime evidence, REST envelope evidence, timer startup evidence, or Channel boundary evidence when the matching persisted artifacts provide them and recorder-backed evidence otherwise,
+- trigger-driven runtime startup is now partially implemented through narrow REST, timer, CLI, and Channel slices on top of the direct-flow helper path,
+- analysis-only diagnosis planning can now choose between validation, mapping, contracts, trigger-binding analysis, trace, replay, and compare to produce structured diagnosis reports and recommendation-oriented patch suggestions,
+- the web console now exposes task-detail runtime evidence, trigger-specific summaries, normalized steps, fallback reasons, comparison basis, and diagnosis summaries for the currently supported slices,
+- broader runtime coverage beyond the current narrow supported slices remains planned,
 - analysis-only orchestration modes.
 
 See [Capability Matrix](./capability-matrix.md) for the detailed breakdown.
@@ -431,6 +435,7 @@ Persisted through Prisma today:
 ### Current partial persistence
 
 - app-scoped inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, mapping-test, runtime-trace, replay, and run-comparison artifacts are persisted through hidden synthetic analysis tasks,
+- task-scoped `diagnosis_report` artifacts are persisted through the normal task pipeline and can reference nested trace, replay, and comparison artifacts used during diagnosis,
 - those app-analysis payloads are stored in Blob/Azurite-backed JSON objects,
 - broader task artifacts outside the app-analysis slice still include logical/local URIs.
 
@@ -445,7 +450,7 @@ Persisted through Prisma today:
 - `flogo.json` is still the canonical artifact even as the Go helper path grows.
 - The Go helper is intentionally a finite execution binary, not a new always-on service.
 - The current helper uses contribution inventory plus module-aware package discovery, evidence confidence, normalized Flogo metadata, static mapping evaluation, and known-registry inference for the Phase 1 analysis path; it is not yet a full Core/Flow-native runtime.
-- Runtime trace capture, replay, and run comparison are implemented as helper-backed artifact evidence with one narrow live REST/Core/Flow execution slice for trace and replay, a narrow timer startup partial slice, REST envelope comparison preference when both artifacts are REST-backed, and timer startup comparison preference when both artifacts are timer-backed; contribution-authoring remains a roadmap item.
+- Runtime trace capture, replay, and run comparison are implemented as helper-backed artifact evidence with narrow live direct-flow, REST, timer, CLI, and Channel slices plus comparison-basis preference over persisted artifacts; diagnosis remains recommendation-oriented and does not auto-apply repository patches; contribution-authoring remains a roadmap item.
 - In restricted shells on Windows, `next build` and Vitest can fail with `spawn EPERM` even when typecheck is clean.
 
 ## Reference documents

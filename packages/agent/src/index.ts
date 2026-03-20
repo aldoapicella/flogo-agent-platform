@@ -68,6 +68,7 @@ function getAnalysisMode(
   | "property_plan"
   | "governance"
   | "composition_compare"
+  | "diagnosis"
   | undefined {
   const mode = task.inputs["mode"];
   return mode === "flow_contracts" ||
@@ -91,7 +92,8 @@ function getAnalysisMode(
     mode === "mapping_test" ||
     mode === "property_plan" ||
     mode === "governance" ||
-    mode === "composition_compare"
+    mode === "composition_compare" ||
+    mode === "diagnosis"
     ? mode
     : undefined;
 }
@@ -183,7 +185,11 @@ export class TaskPlanner {
       steps.push({ id: "governance", label: "Validate alias, orphan, and version governance", tool: "runner.validateGovernance" });
     } else if (analysisMode === "composition_compare") {
       steps.push({ id: "compare", label: "Compare canonical JSON to programmatic composition", tool: "runner.compareComposition" });
+    } else if (analysisMode === "diagnosis") {
+      steps.push({ id: "diagnosis", label: "Diagnose the reported failure using the narrowest evidence-backed proof path", tool: "runner.diagnoseApp" });
     } else {
+      const diagnosisHeuristic = /(diagnos|root cause|why did|why does|why is|wrong response|mapping bug|replay mismatch|unexpected output|trigger issue|runtime issue)/i.test(summary);
+
       if (/(flow contract|flow signature|flow io|reusable flow)/i.test(summary)) {
         steps.push({ id: "flow-contracts", label: "Infer reusable flow input/output contracts", tool: "runner.inferFlowContracts" });
       }
@@ -216,17 +222,26 @@ export class TaskPlanner {
         steps.push({ id: "error-path", label: "Plan a generated error branch for a flow task", tool: "runner.addErrorPath" });
       }
 
-      if (/(trace this flow|show step execution|capture runtime trace|what happened during execution|execute and trace|runtime trace)/i.test(summary)) {
+      if (diagnosisHeuristic) {
+        steps.push({
+          id: "diagnosis",
+          label: "Diagnose the reported failure using the narrowest evidence-backed proof path",
+          tool: "runner.diagnoseApp"
+        });
+        skipMutationTail = true;
+      }
+
+      if (!diagnosisHeuristic && /(trace this flow|show step execution|capture runtime trace|what happened during execution|execute and trace|runtime trace)/i.test(summary)) {
         steps.push({ id: "run-trace", label: "Execute a flow and capture a runtime trace", tool: "runner.captureRunTrace" });
         skipMutationTail = true;
       }
 
-      if (/(replay|rerun with overrides|run again with different input|re-execute this trace|replay this run)/i.test(summary)) {
+      if (!diagnosisHeuristic && /(replay|rerun with overrides|run again with different input|re-execute this trace|replay this run)/i.test(summary)) {
         steps.push({ id: "replay", label: "Replay a flow execution with optional overrides", tool: "runner.replayFlow" });
         skipMutationTail = true;
       }
 
-      if (/(compare runs|compare traces|compare replay|show differences between runs|diff these executions)/i.test(summary)) {
+      if (!diagnosisHeuristic && /(compare runs|compare traces|compare replay|show differences between runs|diff these executions)/i.test(summary)) {
         steps.push({ id: "run-comparison", label: "Compare two captured runtime executions", tool: "runner.compareRuns" });
         skipMutationTail = true;
       }

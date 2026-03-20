@@ -68,6 +68,7 @@ Important current `inputs` conventions:
 - `mode = "replay"` for helper-backed replay execution
 - `mode = "run_comparison_plan"` for analysis-only run-comparison preflight
 - `mode = "run_comparison"` for helper-backed run comparison execution
+- `mode = "diagnosis"` for analysis-only diagnosis planning and recommendation
 - `mode = "governance"` for analysis-only alias/orphan/version validation
 - `mode = "composition_compare"` for analysis-only JSON vs programmatic comparison
 
@@ -183,6 +184,7 @@ Current artifact kinds:
 - `replay_report`
 - `run_comparison_plan`
 - `run_comparison`
+- `diagnosis_report`
 - `contrib_bundle`
 
 ## Flogo-native contracts
@@ -698,6 +700,7 @@ Examples:
 - `run_trace_plan` and `run_trace` are now produced by the direct/runtime helper-backed trace capture path, with `run_trace` artifacts carrying `trace.evidenceKind`, `trace.runtimeEvidence`, and matching artifact metadata for the narrow recorder-backed direct-flow, REST runtime, and timer runtime slices.
 - `replay_plan` and `replay_report` are now produced by the direct/helper-backed replay path; replay is runtime-backed on the same narrow supported direct-flow slice plus the narrow REST, timer, CLI, and Channel runtime slices, and otherwise remains simulated fallback, with `result.runtimeEvidence` making that distinction explicit.
 - `run_comparison_plan` and `run_comparison` are now produced from stored `run_trace` and `replay_report` artifacts, preferring recorder-backed runtime evidence and normalized step evidence when available, preferring REST envelope comparison or timer startup comparison when the matching artifacts carry those runtime slices, and falling back to nested-trace or summary-only replay payloads otherwise.
+- `diagnosis_report` is now produced by the analysis-only diagnosis loop; it summarizes problem category, subtype, supporting evidence references, recommended next action, recommended patch, confidence, and evidence quality while linking back to any nested trace, replay, or comparison artifacts used during the proof path.
 - `contrib_bundle` remains a defined artifact kind whose producing feature is not implemented yet.
 - graph projections in Prisma exist, but the current runtime does not fully maintain them.
 - task persistence is live, but workspace snapshots and blob-backed artifact content are still planned work.

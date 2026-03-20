@@ -7,19 +7,23 @@ import path from "node:path";
 import {
   type CompositionCompareResult,
   type ArtifactRef,
+  DiagnosisRequestSchema,
   type ContribEvidenceResponse,
   type ContributionInventory,
   type ContribCatalog,
   type ContribDescriptor,
   type ContribDescriptorResponse,
   type ErrorPathTemplateResponse,
+  type FlowContracts,
   type FlowContractsResponse,
   ReplayResponseSchema,
+  RunComparisonResponseSchema,
   type RunComparisonResponse,
   type ReplayResponse,
   RunTraceResponseSchema,
   type RunTraceResponse,
   type IteratorSynthesisResponse,
+  type MappingPreviewContext,
   type MappingTestResponse,
   type Diagnostic,
   type RestEnvelopeComparison,
@@ -45,6 +49,15 @@ import {
   RunnerJobSpecSchema,
   RunnerJobStatusSchema
 } from "@flogo-agent/contracts";
+import {
+  buildAgentDiagnosisReport,
+  inferFlowContracts,
+  planDiagnosis,
+  planTriggerBinding,
+  previewMapping,
+  runMappingTest,
+  validateFlogoApp
+} from "@flogo-agent/flogo-graph";
 
 export interface RunnerExecutor {
   execute(spec: RunnerJobSpec): Promise<RunnerJobResult>;
@@ -191,7 +204,8 @@ function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
     stepType === "test_mapping" ||
     stepType === "plan_properties" ||
     stepType === "validate_governance" ||
-    stepType === "compare_composition"
+    stepType === "compare_composition" ||
+    stepType === "diagnose_app"
   );
 }
 
@@ -1155,93 +1169,408 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
   return [];
 }
 
+type ExecutedCommandResult = {
+  ok: boolean;
+  exitCode: number;
+  startedAt: string;
+  finishedAt: string;
+  stdout: string;
+  stderr: string;
+  diagnostics: Diagnostic[];
+  logArtifact: ArtifactRef;
+  artifacts: ArtifactRef[];
+};
+
+type DiagnosisComparableArtifact = {
+  artifactId: string;
+  kind: "run_trace" | "replay_report";
+  payload: Record<string, unknown>;
+};
+
+async function executePreparedRunnerCommand(spec: RunnerJobSpec): Promise<ExecutedCommandResult> {
+  const prepared = await prepareCommand(spec);
+  const command = prepared.command;
+  const [binary, ...args] = command;
+  const startedAt = new Date().toISOString();
+
+  return new Promise((resolve) => {
+    const child = spawn(binary, args, {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: process.platform === "win32"
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("close", (code) => {
+      void prepared.cleanup?.();
+      const diagnostics: Diagnostic[] = stderr
+        ? [
+            {
+              code: "runner.stderr",
+              message: stderr.trim(),
+              severity: "warning"
+            } satisfies Diagnostic
+          ]
+        : [];
+      const logArtifact = createLogArtifact(spec.taskId, spec.stepType, `${stdout}\n${stderr}`.trim());
+      const artifacts = [logArtifact];
+      if (code === 0 && isAnalysisStep(spec.stepType) && spec.stepType !== "diagnose_app") {
+        artifacts.push(...createAnalysisArtifacts(spec, stdout, diagnostics));
+      }
+
+      resolve({
+        ok: code === 0,
+        exitCode: code ?? 1,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        stdout,
+        stderr,
+        diagnostics,
+        logArtifact,
+        artifacts
+      });
+    });
+
+    child.on("error", (error) => {
+      void prepared.cleanup?.();
+      const logArtifact = createLogArtifact(spec.taskId, spec.stepType, error.message);
+      resolve({
+        ok: false,
+        exitCode: 1,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        stdout,
+        stderr,
+        diagnostics: [
+          {
+            code: "runner.spawn_error",
+            message: error.message,
+            severity: "error"
+          }
+        ],
+        logArtifact,
+        artifacts: [logArtifact]
+      });
+    });
+  });
+}
+
+function artifactByType(artifacts: ArtifactRef[], type: ArtifactRef["type"]) {
+  return artifacts.find((artifact) => artifact.type === type);
+}
+
+function parseTraceArtifact(artifact?: ArtifactRef) {
+  if (!artifact) {
+    return undefined;
+  }
+
+  const parsed = RunTraceResponseSchema.safeParse({
+    trace: artifact.metadata?.["trace"],
+    validation: artifact.metadata?.["validation"]
+  });
+  return parsed.success ? parsed.data : undefined;
+}
+
+function parseReplayArtifact(artifact?: ArtifactRef) {
+  if (!artifact) {
+    return undefined;
+  }
+
+  const parsed = ReplayResponseSchema.safeParse({
+    result: artifact.metadata?.["result"]
+  });
+  return parsed.success ? parsed.data : undefined;
+}
+
+function parseComparisonArtifact(artifact?: ArtifactRef) {
+  if (!artifact) {
+    return undefined;
+  }
+
+  const parsed = RunComparisonResponseSchema.safeParse({
+    result: artifact.metadata?.["result"],
+    validation: artifact.metadata?.["validation"]
+  });
+  return parsed.success ? parsed.data : undefined;
+}
+
+function toComparableArtifact(artifact?: ArtifactRef): DiagnosisComparableArtifact | undefined {
+  if (!artifact) {
+    return undefined;
+  }
+
+  if (artifact.type === "run_trace") {
+    return {
+      artifactId: artifact.id,
+      kind: "run_trace",
+      payload: {
+        trace: artifact.metadata?.["trace"],
+        validation: artifact.metadata?.["validation"]
+      }
+    };
+  }
+
+  if (artifact.type === "replay_report") {
+    return {
+      artifactId: artifact.id,
+      kind: "replay_report",
+      payload: {
+        result: artifact.metadata?.["result"]
+      }
+    };
+  }
+
+  return undefined;
+}
+
+async function executeNestedAnalysisStep(
+  parentSpec: RunnerJobSpec,
+  args: {
+    stepType: RunnerJobSpec["stepType"];
+    jobKind: RunnerJobSpec["jobKind"];
+    analysisKind?: RunnerJobSpec["analysisKind"];
+    analysisPayload?: Record<string, unknown>;
+    targetNodeId?: string;
+    targetRef?: string;
+  }
+) {
+  const nestedSpec = RunnerJobSpecSchema.parse({
+    ...parentSpec,
+    stepType: args.stepType,
+    jobKind: args.jobKind,
+    analysisKind: args.analysisKind,
+    analysisPayload: args.analysisPayload,
+    targetNodeId: args.targetNodeId,
+    targetRef: args.targetRef,
+    artifactOutputUri: `${parentSpec.artifactOutputUri}/${args.stepType}`,
+    artifactBlobPrefix: parentSpec.artifactBlobPrefix ? `${parentSpec.artifactBlobPrefix}/${args.stepType}` : undefined
+  });
+
+  return executePreparedRunnerCommand(nestedSpec);
+}
+
+async function executeDiagnosis(spec: RunnerJobSpec): Promise<RunnerJobResult> {
+  const request = DiagnosisRequestSchema.parse(spec.analysisPayload ?? {});
+  const plan = planDiagnosis(request);
+  const appDocument = await fs.readFile(spec.appPath, "utf8");
+
+  const nestedArtifacts: ArtifactRef[] = [];
+  const relatedArtifactIds: string[] = [];
+  const validation = validateFlogoApp(appDocument);
+  let flowContracts: FlowContracts | undefined;
+  let mappingPreviewResult: MappingPreviewResult | undefined;
+  let mappingTestResult: MappingTestResponse["result"] | undefined;
+  let triggerBindingPlan: TriggerBindingResponse["result"]["plan"] | undefined;
+  let traceResponse: RunTraceResponse | undefined;
+  let replayResponse: ReplayResponse | undefined;
+  let comparisonResponse: RunComparisonResponse | undefined;
+
+  if (plan.selectedOperations.includes("flow_contract_analysis") && request.flowId) {
+    flowContracts = inferFlowContracts(appDocument);
+  }
+
+  if (plan.selectedOperations.includes("mapping_preview") && request.targetNodeId) {
+    const mappingContext =
+      request.mappingContext ??
+      ({
+        flow: request.sampleInput,
+        activity: {},
+        env: {},
+        property: {},
+        trigger:
+          request.triggerFamily === "rest" || request.triggerFamily === "cli" || request.triggerFamily === "channel"
+            ? request.sampleInput
+            : {}
+      } satisfies MappingPreviewContext);
+    mappingPreviewResult = previewMapping(appDocument, request.targetNodeId, mappingContext);
+  }
+
+  if (plan.selectedOperations.includes("mapping_test") && request.targetNodeId && request.expectedOutput) {
+    const mappingContext =
+      request.mappingContext ??
+      ({
+        flow: request.sampleInput,
+        activity: {},
+        env: {},
+        property: {},
+        trigger:
+          request.triggerFamily === "rest" || request.triggerFamily === "cli" || request.triggerFamily === "channel"
+            ? request.sampleInput
+            : {}
+      } satisfies MappingPreviewContext);
+    mappingTestResult = runMappingTest(appDocument, request.targetNodeId, mappingContext, request.expectedOutput, true);
+  }
+
+  if (plan.selectedOperations.includes("trigger_binding_analysis") && request.profile && request.flowId) {
+    triggerBindingPlan = planTriggerBinding(appDocument, {
+      flowId: request.flowId,
+      profile: request.profile,
+      validateOnly: true
+    }).result.plan;
+  }
+
+  if (plan.selectedOperations.includes("run_trace") && request.flowId) {
+    const traceExecution = await executeNestedAnalysisStep(spec, {
+      stepType: "capture_run_trace",
+      jobKind: "run_trace_capture",
+      analysisPayload: {
+        flowId: request.flowId,
+        sampleInput: request.sampleInput,
+        capture: request.capture,
+        validateOnly: false
+      }
+    });
+    nestedArtifacts.push(...traceExecution.artifacts);
+    const traceArtifact = artifactByType(traceExecution.artifacts, "run_trace");
+    if (traceArtifact) {
+      relatedArtifactIds.push(traceArtifact.id);
+      traceResponse = parseTraceArtifact(traceArtifact);
+    }
+  }
+
+  let replayBaseInput = request.baseInput;
+  if (!replayBaseInput && traceResponse?.trace?.summary.input) {
+    replayBaseInput = traceResponse.trace.summary.input;
+  }
+
+  if (plan.selectedOperations.includes("replay") && request.flowId && replayBaseInput) {
+    const replayExecution = await executeNestedAnalysisStep(spec, {
+      stepType: "replay_flow",
+      jobKind: "flow_replay",
+      analysisPayload: {
+        flowId: request.flowId,
+        baseInput: replayBaseInput,
+        overrides: request.overrides,
+        capture: request.capture,
+        validateOnly: false
+      }
+    });
+    nestedArtifacts.push(...replayExecution.artifacts);
+    const replayArtifact = artifactByType(replayExecution.artifacts, "replay_report");
+    if (replayArtifact) {
+      relatedArtifactIds.push(replayArtifact.id);
+      replayResponse = parseReplayArtifact(replayArtifact);
+    }
+  }
+
+  const leftComparable =
+    request.leftArtifact
+      ? (request.leftArtifact as DiagnosisComparableArtifact)
+      : toComparableArtifact(artifactByType(nestedArtifacts, "run_trace"));
+  const rightComparable =
+    request.rightArtifact
+      ? (request.rightArtifact as DiagnosisComparableArtifact)
+      : toComparableArtifact(artifactByType(nestedArtifacts, "replay_report"));
+
+  if (plan.selectedOperations.includes("compare_runs") && leftComparable && rightComparable) {
+    const compareExecution = await executeNestedAnalysisStep(spec, {
+      stepType: "compare_runs",
+      jobKind: "run_comparison",
+      analysisPayload: {
+        leftArtifactId: request.leftArtifactId ?? leftComparable.artifactId,
+        rightArtifactId: request.rightArtifactId ?? rightComparable.artifactId,
+        leftArtifact: leftComparable,
+        rightArtifact: rightComparable,
+        compare: request.compare,
+        validateOnly: false
+      }
+    });
+    nestedArtifacts.push(...compareExecution.artifacts);
+    const comparisonArtifact = artifactByType(compareExecution.artifacts, "run_comparison");
+    if (comparisonArtifact) {
+      relatedArtifactIds.push(comparisonArtifact.id);
+      comparisonResponse = parseComparisonArtifact(comparisonArtifact);
+    }
+  }
+
+  const report = buildAgentDiagnosisReport(request, {
+    validation,
+    flowContracts,
+    mappingPreview: mappingPreviewResult,
+    mappingTest: mappingTestResult,
+    triggerBindingPlan,
+    trace: traceResponse?.trace,
+    replay: replayResponse?.result,
+    comparison: comparisonResponse?.result,
+    relatedArtifactIds
+  });
+
+  const diagnosisArtifact = createAnalysisArtifact(spec, "diagnosis_report", "diagnosis-report", {
+    report,
+    problemCategory: report.problemCategory,
+    subtype: report.subtype,
+    evidenceQuality: report.evidenceQuality,
+    confidence: report.confidence,
+    selectedOperations: report.plan.selectedOperations,
+    relatedArtifactIds: report.relatedArtifactIds,
+    fallbackDetected: report.fallbackDetected,
+    diagnostics: report.diagnostics
+  });
+
+  const logArtifact = createLogArtifact(
+    spec.taskId,
+    spec.stepType,
+    JSON.stringify(
+      {
+        symptom: request.symptom,
+        triggerFamily: request.triggerFamily,
+        selectedOperations: plan.selectedOperations,
+        relatedArtifactIds
+      },
+      null,
+      2
+    )
+  );
+
+  const diagnostics = [...validation.stages.flatMap((stage) => stage.diagnostics), ...report.diagnostics];
+
+  return RunnerJobResultSchema.parse({
+    jobId: `${spec.taskId}-${spec.stepType}`,
+    jobRunId: spec.jobRunId,
+    ok: true,
+    status: "succeeded",
+    summary: `Executed ${spec.stepType}`,
+    exitCode: 0,
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+    jobTemplateName: spec.jobTemplateName,
+    logArtifact,
+    artifacts: [logArtifact, ...nestedArtifacts, diagnosisArtifact],
+    diagnostics
+  });
+}
+
 export class RunnerExecutorService implements RunnerExecutor {
   async execute(specInput: RunnerJobSpec): Promise<RunnerJobResult> {
     const spec = RunnerJobSpecSchema.parse(specInput);
-    const prepared = await prepareCommand(spec);
-    const command = prepared.command;
-    const [binary, ...args] = command;
-    const startedAt = new Date().toISOString();
+    if (spec.stepType === "diagnose_app") {
+      return executeDiagnosis(spec);
+    }
 
-    return new Promise((resolve) => {
-      const child = spawn(binary, args, {
-        cwd: process.cwd(),
-        stdio: ["ignore", "pipe", "pipe"],
-        shell: process.platform === "win32"
-      });
-
-      let stdout = "";
-      let stderr = "";
-
-      child.stdout.on("data", (chunk) => {
-        stdout += chunk.toString();
-      });
-
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString();
-      });
-
-      child.on("close", (code) => {
-        void prepared.cleanup?.();
-        const logArtifact = createLogArtifact(spec.taskId, spec.stepType, `${stdout}\n${stderr}`.trim());
-        const diagnostics: Diagnostic[] = stderr
-          ? [
-              {
-                code: "runner.stderr",
-                message: stderr.trim(),
-                severity: "warning"
-              } satisfies Diagnostic
-            ]
-          : [];
-        const artifacts = [logArtifact];
-        if (code === 0 && isAnalysisStep(spec.stepType)) {
-          artifacts.push(...createAnalysisArtifacts(spec, stdout, diagnostics));
-        }
-
-        resolve(
-          RunnerJobResultSchema.parse({
-            jobId: `${spec.taskId}-${spec.stepType}`,
-            jobRunId: spec.jobRunId,
-            ok: code === 0,
-            status: code === 0 ? "succeeded" : "failed",
-            summary: code === 0 ? `Executed ${spec.stepType}` : `Execution failed for ${spec.stepType}`,
-            exitCode: code ?? 1,
-            startedAt,
-            finishedAt: new Date().toISOString(),
-            jobTemplateName: spec.jobTemplateName,
-            logArtifact,
-            artifacts,
-            diagnostics
-          })
-        );
-      });
-
-      child.on("error", (error) => {
-        void prepared.cleanup?.();
-        const logArtifact = createLogArtifact(spec.taskId, spec.stepType, error.message);
-        resolve(
-          RunnerJobResultSchema.parse({
-            jobId: `${spec.taskId}-${spec.stepType}`,
-            jobRunId: spec.jobRunId,
-            ok: false,
-            status: "failed",
-            summary: `Failed to spawn command for ${spec.stepType}`,
-            exitCode: 1,
-            startedAt,
-            finishedAt: new Date().toISOString(),
-            jobTemplateName: spec.jobTemplateName,
-            logArtifact,
-            artifacts: [logArtifact],
-            diagnostics: [
-              {
-                code: "runner.spawn_error",
-                message: error.message,
-                severity: "error"
-              }
-            ]
-          })
-        );
-      });
+    const executed = await executePreparedRunnerCommand(spec);
+    return RunnerJobResultSchema.parse({
+      jobId: `${spec.taskId}-${spec.stepType}`,
+      jobRunId: spec.jobRunId,
+      ok: executed.ok,
+      status: executed.ok ? "succeeded" : "failed",
+      summary: executed.ok ? `Executed ${spec.stepType}` : `Execution failed for ${spec.stepType}`,
+      exitCode: executed.exitCode,
+      startedAt: executed.startedAt,
+      finishedAt: executed.finishedAt,
+      jobTemplateName: spec.jobTemplateName,
+      logArtifact: executed.logArtifact,
+      artifacts: executed.artifacts,
+      diagnostics: executed.diagnostics
     });
   }
 }

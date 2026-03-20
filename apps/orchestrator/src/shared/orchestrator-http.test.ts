@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { buildRunnerJobSpec } from "./orchestrator-http.js";
+import { type OrchestratorStartRequest } from "@flogo-agent/contracts";
+
+import { buildRunnerJobSpec, resolveWorkflowRunnerSteps } from "./orchestrator-http.js";
 
 describe("orchestrator-http", () => {
   it("forces trigger binding analysis jobs to plan mode and omits triggerName", () => {
@@ -49,5 +51,43 @@ describe("orchestrator-http", () => {
     expect(spec.analysisPayload?.handlerName).toBe("post_hello");
     expect(spec.analysisPayload?.triggerId).toBe("flogo-rest-hello");
     expect(Object.prototype.hasOwnProperty.call(spec.analysisPayload ?? {}, "triggerName")).toBe(false);
+  });
+
+  it("routes diagnosis mode to a single analysis-only diagnosis step with inferred symptom and trigger family", () => {
+    const start: OrchestratorStartRequest = {
+      taskId: "task-diagnosis",
+      request: {
+        type: "debug",
+        projectId: "demo",
+        requestedBy: "operator",
+        summary: "Why is the HTTP response wrong for this REST flow?",
+        inputs: {
+          mode: "diagnosis",
+          flowId: "hello",
+          sampleInput: {
+            payload: "hi"
+          }
+        },
+        constraints: {
+          allowDependencyChanges: false,
+          allowCustomCode: false,
+          targetEnv: "dev",
+          requireApproval: true
+        }
+      },
+      requiredApprovals: [],
+      planSummary: "Diagnose runtime issue",
+      steps: []
+    };
+
+    expect(resolveWorkflowRunnerSteps(start)).toEqual(["diagnose_app"]);
+
+    const spec = buildRunnerJobSpec(start, "diagnose_app");
+
+    expect(spec.jobKind).toBe("diagnosis");
+    expect(spec.analysisKind).toBe("diagnosis");
+    expect(spec.analysisPayload?.symptom).toBe("wrong_response");
+    expect(spec.analysisPayload?.triggerFamily).toBe("rest");
+    expect(spec.analysisPayload?.flowId).toBe("hello");
   });
 });

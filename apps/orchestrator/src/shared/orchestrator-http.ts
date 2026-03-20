@@ -16,6 +16,59 @@ const internalServiceToken = process.env.INTERNAL_SERVICE_TOKEN;
 
 const defaultWorkflowRunnerSteps: RunnerStepType[] = ["build", "run", "generate_smoke", "run_smoke"];
 
+function inferDiagnosisSymptom(summary: string) {
+  if (/(wrong http response|wrong response|reply mismatch|bad response)/i.test(summary)) {
+    return "wrong_response" as const;
+  }
+  if (/(scheduled|timer|cron|tick)/i.test(summary)) {
+    return "scheduled_flow_issue" as const;
+  }
+  if (/(cli|arg|flag|stdout|command)/i.test(summary)) {
+    return "cli_argument_issue" as const;
+  }
+  if (/(channel|internal event|worker event)/i.test(summary)) {
+    return "internal_event_issue" as const;
+  }
+  if (/(mapping|resolver|coercion|\$flow|\$activity|\$env|\$property|\$trigger)/i.test(summary)) {
+    return "mapping_mismatch" as const;
+  }
+  if (/(contract|flow input|flow output|signature)/i.test(summary)) {
+    return "flow_contract_issue" as const;
+  }
+  if (/(replay mismatch|replay drift|trace vs replay)/i.test(summary)) {
+    return "replay_mismatch" as const;
+  }
+  if (/(unsupported|fallback)/i.test(summary)) {
+    return "unsupported_shape" as const;
+  }
+  if (/(fail|error|crash|task failure|step failure)/i.test(summary)) {
+    return "step_failure" as const;
+  }
+  if (/(validation|semantic|structural|missing import|missing flow)/i.test(summary)) {
+    return "validation_failure" as const;
+  }
+  return "unexpected_output" as const;
+}
+
+function inferDiagnosisTriggerFamily(summary: string) {
+  if (/\brest\b|http|request|response|reply/i.test(summary)) {
+    return "rest" as const;
+  }
+  if (/\btimer\b|cron|schedule|scheduled|tick/i.test(summary)) {
+    return "timer" as const;
+  }
+  if (/\bcli\b|command|flag|stdout|argv|args/i.test(summary)) {
+    return "cli" as const;
+  }
+  if (/\bchannel\b|internal event|worker event/i.test(summary)) {
+    return "channel" as const;
+  }
+  if (/direct flow|independent action|flow only/i.test(summary)) {
+    return "direct_flow" as const;
+  }
+  return "unknown" as const;
+}
+
 export function resolveWorkflowRunnerSteps(start: OrchestratorStartRequest): RunnerStepType[] {
   const mode = start.request.inputs["mode"];
   if (mode === "flow_contracts") {
@@ -77,6 +130,9 @@ export function resolveWorkflowRunnerSteps(start: OrchestratorStartRequest): Run
   }
   if (mode === "composition_compare") {
     return ["compare_composition"];
+  }
+  if (mode === "diagnosis") {
+    return ["diagnose_app"];
   }
   return defaultWorkflowRunnerSteps;
 }
@@ -169,6 +225,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
       break;
     case "compare_composition":
       jobKind = "composition_compare";
+      break;
+    case "diagnose_app":
+      jobKind = "diagnosis";
       break;
     case "build":
     case "run":
@@ -479,6 +538,82 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
         resourceId:
           typeof start.request.inputs["resourceId"] === "string"
             ? (start.request.inputs["resourceId"] as string)
+            : undefined
+      };
+      break;
+    case "diagnose_app":
+      analysisPayload = {
+        symptom:
+          typeof start.request.inputs["symptom"] === "string"
+            ? (start.request.inputs["symptom"] as string)
+            : inferDiagnosisSymptom(start.request.summary),
+        triggerFamily:
+          typeof start.request.inputs["triggerFamily"] === "string"
+            ? (start.request.inputs["triggerFamily"] as string)
+            : inferDiagnosisTriggerFamily(start.request.summary),
+        flowId:
+          typeof start.request.inputs["flowId"] === "string"
+            ? (start.request.inputs["flowId"] as string)
+            : undefined,
+        sampleInput:
+          start.request.inputs["sampleInput"] && typeof start.request.inputs["sampleInput"] === "object" && !Array.isArray(start.request.inputs["sampleInput"])
+            ? (start.request.inputs["sampleInput"] as Record<string, unknown>)
+            : {},
+        mappingContext:
+          start.request.inputs["mappingContext"] && typeof start.request.inputs["mappingContext"] === "object" && !Array.isArray(start.request.inputs["mappingContext"])
+            ? (start.request.inputs["mappingContext"] as Record<string, unknown>)
+            : undefined,
+        traceArtifactId:
+          typeof start.request.inputs["traceArtifactId"] === "string"
+            ? (start.request.inputs["traceArtifactId"] as string)
+            : undefined,
+        baseInput:
+          start.request.inputs["baseInput"] && typeof start.request.inputs["baseInput"] === "object" && !Array.isArray(start.request.inputs["baseInput"])
+            ? (start.request.inputs["baseInput"] as Record<string, unknown>)
+            : undefined,
+        overrides:
+          start.request.inputs["overrides"] && typeof start.request.inputs["overrides"] === "object" && !Array.isArray(start.request.inputs["overrides"])
+            ? (start.request.inputs["overrides"] as Record<string, unknown>)
+            : undefined,
+        leftArtifactId:
+          typeof start.request.inputs["leftArtifactId"] === "string"
+            ? (start.request.inputs["leftArtifactId"] as string)
+            : undefined,
+        rightArtifactId:
+          typeof start.request.inputs["rightArtifactId"] === "string"
+            ? (start.request.inputs["rightArtifactId"] as string)
+            : undefined,
+        leftArtifact:
+          start.request.inputs["leftArtifact"] && typeof start.request.inputs["leftArtifact"] === "object" && !Array.isArray(start.request.inputs["leftArtifact"])
+            ? (start.request.inputs["leftArtifact"] as Record<string, unknown>)
+            : undefined,
+        rightArtifact:
+          start.request.inputs["rightArtifact"] && typeof start.request.inputs["rightArtifact"] === "object" && !Array.isArray(start.request.inputs["rightArtifact"])
+            ? (start.request.inputs["rightArtifact"] as Record<string, unknown>)
+            : undefined,
+        targetNodeId:
+          typeof start.request.inputs["targetNodeId"] === "string"
+            ? (start.request.inputs["targetNodeId"] as string)
+            : undefined,
+        expectedOutput:
+          start.request.inputs["expectedOutput"] && typeof start.request.inputs["expectedOutput"] === "object" && !Array.isArray(start.request.inputs["expectedOutput"])
+            ? (start.request.inputs["expectedOutput"] as Record<string, unknown>)
+            : undefined,
+        profile:
+          start.request.inputs["profile"] && typeof start.request.inputs["profile"] === "object" && !Array.isArray(start.request.inputs["profile"])
+            ? (start.request.inputs["profile"] as Record<string, unknown>)
+            : undefined,
+        expectedBehavior:
+          typeof start.request.inputs["expectedBehavior"] === "string"
+            ? (start.request.inputs["expectedBehavior"] as string)
+            : undefined,
+        capture:
+          start.request.inputs["capture"] && typeof start.request.inputs["capture"] === "object" && !Array.isArray(start.request.inputs["capture"])
+            ? (start.request.inputs["capture"] as Record<string, unknown>)
+            : undefined,
+        compare:
+          start.request.inputs["compare"] && typeof start.request.inputs["compare"] === "object" && !Array.isArray(start.request.inputs["compare"])
+            ? (start.request.inputs["compare"] as Record<string, unknown>)
             : undefined
       };
       break;

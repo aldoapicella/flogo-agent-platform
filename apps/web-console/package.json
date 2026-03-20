@@ -6,6 +6,7 @@
     "build": "next build",
     "dev": "next dev --port 3000",
     "start": "next start --port 3000",
+    "test": "vitest --config vitest.config.ts run",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -19,4 +20,3 @@
     "@types/react-dom": "^19.0.4"
   }
 }
-

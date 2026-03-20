@@ -2,7 +2,7 @@ import { type ArtifactRef } from "@flogo-agent/contracts";
 
 export function ArtifactList({ artifacts }: { artifacts: ArtifactRef[] }) {
   return (
-    <div className="card">
+    <div className="card span-full">
       <h3>Artifacts</h3>
       {artifacts.length === 0 ? (
         <p className="meta">No artifacts published yet.</p>

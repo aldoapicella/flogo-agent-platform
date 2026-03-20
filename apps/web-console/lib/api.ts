@@ -1,4 +1,4 @@
-import { type TaskResult } from "@flogo-agent/contracts";
+import { type ArtifactRef, type TaskResult } from "@flogo-agent/contracts";
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -31,5 +31,21 @@ export async function getTask(taskId: string): Promise<TaskResult | null> {
     return response.json();
   } catch {
     return null;
+  }
+}
+
+export async function getTaskArtifacts(taskId: string): Promise<ArtifactRef[]> {
+  try {
+    const response = await fetch(`${apiBaseUrl}/v1/tasks/${taskId}/artifacts`, {
+      next: {
+        revalidate: 0
+      }
+    });
+    if (!response.ok) {
+      return [];
+    }
+    return response.json();
+  } catch {
+    return [];
   }
 }

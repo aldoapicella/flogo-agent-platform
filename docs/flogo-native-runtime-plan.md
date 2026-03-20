@@ -251,7 +251,7 @@ Focus:
 
 Current status:
 
-- implemented in mixed form: direct trace capture now has a narrow runtime-backed helper path with recorder-backed evidence on one supported same-flow scenario, REST trace/replay share one narrow live trigger-backed slice, timer startup has a narrow partial slice, CLI trace/replay share one narrow command-entry slice, Channel trace/replay share one narrow internal-event slice, and run comparison prefers richer runtime artifacts, REST envelope evidence, timer startup evidence, or Channel boundary evidence when both sides provide them while preserving fallback behavior elsewhere.
+- implemented in mixed form: direct trace capture now has a narrow runtime-backed helper path with recorder-backed evidence on one supported same-flow scenario, REST trace/replay share one narrow live trigger-backed slice, timer startup has a narrow partial slice, CLI trace/replay share one narrow command-entry slice, Channel trace/replay share one narrow internal-event slice, run comparison prefers richer runtime artifacts, REST envelope evidence, timer startup evidence, or Channel boundary evidence when both sides provide them while preserving fallback behavior elsewhere, and the agent can now run a recommendation-oriented diagnosis loop over that evidence without applying fixes automatically.
 
 Implemented in repo:
 
@@ -415,6 +415,39 @@ Current status:
 
 - implemented in repo: the eval package now carries a dedicated runtime-evidence corpus for the existing direct-flow, REST, timer, CLI, and Channel runtime slices plus representative unsupported-shape fallbacks, with machine-readable expectations for evidence kind, runtime mode, replay behavior, normalized step availability, and comparison-basis preference.
 
+## Phase 3.10: Web-console runtime-evidence UX
+
+Focus:
+
+- expose runtime evidence, fallback, and comparison basis on task detail pages,
+- render trigger-family-specific runtime summaries without inventing unavailable data,
+- keep the UI faithful to the current narrow backend slices.
+
+Current status:
+
+- implemented in repo: the web console task detail page now surfaces runtime evidence kind, runtime mode, fallback reason, normalized steps, compare basis, and trigger-specific panels for the supported REST, timer, CLI, and Channel slices while preserving honest unavailable-field handling.
+
+## Phase 3.11: Agent diagnosis loop v1
+
+Focus:
+
+- choose the narrowest useful proof path across validation, mapping, contracts, trace, replay, and compare,
+- summarize runtime/static evidence into a structured diagnosis,
+- recommend a minimal patch with explicit confidence and evidence quality,
+- stay recommendation-only rather than auto-fixing repository code.
+
+Current status:
+
+- partially implemented: analysis-only tasks can now request `inputs.mode = "diagnosis"` to run a typed diagnosis planner over validation, mapping preview/test, flow-contract analysis, trigger-binding analysis, trace, replay, and compare on the current supported slices,
+- the runner persists a `diagnosis_report` artifact with problem category, subtype, supporting evidence references, recommended next action, recommended patch, confidence, evidence quality, and related artifact IDs,
+- the task-detail UI now renders a diagnosis summary from that artifact, but the diagnosis surface remains summary-first rather than a full operator workbench.
+
+Current limitations:
+
+- the diagnosis loop is additive and recommendation-oriented only; it does not auto-apply patches or replace existing mutation flows,
+- confidence is intentionally downgraded when the proof path lands on simulated fallback, artifact-backed-only comparison, or insufficient runtime evidence,
+- diagnosis quality is still bounded by the current narrow runtime-backed slices and the available static evidence for each trigger family.
+
 ## Phase 3.2: Recorder-backed evidence foundation
 
 Focus:
@@ -560,14 +593,14 @@ Use this section as the working tracker for future implementation slices.
 | Area | Scope | Status | Code reference | Next step |
 | --- | --- | --- | --- | --- |
 | Shared contracts | Inventory, descriptor, contribution-evidence, governance, composition, mapping-preview, mapping-test, property-plan, flow-contract, trigger-binding, subflow-refactor, advanced control-flow, run-trace, replay, and run-comparison contracts | Partial | `packages/contracts/src/index.ts` | Add contribution-authoring contracts |
-| Graph engine | Contribution inventory, catalog, evidence inspection, alias validation, governance validation, composition comparison, mapping preview, mapping tests, coercion suggestions, property planning, flow contract inference, trigger-binding planning/application, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, run-trace preflight validation, replay preflight validation, and run-comparison diffing | Partial | `packages/flogo-graph/src/index.ts` | Add runtime-backed debugging evidence layers on top of trace/replay/comparison |
-| Tool layer | Flogo core/mapping tools split plus flow-contract, trigger-binding, subflow-refactor, advanced control-flow dispatch, runtime trace dispatch, replay dispatch, and run-comparison dispatch | Partial | `packages/tools/src/*.ts` | Add contribution-authoring tool modules |
-| Planner | Analysis-only modes, runtime trace/replay/run-comparison planning-execution routing, and Flogo-aware step selection | Partial | `packages/agent/src/index.ts` | Add runtime-backed debugging planning |
+| Graph engine | Contribution inventory, catalog, evidence inspection, alias validation, governance validation, composition comparison, mapping preview, mapping tests, coercion suggestions, property planning, flow contract inference, trigger-binding planning/application, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, run-trace/replay preflight validation, run-comparison diffing, and diagnosis report classification | Partial | `packages/flogo-graph/src/index.ts` | Deepen diagnosis-specific evidence ranking and classification coverage |
+| Tool layer | Flogo core/mapping tools split plus flow-contract, trigger-binding, subflow-refactor, advanced control-flow dispatch, runtime trace dispatch, replay dispatch, run-comparison dispatch, and diagnosis dispatch | Partial | `packages/tools/src/*.ts` | Add contribution-authoring tool modules later |
+| Planner | Analysis-only modes, runtime trace/replay/run-comparison/diagnosis planning-execution routing, and Flogo-aware step selection | Partial | `packages/agent/src/index.ts` | Expand diagnosis heuristics and symptom coverage |
 | Control-plane APIs | Graph, inventory, catalog, descriptor inspection, contribution evidence inspection, flow contracts, runtime trace, replay, run comparison, trigger binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, governance, composition comparison, mapping preview, mapping test, property plan, app artifact listing | Partial | `apps/control-plane/src/modules/flogo-apps/*` | Add contribution-authoring APIs later |
 | Persistence | Prisma-backed task/event/artifact state plus hidden app-analysis records and Blob-backed analysis payloads | Partial | `apps/control-plane/src/modules/agent/task-store.service.ts`, `apps/control-plane/src/modules/flogo-apps/app-analysis-storage.service.ts` | Extend Blob-backed storage beyond app-analysis artifacts |
-| Runner-worker | Flow-contract, runtime trace, replay, run comparison, trigger-binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, and property-plan execution support | Partial | `apps/runner-worker/src/services/*` | Add contribution-authoring job kinds |
+| Runner-worker | Flow-contract, runtime trace, replay, run comparison, trigger-binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, property-plan, and diagnosis execution support | Partial | `apps/runner-worker/src/services/*` | Add contribution-authoring job kinds later |
 | Go helper | Flow-contract, runtime trace, replay, run comparison, trigger-binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, and property planning | Partial | `go-runtime/flogo-helper/main.go` | Integrate deeper Flow runtime hooks and later runtime-backed debugging behavior |
-| Web console | Basic task UI only | Planned | `apps/web-console` | Add catalog, mapping preview, and later replay views |
+| Web console | Task detail runtime-evidence inspection plus diagnosis-summary rendering for trace, replay, compare, and diagnosis artifacts | Partial | `apps/web-console` | Add richer compare workflows and a deeper diagnosis workbench |
 | Eval coverage | Existing create/update/debug/review baseline plus a dedicated runtime-evidence suite for the current real runtime slices | Partial | `packages/evals` | Add broader UI-facing workflow evals and later contribution-authoring cases |
 
 ## Rules For Future Implementation Passes
@@ -583,13 +616,13 @@ When implementing a Flogo-native feature:
 
 ## Recommended Next Slice
 
-The next implementation slice after the current baseline should expose the current runtime evidence clearly in the web console and keep improving operator-facing inspection rather than widening trigger breadth further.
+The next implementation slice after the current baseline should deepen diagnosis quality and operator-facing diagnosis workflows on top of the now-visible runtime evidence rather than widening trigger breadth further.
 
 Recommended next items:
 
-1. Surface the runtime evidence more clearly in the web console instead of adding another trigger family.
-2. Keep the runtime-evidence suite current as the existing slices evolve so regressions stay visible.
-3. Leave broader trigger-runtime parity beyond the current slices deferred until the supported trigger families share a coherent runtime evidence model.
+1. Add diagnosis-focused eval coverage for planner selection, confidence scoring, and recommendation stability across the current trigger families.
+2. Expand the web console diagnosis surface from a summary panel into richer drill-down and compare-assisted diagnosis workflows.
+3. Keep broader trigger-runtime parity beyond the current slices deferred until the supported trigger families share a coherent runtime evidence model, then begin Phase 4 contribution-authoring foundation work.
 
 ## Source References
 

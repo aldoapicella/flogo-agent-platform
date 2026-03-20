@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { EvalCaseSchema } from "@flogo-agent/contracts";
 
-import { evalCases, runtimeEvidenceEvalCases, summarizeRuntimeEvidenceEvalCoverage, workflowEvalCases } from "./index.js";
+import {
+  diagnosisEvalCases,
+  evalCases,
+  runtimeEvidenceEvalCases,
+  summarizeDiagnosisEvalCoverage,
+  summarizeRuntimeEvidenceEvalCoverage,
+  workflowEvalCases
+} from "./index.js";
 
 describe("runtime evidence eval suite", () => {
   it("keeps every exported eval case schema-valid", () => {
@@ -12,7 +19,7 @@ describe("runtime evidence eval suite", () => {
   });
 
   it("extends the baseline workflow corpus instead of replacing it", () => {
-    expect(evalCases.length).toBe(workflowEvalCases.length + runtimeEvidenceEvalCases.length);
+    expect(evalCases.length).toBe(workflowEvalCases.length + runtimeEvidenceEvalCases.length + diagnosisEvalCases.length);
   });
 
   it("covers every current runtime family with one supported and one fallback case", () => {
@@ -76,5 +83,63 @@ describe("runtime evidence eval suite", () => {
       expect(testCase.runtimeEvidence?.artifacts.length).toBeGreaterThan(0);
       expect(testCase.suite).toBe("runtime_evidence");
     }
+  });
+});
+
+describe("diagnosis eval suite", () => {
+  it("keeps every exported diagnosis eval case schema-valid", () => {
+    for (const { case: testCase } of diagnosisEvalCases) {
+      expect(EvalCaseSchema.parse(testCase)).toEqual(testCase);
+    }
+  });
+
+  it("covers every current runtime family with supported and fallback diagnosis cases", () => {
+    const summary = summarizeDiagnosisEvalCoverage();
+
+    expect(summary.total).toBe(10);
+    expect(summary.families.direct_flow).toEqual({ supported: 1, fallback: 1 });
+    expect(summary.families.rest).toEqual({ supported: 1, fallback: 1 });
+    expect(summary.families.timer).toEqual({ supported: 1, fallback: 1 });
+    expect(summary.families.cli).toEqual({ supported: 1, fallback: 1 });
+    expect(summary.families.channel).toEqual({ supported: 1, fallback: 1 });
+  });
+
+  it("calibrates confidence bands against evidence quality", () => {
+    const summary = summarizeDiagnosisEvalCoverage();
+
+    expect(summary.confidenceBands).toEqual({
+      certain: 0,
+      high: 5,
+      medium: 0,
+      low: 5
+    });
+    expect(summary.evidenceQualities).toEqual({
+      runtime_backed: 5,
+      simulated_fallback: 5,
+      artifact_backed: 0,
+      mixed: 0
+    });
+  });
+
+  it("keeps recommendations minimal and fallback-aware", () => {
+    const summary = summarizeDiagnosisEvalCoverage();
+
+    expect(summary.recommendationShapes).toEqual({
+      minimal_patch: 5,
+      minimal_probe: 0,
+      fallback_only: 5
+    });
+    expect(summary.fallbackCases).toHaveLength(5);
+  });
+
+  it("anchors diagnosis cases to the current runtime boundaries and categories", () => {
+    const byId = Object.fromEntries(diagnosisEvalCases.map((testCase) => [testCase.case.id, testCase]));
+
+    expect(byId["diagnosis-001"]?.diagnosis.category).toBe("activity");
+    expect(byId["diagnosis-003"]?.diagnosis.subtype).toBe("reply_mapping_mismatch");
+    expect(byId["diagnosis-005"]?.diagnosis.category).toBe("trigger");
+    expect(byId["diagnosis-007"]?.diagnosis.confidenceBand).toBe("high");
+    expect(byId["diagnosis-010"]?.diagnosis.confidenceBand).toBe("low");
+    expect(byId["diagnosis-004"]?.diagnosis.recommendationShape).toBe("fallback_only");
   });
 });

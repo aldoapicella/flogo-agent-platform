@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@flogo-agent/contracts": "workspace:*",
+    "@flogo-agent/flogo-graph": "workspace:*",
     "@flogo-agent/tools": "workspace:*",
     "fastify": "^5.2.1"
   }

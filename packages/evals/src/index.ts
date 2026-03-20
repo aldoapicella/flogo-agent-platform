@@ -1,10 +1,32 @@
-import { EvalCaseSchema, type EvalCase } from "@flogo-agent/contracts";
+import {
+  EvalCaseSchema,
+  type DiagnosisConfidenceLevel,
+  type DiagnosisEvidenceQuality,
+  type DiagnosisProblemCategory,
+  type DiagnosisSubtype,
+  type EvalCase
+} from "@flogo-agent/contracts";
 
 type RuntimeEvidenceMetadata = NonNullable<EvalCase["runtimeEvidence"]>;
 type RuntimeEvidenceMetadataInput = Omit<RuntimeEvidenceMetadata, "operations" | "artifacts" | "mirrors"> &
   Partial<Pick<RuntimeEvidenceMetadata, "operations" | "artifacts" | "mirrors">>;
 type RuntimeEvidenceFamily = RuntimeEvidenceMetadata["family"];
 type RuntimeEvidenceScenario = RuntimeEvidenceMetadata["scenario"];
+type DiagnosisCaseFamily = RuntimeEvidenceFamily;
+type DiagnosisCaseScenario = RuntimeEvidenceScenario;
+
+type DiagnosisEvalCase = {
+  case: EvalCase;
+  diagnosis: {
+    family: DiagnosisCaseFamily;
+    scenario: DiagnosisCaseScenario;
+    category: DiagnosisProblemCategory;
+    subtype: DiagnosisSubtype;
+    evidenceQuality: DiagnosisEvidenceQuality;
+    confidenceBand: DiagnosisConfidenceLevel;
+    recommendationShape: "minimal_patch" | "minimal_probe" | "fallback_only";
+  };
+};
 
 function createCase(
   id: string,
@@ -57,6 +79,24 @@ function createRuntimeEvidenceCase(
       mirrors
     }
   });
+}
+
+function createDiagnosisCase(
+  id: string,
+  title: string,
+  prompt: string,
+  expectedSignals: string[],
+  diagnosis: DiagnosisEvalCase["diagnosis"],
+  runtimeEvidence: RuntimeEvidenceMetadataInput
+): DiagnosisEvalCase {
+  const runtimeCase = createRuntimeEvidenceCase(id, title, prompt, expectedSignals, runtimeEvidence);
+  return {
+    case: EvalCaseSchema.parse({
+      ...runtimeCase,
+      suite: "diagnosis"
+    }),
+    diagnosis
+  };
 }
 
 export const workflowEvalCases: EvalCase[] = [
@@ -385,7 +425,449 @@ export const runtimeEvidenceEvalCases: EvalCase[] = [
   )
 ];
 
-export const evalCases: EvalCase[] = [...workflowEvalCases, ...runtimeEvidenceEvalCases];
+export const diagnosisEvalCases: DiagnosisEvalCase[] = [
+  createDiagnosisCase(
+    "diagnosis-001",
+    "Direct-flow runtime diagnosis",
+    "Diagnose a failing direct-flow task using runtime-backed trace and compare evidence, then recommend the smallest patch that fixes the failing step.",
+    [
+      "diagnosis",
+      "family:direct_flow",
+      "category:activity",
+      "subtype:step_failure",
+      "confidence:high",
+      "evidence:runtime_backed"
+    ],
+    {
+      family: "direct_flow",
+      scenario: "supported",
+      category: "activity",
+      subtype: "step_failure",
+      evidenceQuality: "runtime_backed",
+      confidenceBand: "high",
+      recommendationShape: "minimal_patch"
+    },
+    {
+      family: "direct_flow",
+      scenario: "supported",
+      operations: ["trace", "replay", "compare"],
+      artifacts: ["run_trace", "replay_report", "run_comparison"],
+      trace: {
+        evidenceKind: "runtime_backed",
+        runtimeMode: "independent_action",
+        normalizedStepsExpected: true,
+        fallbackReasonExpected: false
+      },
+      replay: {
+        implemented: true,
+        evidenceKind: "runtime_backed",
+        runtimeMode: "independent_action_replay",
+        normalizedStepsExpected: true,
+        fallbackReasonExpected: false
+      },
+      comparison: {
+        basis: "normalized_runtime_evidence",
+        runtimePreferred: true
+      },
+      mirrors: [
+        "packages/flogo-graph/src/index.test.ts",
+        "apps/runner-worker/src/services/runner-executor.service.test.ts",
+        "apps/web-console/lib/diagnosis.test.ts"
+      ]
+    }
+  ),
+  createDiagnosisCase(
+    "diagnosis-002",
+    "Direct-flow fallback diagnosis",
+    "Diagnose an unsupported direct-flow shape and make the diagnosis explicitly low confidence because the runtime proof path fell back to simulation.",
+    [
+      "diagnosis",
+      "family:direct_flow",
+      "category:runtime",
+      "subtype:unsupported_shape",
+      "confidence:low",
+      "evidence:simulated_fallback"
+    ],
+    {
+      family: "direct_flow",
+      scenario: "fallback",
+      category: "runtime",
+      subtype: "unsupported_shape",
+      evidenceQuality: "simulated_fallback",
+      confidenceBand: "low",
+      recommendationShape: "fallback_only"
+    },
+    {
+      family: "direct_flow",
+      scenario: "fallback",
+      operations: ["trace", "compare"],
+      artifacts: ["run_trace", "run_comparison"],
+      trace: {
+        evidenceKind: "simulated_fallback",
+        normalizedStepsExpected: false,
+        fallbackReasonExpected: true,
+        fallbackDiagnosticCode: "flogo.run_trace.runtime_fallback"
+      },
+      comparison: {
+        basis: "simulated_fallback",
+        runtimePreferred: false
+      },
+      mirrors: ["packages/flogo-graph/src/index.test.ts", "apps/web-console/lib/diagnosis.test.ts"]
+    }
+  ),
+  createDiagnosisCase(
+    "diagnosis-003",
+    "REST mapping diagnosis",
+    "Diagnose a wrong REST response by checking trigger-to-flow mapping, then recommend the minimal mapping correction and a supporting compare.",
+    [
+      "diagnosis",
+      "family:rest",
+      "category:mapping",
+      "subtype:reply_mapping_mismatch",
+      "confidence:high",
+      "evidence:runtime_backed"
+    ],
+    {
+      family: "rest",
+      scenario: "supported",
+      category: "mapping",
+      subtype: "reply_mapping_mismatch",
+      evidenceQuality: "runtime_backed",
+      confidenceBand: "high",
+      recommendationShape: "minimal_patch"
+    },
+    {
+      family: "rest",
+      scenario: "supported",
+      operations: ["trace", "replay", "compare"],
+      artifacts: ["run_trace", "run_comparison"],
+      trace: {
+        evidenceKind: "runtime_backed",
+        runtimeMode: "rest_trigger",
+        normalizedStepsExpected: true,
+        triggerEvidenceField: "restTriggerRuntime",
+        fallbackReasonExpected: false
+      },
+      comparison: {
+        basis: "rest_runtime_envelope",
+        runtimePreferred: true
+      },
+      mirrors: [
+        "go-runtime/flogo-helper/main_test.go",
+        "packages/flogo-graph/src/index.test.ts",
+        "apps/web-console/components/diagnosis-panel.test.tsx"
+      ]
+    }
+  ),
+  createDiagnosisCase(
+    "diagnosis-004",
+    "REST fallback diagnosis",
+    "Diagnose an unsupported REST shape and keep the diagnosis low confidence because the evidence path fell back to simulation.",
+    [
+      "diagnosis",
+      "family:rest",
+      "category:runtime",
+      "subtype:fallback_to_simulation",
+      "confidence:low",
+      "evidence:simulated_fallback"
+    ],
+    {
+      family: "rest",
+      scenario: "fallback",
+      category: "runtime",
+      subtype: "fallback_to_simulation",
+      evidenceQuality: "simulated_fallback",
+      confidenceBand: "low",
+      recommendationShape: "fallback_only"
+    },
+    {
+      family: "rest",
+      scenario: "fallback",
+      operations: ["trace", "replay"],
+      artifacts: ["run_trace", "replay_report"],
+      trace: {
+        evidenceKind: "simulated_fallback",
+        normalizedStepsExpected: false,
+        fallbackReasonExpected: true,
+        fallbackDiagnosticCode: "flogo.run_trace.rest_trigger_runtime_fallback"
+      },
+      replay: {
+        implemented: true,
+        evidenceKind: "simulated_fallback",
+        normalizedStepsExpected: false,
+        fallbackReasonExpected: true
+      },
+      mirrors: ["go-runtime/flogo-helper/main_test.go", "apps/web-console/lib/diagnosis.test.ts"]
+    }
+  ),
+  createDiagnosisCase(
+    "diagnosis-005",
+    "Timer startup diagnosis",
+    "Diagnose a scheduled-flow problem by checking timer startup evidence and recommend the smallest schedule correction.",
+    [
+      "diagnosis",
+      "family:timer",
+      "category:trigger",
+      "subtype:timer_startup_mismatch",
+      "confidence:high",
+      "evidence:runtime_backed"
+    ],
+    {
+      family: "timer",
+      scenario: "supported",
+      category: "trigger",
+      subtype: "timer_startup_mismatch",
+      evidenceQuality: "runtime_backed",
+      confidenceBand: "high",
+      recommendationShape: "minimal_patch"
+    },
+    {
+      family: "timer",
+      scenario: "supported",
+      operations: ["trace", "replay", "compare"],
+      artifacts: ["run_trace", "replay_report"],
+      trace: {
+        evidenceKind: "runtime_backed",
+        runtimeMode: "timer_trigger",
+        normalizedStepsExpected: true,
+        triggerEvidenceField: "timerTriggerRuntime",
+        fallbackReasonExpected: false
+      },
+      replay: {
+        implemented: true,
+        evidenceKind: "runtime_backed",
+        runtimeMode: "timer_trigger_replay",
+        normalizedStepsExpected: true,
+        triggerEvidenceField: "timerTriggerRuntime",
+        fallbackReasonExpected: false
+      },
+      mirrors: [
+        "go-runtime/flogo-helper/main_test.go",
+        "packages/flogo-graph/src/index.test.ts",
+        "apps/runner-worker/src/services/runner-executor.service.test.ts"
+      ]
+    }
+  ),
+  createDiagnosisCase(
+    "diagnosis-006",
+    "Timer fallback diagnosis",
+    "Diagnose an unsupported timer shape and explicitly lower confidence because the evidence path was simulated.",
+    [
+      "diagnosis",
+      "family:timer",
+      "category:runtime",
+      "subtype:unsupported_shape",
+      "confidence:low",
+      "evidence:simulated_fallback"
+    ],
+    {
+      family: "timer",
+      scenario: "fallback",
+      category: "runtime",
+      subtype: "unsupported_shape",
+      evidenceQuality: "simulated_fallback",
+      confidenceBand: "low",
+      recommendationShape: "fallback_only"
+    },
+    {
+      family: "timer",
+      scenario: "fallback",
+      operations: ["trace"],
+      artifacts: ["run_trace"],
+      trace: {
+        evidenceKind: "simulated_fallback",
+        normalizedStepsExpected: false,
+        fallbackReasonExpected: true,
+        fallbackDiagnosticCode: "flogo.run_trace.timer_trigger_runtime_fallback"
+      },
+      mirrors: ["go-runtime/flogo-helper/main_test.go"]
+    }
+  ),
+  createDiagnosisCase(
+    "diagnosis-007",
+    "CLI entrypoint diagnosis",
+    "Diagnose a command-entry issue by checking CLI args and flags, then recommend the minimal handler correction.",
+    [
+      "diagnosis",
+      "family:cli",
+      "category:trigger",
+      "subtype:cli_boundary_mismatch",
+      "confidence:high",
+      "evidence:runtime_backed"
+    ],
+    {
+      family: "cli",
+      scenario: "supported",
+      category: "trigger",
+      subtype: "cli_boundary_mismatch",
+      evidenceQuality: "runtime_backed",
+      confidenceBand: "high",
+      recommendationShape: "minimal_patch"
+    },
+    {
+      family: "cli",
+      scenario: "supported",
+      operations: ["trace", "replay", "compare"],
+      artifacts: ["run_trace", "replay_report"],
+      trace: {
+        evidenceKind: "runtime_backed",
+        runtimeMode: "cli_trigger",
+        normalizedStepsExpected: true,
+        triggerEvidenceField: "cliTriggerRuntime",
+        fallbackReasonExpected: false
+      },
+      replay: {
+        implemented: true,
+        evidenceKind: "runtime_backed",
+        runtimeMode: "cli_trigger_replay",
+        normalizedStepsExpected: true,
+        triggerEvidenceField: "cliTriggerRuntime",
+        fallbackReasonExpected: false
+      },
+      mirrors: [
+        "go-runtime/flogo-helper/main_test.go",
+        "apps/control-plane/src/modules/flogo-apps/flogo-apps.service.test.ts",
+        "apps/runner-worker/src/services/runner-executor.service.test.ts"
+      ]
+    }
+  ),
+  createDiagnosisCase(
+    "diagnosis-008",
+    "CLI fallback diagnosis",
+    "Diagnose an unsupported CLI shape and keep the confidence low because the trace path had to simulate the runtime boundary.",
+    [
+      "diagnosis",
+      "family:cli",
+      "category:runtime",
+      "subtype:unsupported_shape",
+      "confidence:low",
+      "evidence:simulated_fallback"
+    ],
+    {
+      family: "cli",
+      scenario: "fallback",
+      category: "runtime",
+      subtype: "unsupported_shape",
+      evidenceQuality: "simulated_fallback",
+      confidenceBand: "low",
+      recommendationShape: "fallback_only"
+    },
+    {
+      family: "cli",
+      scenario: "fallback",
+      operations: ["trace", "replay"],
+      artifacts: ["run_trace", "replay_report"],
+      trace: {
+        evidenceKind: "simulated_fallback",
+        normalizedStepsExpected: false,
+        fallbackReasonExpected: true,
+        fallbackDiagnosticCode: "flogo.run_trace.cli_trigger_runtime_fallback"
+      },
+      replay: {
+        implemented: true,
+        evidenceKind: "simulated_fallback",
+        normalizedStepsExpected: false,
+        fallbackReasonExpected: true
+      },
+      mirrors: ["go-runtime/flogo-helper/main_test.go"]
+    }
+  ),
+  createDiagnosisCase(
+    "diagnosis-009",
+    "Channel boundary diagnosis",
+    "Diagnose an internal-event channel problem by checking the channel boundary and recommend the smallest wiring correction.",
+    [
+      "diagnosis",
+      "family:channel",
+      "category:trigger",
+      "subtype:channel_boundary_mismatch",
+      "confidence:high",
+      "evidence:runtime_backed"
+    ],
+    {
+      family: "channel",
+      scenario: "supported",
+      category: "trigger",
+      subtype: "channel_boundary_mismatch",
+      evidenceQuality: "runtime_backed",
+      confidenceBand: "high",
+      recommendationShape: "minimal_patch"
+    },
+    {
+      family: "channel",
+      scenario: "supported",
+      operations: ["trace", "replay", "compare"],
+      artifacts: ["run_trace", "replay_report", "run_comparison"],
+      trace: {
+        evidenceKind: "runtime_backed",
+        runtimeMode: "channel_trigger",
+        normalizedStepsExpected: true,
+        triggerEvidenceField: "channelTriggerRuntime",
+        fallbackReasonExpected: false
+      },
+      replay: {
+        implemented: true,
+        evidenceKind: "runtime_backed",
+        runtimeMode: "channel_trigger_replay",
+        normalizedStepsExpected: true,
+        triggerEvidenceField: "channelTriggerRuntime",
+        fallbackReasonExpected: false
+      },
+      comparison: {
+        basis: "channel_runtime_boundary",
+        runtimePreferred: true
+      },
+      mirrors: [
+        "go-runtime/flogo-helper/main_test.go",
+        "packages/flogo-graph/src/index.test.ts",
+        "apps/web-console/components/diagnosis-panel.test.tsx"
+      ]
+    }
+  ),
+  createDiagnosisCase(
+    "diagnosis-010",
+    "Channel fallback diagnosis",
+    "Diagnose an unsupported channel topology and keep the confidence low because the runtime evidence was simulated.",
+    [
+      "diagnosis",
+      "family:channel",
+      "category:runtime",
+      "subtype:fallback_to_simulation",
+      "confidence:low",
+      "evidence:simulated_fallback"
+    ],
+    {
+      family: "channel",
+      scenario: "fallback",
+      category: "runtime",
+      subtype: "fallback_to_simulation",
+      evidenceQuality: "simulated_fallback",
+      confidenceBand: "low",
+      recommendationShape: "fallback_only"
+    },
+    {
+      family: "channel",
+      scenario: "fallback",
+      operations: ["trace", "replay"],
+      artifacts: ["run_trace", "replay_report"],
+      trace: {
+        evidenceKind: "simulated_fallback",
+        normalizedStepsExpected: false,
+        fallbackReasonExpected: true,
+        fallbackDiagnosticCode: "flogo.run_trace.channel_trigger_runtime_fallback"
+      },
+      replay: {
+        implemented: true,
+        evidenceKind: "simulated_fallback",
+        normalizedStepsExpected: false,
+        fallbackReasonExpected: true
+      },
+      mirrors: ["go-runtime/flogo-helper/main_test.go"]
+    }
+  )
+];
+
+export const evalCases: EvalCase[] = [...workflowEvalCases, ...runtimeEvidenceEvalCases, ...diagnosisEvalCases.map((entry) => entry.case)];
 
 export function summarizeRuntimeEvidenceEvalCoverage(cases: EvalCase[] = runtimeEvidenceEvalCases): {
   total: number;
@@ -439,6 +921,94 @@ export function summarizeRuntimeEvidenceEvalCoverage(cases: EvalCase[] = runtime
     traceRuntimeModes: [...traceRuntimeModes].sort(),
     replayRuntimeModes: [...replayRuntimeModes].sort(),
     fallbackCases: [...fallbackCases].sort()
+  };
+}
+
+export function summarizeDiagnosisEvalCoverage(cases: DiagnosisEvalCase[] = diagnosisEvalCases): {
+  total: number;
+  caseIds: string[];
+  families: Record<DiagnosisCaseFamily, { supported: number; fallback: number }>;
+  confidenceBands: Record<DiagnosisConfidenceLevel, number>;
+  evidenceQualities: Record<DiagnosisEvidenceQuality, number>;
+  categories: Record<DiagnosisProblemCategory, number>;
+  subtypes: Record<DiagnosisSubtype, number>;
+  fallbackCases: string[];
+  recommendationShapes: Record<DiagnosisEvalCase["diagnosis"]["recommendationShape"], number>;
+} {
+  const families = {
+    direct_flow: { supported: 0, fallback: 0 },
+    rest: { supported: 0, fallback: 0 },
+    timer: { supported: 0, fallback: 0 },
+    cli: { supported: 0, fallback: 0 },
+    channel: { supported: 0, fallback: 0 }
+  } satisfies Record<DiagnosisCaseFamily, Record<DiagnosisCaseScenario, number>>;
+  const confidenceBands: Record<DiagnosisConfidenceLevel, number> = {
+    certain: 0,
+    high: 0,
+    medium: 0,
+    low: 0
+  };
+  const evidenceQualities: Record<DiagnosisEvidenceQuality, number> = {
+    runtime_backed: 0,
+    simulated_fallback: 0,
+    artifact_backed: 0,
+    mixed: 0
+  };
+  const categories: Record<DiagnosisProblemCategory, number> = {
+    model: 0,
+    reference: 0,
+    mapping: 0,
+    trigger: 0,
+    activity: 0,
+    runtime: 0,
+    behavioral: 0
+  };
+  const subtypes: Record<DiagnosisSubtype, number> = {
+    contract_validation_failure: 0,
+    parse_or_resolution_failure: 0,
+    input_resolution_mismatch: 0,
+    reply_mapping_mismatch: 0,
+    rest_envelope_mismatch: 0,
+    timer_startup_mismatch: 0,
+    cli_boundary_mismatch: 0,
+    channel_boundary_mismatch: 0,
+    step_failure: 0,
+    behavioral_regression: 0,
+    fallback_to_simulation: 0,
+    unsupported_shape: 0,
+    insufficient_evidence: 0
+  };
+  const recommendationShapes: Record<DiagnosisEvalCase["diagnosis"]["recommendationShape"], number> = {
+    minimal_patch: 0,
+    minimal_probe: 0,
+    fallback_only: 0
+  };
+  const fallbackCases = new Set<string>();
+  const caseIds: string[] = [];
+
+  for (const diagnosisCase of cases) {
+    caseIds.push(diagnosisCase.case.id);
+    families[diagnosisCase.diagnosis.family][diagnosisCase.diagnosis.scenario] += 1;
+    confidenceBands[diagnosisCase.diagnosis.confidenceBand] += 1;
+    evidenceQualities[diagnosisCase.diagnosis.evidenceQuality] += 1;
+    categories[diagnosisCase.diagnosis.category] += 1;
+    subtypes[diagnosisCase.diagnosis.subtype] += 1;
+    recommendationShapes[diagnosisCase.diagnosis.recommendationShape] += 1;
+    if (diagnosisCase.diagnosis.scenario === "fallback") {
+      fallbackCases.add(diagnosisCase.case.id);
+    }
+  }
+
+  return {
+    total: cases.length,
+    caseIds,
+    families,
+    confidenceBands,
+    evidenceQualities,
+    categories,
+    subtypes,
+    fallbackCases: [...fallbackCases].sort(),
+    recommendationShapes
   };
 }
 

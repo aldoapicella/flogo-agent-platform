@@ -62,6 +62,7 @@ Important analysis-only modes:
 - `inputs.mode = "replay"`
 - `inputs.mode = "run_comparison_plan"`
 - `inputs.mode = "run_comparison"`
+- `inputs.mode = "diagnosis"`
 - `inputs.mode = "mapping_preview"`
 - `inputs.mode = "mapping_test"`
 - `inputs.mode = "property_plan"`
@@ -114,6 +115,33 @@ Key fields:
 - `requiredApprovals`
 - `nextActions`
 - `artifacts`
+
+### Diagnosis task mode
+
+Uses the existing task endpoint with `inputs.mode = "diagnosis"` to run a recommendation-oriented diagnosis loop over the current Flogo-native runtime and static-analysis surfaces.
+
+Important input fields:
+
+- `symptom`
+- `triggerFamily`
+- `flowId?`
+- `sampleInput?`
+- `baseInput?`
+- `overrides?`
+- `traceArtifactId?`
+- `leftArtifactId?`
+- `rightArtifactId?`
+- `targetNodeId?`
+- `expectedOutput?`
+- `profile?`
+
+Important behavior:
+
+- diagnosis is analysis-only and does not schedule patch/build/smoke steps,
+- the planner selects among static validation, mapping preview/test, flow-contract analysis, trigger-binding analysis, trace, replay, and compare based on the symptom, trigger family, and available evidence,
+- the task persists a `diagnosis_report` artifact plus any nested trace/replay/comparison artifacts actually used by the proof path,
+- diagnosis output is recommendation-oriented only; it does not auto-apply code changes in this slice,
+- confidence and evidence quality explicitly distinguish runtime-backed, simulated-fallback, artifact-backed, and mixed proof quality.
 
 ### `GET /v1/tasks`
 
@@ -408,6 +436,17 @@ Current implementation notes:
 - cross-flow comparison is allowed and returns a warning diagnostic instead of a hard failure,
 - array values are compared as whole values in this slice,
 - comparison artifacts capture summary-level diffs, task-level diffs, and diagnostic changes.
+
+### Diagnosis report artifacts
+
+Diagnosis currently ships through `POST /v1/tasks` rather than a dedicated `/diagnose` endpoint.
+
+Current implementation notes:
+
+- diagnosis planning is additive and symptom-driven rather than a replacement for the existing trace, replay, compare, validation, mapping, or trigger-binding APIs,
+- `diagnosis_report` artifacts persist structured `problemCategory`, `subtype`, `likelyRootCause`, `supportingEvidence`, `recommendedNextAction`, `recommendedPatch`, `confidence`, `evidenceQuality`, `limitations`, and related artifact IDs,
+- diagnosis confidence is intentionally lower when the proof path relies on simulated fallback, artifact-backed-only comparison, or insufficient evidence on unsupported shapes,
+- the web console task detail view renders the latest diagnosis artifact as a summary panel alongside runtime evidence.
 
 ### `POST /v1/projects/:projectId/apps/:appId/triggers/bind`
 

@@ -2431,6 +2431,343 @@ describe("RunnerExecutorService", () => {
     expect(result.ok).toBe(true);
     expect(result.artifacts.some((artifact) => artifact.type === "composition_compare")).toBe(true);
   });
+
+  it("executes diagnosis mode and publishes nested runtime artifacts plus a diagnosis report", async () => {
+    process.env.FLOGO_HELPER_BIN = await createMultiResponseHelperScript({
+      "flows:trace": JSON.stringify({
+        trace: {
+          appName: "demo",
+          flowId: "hello_flow",
+          evidenceKind: "runtime_backed",
+          runtimeEvidence: {
+            kind: "runtime_backed",
+            runtimeMode: "rest_trigger",
+            recorderBacked: true,
+            recorderMode: "full",
+            restTriggerRuntime: {
+              kind: "rest",
+              request: {
+                method: "POST",
+                path: "/hello"
+              },
+              flowInput: {
+                payload: "hello"
+              },
+              reply: {
+                status: 200
+              },
+              unavailableFields: [],
+              diagnostics: []
+            },
+            normalizedSteps: [
+              {
+                taskId: "log_1",
+                status: "completed",
+                unavailableFields: [],
+                diagnostics: []
+              }
+            ]
+          },
+          summary: {
+            flowId: "hello_flow",
+            status: "completed",
+            input: {
+              payload: "hello"
+            },
+            output: {
+              message: "hello"
+            },
+            stepCount: 1,
+            diagnostics: []
+          },
+          steps: [],
+          diagnostics: []
+        }
+      }),
+      "flows:replay": JSON.stringify({
+        result: {
+          summary: {
+            flowId: "hello_flow",
+            status: "completed",
+            inputSource: "explicit_input",
+            baseInput: {
+              payload: "hello"
+            },
+            effectiveInput: {
+              payload: "hello"
+            },
+            overridesApplied: false,
+            diagnostics: []
+          },
+          comparisonBasisPreference: "rest_runtime_envelope",
+          runtimeEvidence: {
+            kind: "runtime_backed",
+            runtimeMode: "rest_trigger_replay",
+            recorderBacked: true,
+            recorderMode: "full",
+            restTriggerRuntime: {
+              kind: "rest",
+              request: {
+                method: "POST",
+                path: "/hello"
+              },
+              flowInput: {
+                payload: "hello"
+              },
+              reply: {
+                status: 500
+              },
+              unavailableFields: [],
+              diagnostics: []
+            },
+            normalizedSteps: [
+              {
+                taskId: "log_1",
+                status: "completed",
+                unavailableFields: [],
+                diagnostics: []
+              }
+            ]
+          },
+          trace: {
+            appName: "demo",
+            flowId: "hello_flow",
+            evidenceKind: "runtime_backed",
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              runtimeMode: "rest_trigger_replay",
+              recorderBacked: true,
+              recorderMode: "full",
+              restTriggerRuntime: {
+                kind: "rest",
+                request: {
+                  method: "POST",
+                  path: "/hello"
+                },
+                flowInput: {
+                  payload: "hello"
+                },
+                reply: {
+                  status: 500
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              normalizedSteps: [
+                {
+                  taskId: "log_1",
+                  status: "completed",
+                  unavailableFields: [],
+                  diagnostics: []
+                }
+              ]
+            },
+            summary: {
+              flowId: "hello_flow",
+              status: "completed",
+              input: {
+                payload: "hello"
+              },
+              output: {
+                message: "hello"
+              },
+              stepCount: 1,
+              diagnostics: []
+            },
+            steps: [],
+            diagnostics: []
+          }
+        }
+      }),
+      "flows:compare-runs": JSON.stringify({
+        result: {
+          left: {
+            artifactId: "trace-artifact",
+            kind: "run_trace",
+            summaryStatus: "completed",
+            flowId: "hello_flow",
+            normalizedStepEvidence: true,
+            comparisonBasisPreference: "rest_runtime_envelope"
+          },
+          right: {
+            artifactId: "replay-artifact",
+            kind: "replay_report",
+            summaryStatus: "completed",
+            flowId: "hello_flow",
+            normalizedStepEvidence: true,
+            comparisonBasisPreference: "rest_runtime_envelope"
+          },
+          comparisonBasis: "rest_runtime_envelope",
+          restComparison: {
+            comparisonBasis: "rest_runtime_envelope",
+            requestEnvelopeCompared: true,
+            mappedFlowInputCompared: true,
+            replyEnvelopeCompared: true,
+            normalizedStepEvidenceCompared: true,
+            requestEnvelopeDiff: {
+              kind: "same"
+            },
+            mappedFlowInputDiff: {
+              kind: "same"
+            },
+            replyEnvelopeDiff: {
+              kind: "changed",
+              left: {
+                status: 200
+              },
+              right: {
+                status: 500
+              }
+            },
+            normalizedStepCountDiff: {
+              kind: "same",
+              left: 1,
+              right: 1
+            },
+            unsupportedFields: [],
+            diagnostics: []
+          },
+          summary: {
+            statusChanged: false,
+            inputDiff: {
+              kind: "same"
+            },
+            outputDiff: {
+              kind: "same"
+            },
+            errorDiff: {
+              kind: "same"
+            },
+            stepCountDiff: {
+              kind: "same"
+            },
+            diagnosticDiffs: []
+          },
+          steps: [],
+          diagnostics: []
+        }
+      })
+    });
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-diagnosis",
+      jobKind: "diagnosis",
+      stepType: "diagnose_app",
+      analysisKind: "diagnosis",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://diagnosis",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        symptom: "wrong_response",
+        triggerFamily: "rest",
+        flowId: "hello",
+        sampleInput: {
+          payload: "hello"
+        },
+        baseInput: {
+          payload: "hello"
+        }
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    const diagnosisArtifact = result.artifacts.find((artifact) => artifact.type === "diagnosis_report");
+    const report = diagnosisArtifact?.metadata?.["report"] as
+      | {
+          problemCategory?: string;
+          subtype?: string;
+          evidenceQuality?: string;
+          plan?: { selectedOperations?: string[] };
+          relatedArtifactIds?: string[];
+        }
+      | undefined;
+
+    expect(result.ok).toBe(true);
+    expect(result.artifacts.some((artifact) => artifact.type === "run_trace")).toBe(true);
+    expect(result.artifacts.some((artifact) => artifact.type === "replay_report")).toBe(true);
+    expect(result.artifacts.some((artifact) => artifact.type === "run_comparison")).toBe(true);
+    expect(diagnosisArtifact).toBeDefined();
+    expect(report?.problemCategory).toBe("trigger");
+    expect(report?.subtype).toBe("rest_envelope_mismatch");
+    expect(report?.evidenceQuality).toBe("runtime_backed");
+    expect(report?.plan?.selectedOperations).toContain("compare_runs");
+    expect(report?.relatedArtifactIds?.length).toBeGreaterThan(0);
+  });
+
+  it("persists low-confidence fallback diagnosis metadata honestly", async () => {
+    process.env.FLOGO_HELPER_BIN = await createMultiResponseHelperScript({
+      "flows:trace": JSON.stringify({
+        trace: {
+          appName: "demo",
+          flowId: "hello_flow",
+          evidenceKind: "simulated_fallback",
+          runtimeEvidence: {
+            kind: "simulated_fallback",
+            runtimeMode: "cli_trigger",
+            fallbackReason: "Unsupported CLI flag descriptor triggered fallback."
+          },
+          summary: {
+            flowId: "hello_flow",
+            status: "failed",
+            input: {},
+            output: {},
+            stepCount: 0,
+            diagnostics: []
+          },
+          steps: [],
+          diagnostics: []
+        }
+      })
+    });
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-diagnosis-fallback",
+      jobKind: "diagnosis",
+      stepType: "diagnose_app",
+      analysisKind: "diagnosis",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://diagnosis-fallback",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        symptom: "unsupported_shape",
+        triggerFamily: "cli",
+        flowId: "hello_flow",
+        sampleInput: {
+          payload: "hello"
+        }
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    const diagnosisArtifact = result.artifacts.find((artifact) => artifact.type === "diagnosis_report");
+    const report = diagnosisArtifact?.metadata?.["report"] as
+      | {
+          subtype?: string;
+          evidenceQuality?: string;
+          fallbackDetected?: boolean;
+          confidence?: { level?: string };
+        }
+      | undefined;
+
+    expect(result.ok).toBe(true);
+    expect(diagnosisArtifact).toBeDefined();
+    expect(report?.subtype).toBe("unsupported_shape");
+    expect(report?.evidenceQuality).toBe("simulated_fallback");
+    expect(report?.fallbackDetected).toBe(true);
+    expect(report?.confidence?.level).toBe("low");
+  });
 });
 
 async function createHelperScript(stdout: string, recordArgsPath?: string) {
@@ -2451,6 +2788,32 @@ async function createHelperScript(stdout: string, recordArgsPath?: string) {
     await fs.writeFile(wrapperPath, `@echo off\r\nnode "%~dp0helper.js" %*\r\n`, "utf8");
   } else {
     await fs.writeFile(wrapperPath, `#!/usr/bin/env sh\nexec node "$(dirname \"$0\")/helper.js" "$@"\n`, "utf8");
+    await fs.chmod(wrapperPath, 0o755);
+  }
+
+  return wrapperPath;
+}
+
+async function createMultiResponseHelperScript(outputs: Record<string, string>) {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "flogo-helper-multi-test-"));
+  const scriptPath = path.join(tempDir, "helper.js");
+  const wrapperPath = path.join(tempDir, process.platform === "win32" ? "helper.cmd" : "helper.sh");
+  const contents = [
+    'const outputs = new Map(Object.entries(JSON.parse(process.env.FLOGO_HELPER_MULTI_OUTPUTS || "{}")));',
+    'const key = process.argv.slice(2, 4).join(":");',
+    'const stdout = outputs.get(key) ?? outputs.get(process.argv.slice(2, 3).join(":")) ?? "{}";',
+    "process.stdout.write(stdout);"
+  ].join("\n");
+
+  await fs.writeFile(scriptPath, contents, "utf8");
+  if (process.platform === "win32") {
+    await fs.writeFile(wrapperPath, `@echo off\r\nset FLOGO_HELPER_MULTI_OUTPUTS=${JSON.stringify(JSON.stringify(outputs))}\r\nnode "%~dp0helper.js" %*\r\n`, "utf8");
+  } else {
+    await fs.writeFile(
+      wrapperPath,
+      `#!/usr/bin/env sh\nFLOGO_HELPER_MULTI_OUTPUTS='${JSON.stringify(outputs)}' exec node "$(dirname "$0")/helper.js" "$@"\n`,
+      "utf8"
+    );
     await fs.chmod(wrapperPath, 0o755);
   }
 

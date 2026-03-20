@@ -298,6 +298,9 @@ export class OrchestrationService {
     if (tool.includes("catalogContribs") || tool.includes("previewMapping") || tool.includes("planProperties")) {
       return "review";
     }
+    if (tool.includes("diagnoseApp")) {
+      return "review";
+    }
     return "plan";
   }
 }
