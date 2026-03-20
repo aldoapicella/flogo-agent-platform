@@ -148,6 +148,142 @@ describe("RunnerExecutorService", () => {
     expect(result.artifacts.some((artifact) => artifact.type === "flow_contract")).toBe(true);
   });
 
+  it("executes helper-backed activity scaffolding and publishes bundle plus build/test proof artifacts", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          bundle: {
+            kind: "activity",
+            modulePath: "example.com/acme/echo",
+            packageName: "echoactivity",
+            bundleRoot: "/tmp/flogo-activity-echoactivity",
+            descriptor: {
+              ref: "example.com/acme/echo",
+              alias: "echoactivity",
+              type: "activity",
+              name: "echo-message",
+              version: "0.1.0",
+              title: "Echo Message",
+              settings: [{ name: "prefix", type: "string", required: true }],
+              inputs: [{ name: "message", type: "string", required: true }],
+              outputs: [{ name: "message", type: "string" }],
+              examples: ["Import the module and wire it into a flow."],
+              compatibilityNotes: ["Generated scaffold"],
+              source: "activity_scaffold"
+            },
+            files: [
+              { path: "/tmp/flogo-activity-echoactivity/descriptor.json", kind: "descriptor", bytes: 120, content: "{}" },
+              { path: "/tmp/flogo-activity-echoactivity/activity.go", kind: "implementation", bytes: 240, content: "package echoactivity" }
+            ],
+            readmePath: "/tmp/flogo-activity-echoactivity/README.md"
+          },
+          validation: {
+            ok: true,
+            summary: "Activity scaffold generated and passed isolated go test/build proof.",
+            stages: [
+              { stage: "structural", ok: true, diagnostics: [] },
+              { stage: "regression", ok: true, diagnostics: [] },
+              { stage: "build", ok: true, diagnostics: [] }
+            ],
+            artifacts: []
+          },
+          build: {
+            kind: "build",
+            ok: true,
+            command: ["go", "build", "./..."],
+            exitCode: 0,
+            summary: "go build ./... succeeded",
+            output: ""
+          },
+          test: {
+            kind: "test",
+            ok: true,
+            command: ["go", "test", "./..."],
+            exitCode: 0,
+            summary: "go test ./... succeeded",
+            output: ""
+          }
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-activity-scaffold",
+      jobKind: "custom_contrib",
+      stepType: "scaffold_activity",
+      analysisKind: "activity_scaffold",
+      snapshotUri: ".",
+      appPath: "flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://activity-scaffold",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        activityName: "Echo Message",
+        modulePath: "example.com/acme/echo",
+        title: "Echo Message",
+        description: "Formats a greeting",
+        version: "0.1.0",
+        settings: [{ name: "prefix", type: "string", required: true }],
+        inputs: [{ name: "message", type: "string", required: true }],
+        outputs: [{ name: "message", type: "string" }]
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    const bundleArtifact = result.artifacts.find((artifact) => artifact.type === "contrib_bundle");
+    const buildArtifact = result.artifacts.find((artifact) => artifact.type === "build_log");
+    const testArtifact = result.artifacts.find((artifact) => artifact.type === "test_report");
+    const bundleMetadata = bundleArtifact?.metadata as
+      | {
+          result?: { bundle?: { packageName?: string; modulePath?: string; files?: Array<{ kind?: string }> }; validation?: { ok?: boolean }; build?: { ok?: boolean }; test?: { ok?: boolean } };
+        }
+      | undefined;
+
+    expect(result.ok).toBe(true);
+    expect(bundleArtifact).toBeDefined();
+    expect(buildArtifact).toBeDefined();
+    expect(testArtifact).toBeDefined();
+    expect(bundleMetadata?.result?.bundle?.packageName).toBe("echoactivity");
+    expect(bundleMetadata?.result?.bundle?.modulePath).toBe("example.com/acme/echo");
+    expect(bundleMetadata?.result?.bundle?.files?.some((file) => file.kind === "descriptor")).toBe(true);
+    expect(bundleMetadata?.result?.validation?.ok).toBe(true);
+    expect(bundleMetadata?.result?.build?.ok).toBe(true);
+    expect(bundleMetadata?.result?.test?.ok).toBe(true);
+  });
+
+  it("rejects invalid activity scaffold input before dispatching the helper", async () => {
+    const service = new RunnerExecutorService();
+
+    await expect(
+      service.execute({
+        taskId: "task-invalid-activity-scaffold",
+        jobKind: "custom_contrib",
+        stepType: "scaffold_activity",
+        analysisKind: "activity_scaffold",
+        snapshotUri: ".",
+        appPath: "flogo.json",
+        env: {},
+        envSecretRefs: {},
+        timeoutSeconds: 60,
+        artifactOutputUri: "memory://invalid-activity-scaffold",
+        jobTemplateName: "flogo-runner",
+        analysisPayload: {
+          activityName: "Broken Activity",
+          modulePath: "example.com/acme/broken",
+          title: "Broken Activity",
+          description: "Has an unsupported field type",
+          settings: [{ name: "payload", type: "xml" }]
+        },
+        command: [],
+        containerArgs: []
+      })
+    ).rejects.toThrow(/Unsupported activity scaffold field type/);
+  });
+
   it("executes helper-backed timer trace capture and persists timer runtime metadata", async () => {
     process.env.FLOGO_HELPER_BIN = await createHelperScript(
       JSON.stringify({

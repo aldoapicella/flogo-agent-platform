@@ -87,3 +87,53 @@ describe("TaskPlanner diagnosis mode", () => {
     expect(channelPlan.steps.some((step) => step.tool === "flogo.patchApp")).toBe(false);
   });
 });
+
+describe("TaskPlanner activity scaffold mode", () => {
+  it("treats explicit activity scaffold mode as analysis-only authoring work", () => {
+    const planner = new TaskPlanner();
+    const plan = planner.plan({
+      type: "create",
+      projectId: "demo",
+      requestedBy: "operator",
+      summary: "Scaffold a custom Flogo activity bundle",
+      inputs: {
+        mode: "activity_scaffold",
+        activityName: "Echo Message",
+        modulePath: "example.com/acme/echo"
+      },
+      constraints: {
+        allowDependencyChanges: false,
+        allowCustomCode: false,
+        targetEnv: "dev",
+        requireApproval: true
+      }
+    });
+
+    expect(plan.steps.map((step) => step.tool)).toEqual([
+      "flogo.parseApp",
+      "flogo.validateApp",
+      "runner.scaffoldActivity"
+    ]);
+  });
+
+  it("routes plain-English activity authoring prompts to the scaffold path without a mutation tail", () => {
+    const planner = new TaskPlanner();
+    const plan = planner.plan({
+      type: "create",
+      projectId: "demo",
+      requestedBy: "operator",
+      summary: "Generate a new Flogo activity bundle for a greeting formatter",
+      inputs: {},
+      constraints: {
+        allowDependencyChanges: false,
+        allowCustomCode: false,
+        targetEnv: "dev",
+        requireApproval: true
+      }
+    });
+
+    expect(plan.steps.map((step) => step.tool)).toContain("runner.scaffoldActivity");
+    expect(plan.steps.some((step) => step.tool === "flogo.patchApp")).toBe(false);
+    expect(plan.steps.some((step) => step.tool === "runner.buildApp")).toBe(false);
+  });
+});

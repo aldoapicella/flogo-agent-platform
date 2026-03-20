@@ -172,6 +172,87 @@ func TestLoadTriggerProfileDefaultsCliSingleCmd(t *testing.T) {
 	}
 }
 
+func TestScaffoldActivityGeneratesBundleAndProof(t *testing.T) {
+	response := scaffoldActivity(activityScaffoldRequest{
+		ActivityName: "Echo Message",
+		ModulePath:   "example.com/acme/echo",
+		Title:        "Echo Message",
+		Description:  "Formats a greeting for a flow.",
+		Version:      "0.1.0",
+		Settings: []contribField{
+			{Name: "prefix", Type: "string", Required: true},
+		},
+		Inputs: []contribField{
+			{Name: "message", Type: "string", Required: true},
+		},
+		Outputs: []contribField{
+			{Name: "message", Type: "string"},
+		},
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	if result.Bundle.Kind != "activity" {
+		t.Fatalf("expected activity bundle kind, got %+v", result.Bundle)
+	}
+	if result.Bundle.PackageName != "echo_message" {
+		t.Fatalf("expected sanitized package name, got %+v", result.Bundle)
+	}
+	if result.Bundle.ModulePath != "example.com/acme/echo" {
+		t.Fatalf("expected module path to round-trip, got %+v", result.Bundle)
+	}
+	if result.Bundle.Descriptor.Type != "activity" || result.Bundle.Descriptor.Ref != "example.com/acme/echo" {
+		t.Fatalf("expected scaffold descriptor metadata, got %+v", result.Bundle.Descriptor)
+	}
+	if len(result.Bundle.Files) != 6 {
+		t.Fatalf("expected six generated files, got %+v", result.Bundle.Files)
+	}
+	if !generatedFileKindsInclude(result.Bundle.Files, "descriptor", "implementation", "metadata", "test", "module", "readme") {
+		t.Fatalf("expected all scaffold file kinds, got %+v", result.Bundle.Files)
+	}
+	if !result.Validation.Ok {
+		t.Fatalf("expected scaffold validation to pass, got %+v", result.Validation)
+	}
+	if !result.Test.Ok {
+		t.Fatalf("expected isolated go test proof to pass, got %+v", result.Test)
+	}
+	if !result.Build.Ok {
+		t.Fatalf("expected isolated go build proof to pass, got %+v", result.Build)
+	}
+	if !strings.Contains(generatedFileContent(result.Bundle.Files, "descriptor"), "\"type\": \"flogo:activity\"") {
+		t.Fatalf("expected descriptor.json scaffold content, got %+v", result.Bundle.Files)
+	}
+	if !strings.Contains(generatedFileContent(result.Bundle.Files, "metadata"), "type Input struct") {
+		t.Fatalf("expected metadata.go scaffold content, got %+v", result.Bundle.Files)
+	}
+	if !strings.Contains(generatedFileContent(result.Bundle.Files, "implementation"), "type Activity struct") {
+		t.Fatalf("expected activity.go scaffold content, got %+v", result.Bundle.Files)
+	}
+}
+
+func TestValidateActivityScaffoldRequestRejectsUnsupportedFieldTypes(t *testing.T) {
+	err := validateActivityScaffoldRequest(activityScaffoldRequest{
+		ActivityName: "Broken Activity",
+		ModulePath:   "example.com/acme/broken",
+		Title:        "Broken Activity",
+		Description:  "Uses an unsupported field type.",
+		Inputs: []contribField{
+			{Name: "payload", Type: "xml"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected scaffold validation to fail on unsupported field types")
+	}
+	if !strings.Contains(err.Error(), "unsupported activity scaffold field type") {
+		t.Fatalf("expected unsupported field type error, got %v", err)
+	}
+}
+
 func TestTraceFlowDistinguishesRuntimeBackedAndSimulatedPaths(t *testing.T) {
 	t.Run("runtime-backed direct trace", func(t *testing.T) {
 		app := runtimeBackedTraceTestApp()
@@ -2745,4 +2826,26 @@ func controlFlowValidationTestApp() flogoApp {
 		Settings:    map[string]any{},
 	})
 	return app
+}
+
+func generatedFileKindsInclude(files []generatedContribFile, expectedKinds ...string) bool {
+	seen := map[string]bool{}
+	for _, file := range files {
+		seen[file.Kind] = true
+	}
+	for _, kind := range expectedKinds {
+		if !seen[kind] {
+			return false
+		}
+	}
+	return true
+}
+
+func generatedFileContent(files []generatedContribFile, kind string) string {
+	for _, file := range files {
+		if file.Kind == kind {
+			return file.Content
+		}
+	}
+	return ""
 }

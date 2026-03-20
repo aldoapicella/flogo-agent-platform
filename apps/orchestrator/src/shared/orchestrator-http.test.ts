@@ -86,8 +86,63 @@ describe("orchestrator-http", () => {
 
     expect(spec.jobKind).toBe("diagnosis");
     expect(spec.analysisKind).toBe("diagnosis");
-    expect(spec.analysisPayload?.symptom).toBe("wrong_response");
+    expect(spec.analysisPayload?.symptom).toBe("unexpected_output");
     expect(spec.analysisPayload?.triggerFamily).toBe("rest");
     expect(spec.analysisPayload?.flowId).toBe("hello");
+  });
+
+  it("routes activity scaffold mode to the custom contribution runner step", () => {
+    const start: OrchestratorStartRequest = {
+      taskId: "task-activity-scaffold",
+      request: {
+        type: "create",
+        projectId: "demo",
+        requestedBy: "operator",
+        summary: "Scaffold an activity bundle",
+        inputs: {
+          mode: "activity_scaffold",
+          activityName: "Echo Message",
+          modulePath: "example.com/acme/echo",
+          packageName: "echoactivity",
+          title: "Echo Message",
+          description: "Formats a greeting",
+          version: "0.1.0",
+          homepage: "https://example.com/echo",
+          usage: "Use this activity to format greetings.",
+          settings: [{ name: "prefix", type: "string", required: true }],
+          inputs: [{ name: "message", type: "string", required: true }],
+          outputs: [{ name: "message", type: "string" }]
+        },
+        constraints: {
+          allowDependencyChanges: false,
+          allowCustomCode: false,
+          targetEnv: "dev",
+          requireApproval: true
+        }
+      },
+      requiredApprovals: [],
+      planSummary: "Scaffold activity bundle",
+      steps: []
+    };
+
+    expect(resolveWorkflowRunnerSteps(start)).toEqual(["scaffold_activity"]);
+
+    const spec = buildRunnerJobSpec(start, "scaffold_activity");
+
+    expect(spec.jobKind).toBe("custom_contrib");
+    expect(spec.analysisKind).toBe("activity_scaffold");
+    expect(spec.analysisPayload).toMatchObject({
+      activityName: "Echo Message",
+      modulePath: "example.com/acme/echo",
+      packageName: "echoactivity",
+      title: "Echo Message",
+      description: "Formats a greeting",
+      version: "0.1.0",
+      homepage: "https://example.com/echo",
+      usage: "Use this activity to format greetings."
+    });
+    expect(spec.analysisPayload?.settings).toEqual([{ name: "prefix", type: "string", required: true }]);
+    expect(spec.analysisPayload?.inputs).toEqual([{ name: "message", type: "string", required: true }]);
+    expect(spec.analysisPayload?.outputs).toEqual([{ name: "message", type: "string" }]);
   });
 });

@@ -63,6 +63,7 @@ Important analysis-only modes:
 - `inputs.mode = "run_comparison_plan"`
 - `inputs.mode = "run_comparison"`
 - `inputs.mode = "diagnosis"`
+- `inputs.mode = "activity_scaffold"`
 - `inputs.mode = "mapping_preview"`
 - `inputs.mode = "mapping_test"`
 - `inputs.mode = "property_plan"`
@@ -143,6 +144,32 @@ Important behavior:
 - diagnosis output is recommendation-oriented only; it does not auto-apply code changes in this slice,
 - confidence and evidence quality explicitly distinguish runtime-backed, simulated-fallback, artifact-backed, and mixed proof quality,
 - confidence is calibrated down when the proof path is fallback-only, mixed, artifact-backed-only, contract-inference-only, or otherwise incomplete.
+
+### Activity scaffold task mode
+
+Uses the existing task endpoint with `inputs.mode = "activity_scaffold"` to scaffold one reviewable Flogo Activity bundle and run isolated Go build/test proof against that generated bundle.
+
+Important input fields:
+
+- `activityName`
+- `modulePath`
+- `packageName?`
+- `title`
+- `description`
+- `version?`
+- `homepage?`
+- `settings[]`
+- `inputs[]`
+- `outputs[]`
+- `usage?`
+
+Important behavior:
+
+- activity scaffolding is analysis-oriented and does not install the generated bundle into an app in this slice,
+- the planner routes the task to a single runner `scaffold_activity` step,
+- the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path,
+- supported field types are currently limited to `string`, `integer`, `number`, `boolean`, `object`, `array`, and `any`,
+- this slice covers Activity authoring only; trigger/action scaffolding and packaging/install workflows remain later work.
 
 ### `GET /v1/tasks`
 

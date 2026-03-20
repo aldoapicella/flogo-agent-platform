@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -322,6 +323,57 @@ type validationReport struct {
 	Stages    []validationStageResult `json:"stages"`
 	Summary   string                  `json:"summary"`
 	Artifacts []map[string]any        `json:"artifacts"`
+}
+
+type activityScaffoldRequest struct {
+	ActivityName string         `json:"activityName"`
+	ModulePath   string         `json:"modulePath"`
+	PackageName  string         `json:"packageName,omitempty"`
+	Title        string         `json:"title"`
+	Description  string         `json:"description"`
+	Version      string         `json:"version"`
+	Homepage     string         `json:"homepage,omitempty"`
+	Settings     []contribField `json:"settings"`
+	Inputs       []contribField `json:"inputs"`
+	Outputs      []contribField `json:"outputs"`
+	Usage        string         `json:"usage,omitempty"`
+}
+
+type generatedContribFile struct {
+	Path    string `json:"path"`
+	Kind    string `json:"kind"`
+	Bytes   int    `json:"bytes"`
+	Content string `json:"content,omitempty"`
+}
+
+type contribProofStep struct {
+	Kind     string   `json:"kind"`
+	Ok       bool     `json:"ok"`
+	Command  []string `json:"command"`
+	ExitCode int      `json:"exitCode"`
+	Summary  string   `json:"summary"`
+	Output   string   `json:"output"`
+}
+
+type activityScaffoldBundle struct {
+	Kind        string                 `json:"kind"`
+	ModulePath  string                 `json:"modulePath"`
+	PackageName string                 `json:"packageName"`
+	BundleRoot  string                 `json:"bundleRoot"`
+	Descriptor  contribDescriptor      `json:"descriptor"`
+	Files       []generatedContribFile `json:"files"`
+	ReadmePath  string                 `json:"readmePath,omitempty"`
+}
+
+type activityScaffoldResult struct {
+	Bundle     activityScaffoldBundle `json:"bundle"`
+	Validation validationReport       `json:"validation"`
+	Build      contribProofStep       `json:"build"`
+	Test       contribProofStep       `json:"test"`
+}
+
+type activityScaffoldResponse struct {
+	Result activityScaffoldResult `json:"result"`
 }
 
 type runTraceCaptureOptions struct {
@@ -2647,10 +2699,19 @@ var supportedRuntimeActivityRefs = map[string]bool{
 
 func main() {
 	if len(os.Args) < 3 {
-		fail("expected a command such as 'catalog contribs', 'inspect descriptor', or 'preview mapping'")
+		fail("expected a command such as 'catalog contribs', 'inspect descriptor', 'preview mapping', or 'contrib scaffold-activity'")
 	}
 
 	command := strings.Join(os.Args[1:3], " ")
+	if command == "contrib scaffold-activity" {
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(scaffoldActivity(loadActivityScaffoldRequest(requestPath)))
+		return
+	}
+
 	appPath := lookupFlag("--app")
 	if appPath == "" {
 		fail("missing required --app flag")
@@ -2894,6 +2955,558 @@ func loadExpectedOutput(inputPath string) map[string]any {
 	}
 
 	return expected
+}
+
+func loadActivityScaffoldRequest(inputPath string) activityScaffoldRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var request activityScaffoldRequest
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+	if request.Version == "" {
+		request.Version = "0.0.1"
+	}
+	if request.Settings == nil {
+		request.Settings = []contribField{}
+	}
+	if request.Inputs == nil {
+		request.Inputs = []contribField{}
+	}
+	if request.Outputs == nil {
+		request.Outputs = []contribField{}
+	}
+
+	return request
+}
+
+const scaffoldedActivityCoreVersion = "v1.6.17"
+const scaffoldedActivityGoVersion = "1.24.0"
+
+func scaffoldActivity(request activityScaffoldRequest) activityScaffoldResponse {
+	if err := validateActivityScaffoldRequest(request); err != nil {
+		fail(err.Error())
+	}
+
+	packageName := sanitizePackageName(valueOrFallback(request.PackageName, request.ActivityName))
+	descriptor := buildScaffoldedActivityDescriptor(request, packageName)
+	bundleRoot, err := os.MkdirTemp("", fmt.Sprintf("flogo-activity-%s-", packageName))
+	if err != nil {
+		fail(err.Error())
+	}
+
+	files, err := writeScaffoldedActivityFiles(bundleRoot, request, descriptor, packageName)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	prepareProof := runGoContributionCommand(bundleRoot, "mod", "tidy")
+	testProof := runGoContributionCommand(bundleRoot, "test", "./...")
+	buildProof := runGoContributionCommand(bundleRoot, "build", "./...")
+	validation := buildActivityScaffoldValidation(prepareProof, testProof, buildProof)
+
+	return activityScaffoldResponse{
+		Result: activityScaffoldResult{
+			Bundle: activityScaffoldBundle{
+				Kind:        "activity",
+				ModulePath:  strings.TrimSpace(request.ModulePath),
+				PackageName: packageName,
+				BundleRoot:  bundleRoot,
+				Descriptor:  descriptor,
+				Files:       files,
+				ReadmePath:  filepath.ToSlash(filepath.Join(bundleRoot, "README.md")),
+			},
+			Validation: validation,
+			Build:      buildProof,
+			Test:       testProof,
+		},
+	}
+}
+
+func validateActivityScaffoldRequest(request activityScaffoldRequest) error {
+	problems := []string{}
+	if strings.TrimSpace(request.ActivityName) == "" {
+		problems = append(problems, "activityName is required")
+	}
+	if strings.TrimSpace(request.ModulePath) == "" {
+		problems = append(problems, "modulePath is required")
+	}
+	if strings.TrimSpace(request.Title) == "" {
+		problems = append(problems, "title is required")
+	}
+	if strings.TrimSpace(request.Description) == "" {
+		problems = append(problems, "description is required")
+	}
+
+	for _, group := range []struct {
+		name   string
+		fields []contribField
+	}{
+		{name: "settings", fields: request.Settings},
+		{name: "inputs", fields: request.Inputs},
+		{name: "outputs", fields: request.Outputs},
+	} {
+		for _, field := range group.fields {
+			if strings.TrimSpace(field.Name) == "" {
+				problems = append(problems, fmt.Sprintf("%s field names must be non-empty", group.name))
+			}
+			switch normalizeScaffoldFieldType(field.Type) {
+			case "string", "integer", "number", "boolean", "object", "array", "any":
+			default:
+				problems = append(problems, fmt.Sprintf("unsupported activity scaffold field type %q in %s", field.Type, group.name))
+			}
+		}
+	}
+
+	if len(problems) > 0 {
+		return fmt.Errorf("%s", strings.Join(problems, "; "))
+	}
+
+	return nil
+}
+
+func buildScaffoldedActivityDescriptor(request activityScaffoldRequest, packageName string) contribDescriptor {
+	descriptorName := slugify(valueOrFallback(request.ActivityName, packageName))
+	return contribDescriptor{
+		Ref:      strings.TrimSpace(request.ModulePath),
+		Alias:    packageName,
+		Type:     "activity",
+		Name:     descriptorName,
+		Version:  valueOrFallback(strings.TrimSpace(request.Version), "0.0.1"),
+		Title:    strings.TrimSpace(request.Title),
+		Settings: request.Settings,
+		Inputs:   request.Inputs,
+		Outputs:  request.Outputs,
+		Examples: []string{fmt.Sprintf("Import %q and use %q in your Flogo app.", strings.TrimSpace(request.ModulePath), descriptorName)},
+		Source:   "activity_scaffold",
+		CompatibilityNotes: []string{
+			"Generated by the Phase 4.1 activity scaffold foundation.",
+			"Review the generated Eval logic before installing the activity into an application.",
+		},
+	}
+}
+
+func writeScaffoldedActivityFiles(bundleRoot string, request activityScaffoldRequest, descriptor contribDescriptor, packageName string) ([]generatedContribFile, error) {
+	if err := os.MkdirAll(bundleRoot, 0o755); err != nil {
+		return nil, err
+	}
+
+	files := []generatedContribFile{}
+	write := func(relPath string, kind string, content string) error {
+		fullPath := filepath.Join(bundleRoot, relPath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+			return err
+		}
+		files = append(files, generatedContribFile{
+			Path:    filepath.ToSlash(fullPath),
+			Kind:    kind,
+			Bytes:   len(content),
+			Content: content,
+		})
+		return nil
+	}
+
+	if err := write("descriptor.json", "descriptor", renderActivityDescriptorJSON(request, descriptor)); err != nil {
+		return nil, err
+	}
+	if err := write("go.mod", "module", renderActivityGoMod(request)); err != nil {
+		return nil, err
+	}
+	if err := write("metadata.go", "metadata", renderActivityMetadata(request, packageName)); err != nil {
+		return nil, err
+	}
+	if err := write("activity.go", "implementation", renderActivityImplementation(request, packageName)); err != nil {
+		return nil, err
+	}
+	if err := write("activity_test.go", "test", renderActivityTest(request, packageName)); err != nil {
+		return nil, err
+	}
+	if err := write("README.md", "readme", renderActivityReadme(request, descriptor, packageName)); err != nil {
+		return nil, err
+	}
+
+	return files, nil
+}
+
+func renderActivityDescriptorJSON(request activityScaffoldRequest, descriptor contribDescriptor) string {
+	payload := map[string]any{
+		"name":        descriptor.Name,
+		"type":        "flogo:activity",
+		"version":     descriptor.Version,
+		"title":       descriptor.Title,
+		"description": strings.TrimSpace(request.Description),
+		"settings":    descriptor.Settings,
+		"input":       descriptor.Inputs,
+		"output":      descriptor.Outputs,
+	}
+	if request.Homepage != "" {
+		payload["homepage"] = strings.TrimSpace(request.Homepage)
+	}
+
+	bytes, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		fail(err.Error())
+	}
+	return string(bytes) + "\n"
+}
+
+func renderActivityGoMod(request activityScaffoldRequest) string {
+	return fmt.Sprintf("module %s\n\ngo %s\n\nrequire github.com/project-flogo/core %s\n",
+		strings.TrimSpace(request.ModulePath),
+		scaffoldedActivityGoVersion,
+		scaffoldedActivityCoreVersion,
+	)
+}
+
+func renderActivityMetadata(request activityScaffoldRequest, packageName string) string {
+	useCoerce := len(request.Inputs) > 0 || len(request.Outputs) > 0
+	var builder strings.Builder
+	builder.WriteString("package " + packageName + "\n\n")
+	if useCoerce {
+		builder.WriteString("import \"github.com/project-flogo/core/data/coerce\"\n\n")
+	}
+
+	builder.WriteString(renderMetadataStruct("Settings", request.Settings))
+	builder.WriteString("\n")
+	builder.WriteString(renderMetadataStruct("Input", request.Inputs))
+	builder.WriteString("\n")
+	builder.WriteString(renderFromMapMethod("Input", "r", request.Inputs))
+	builder.WriteString("\n")
+	builder.WriteString(renderToMapMethod("Input", "r", request.Inputs))
+	builder.WriteString("\n")
+	builder.WriteString(renderMetadataStruct("Output", request.Outputs))
+	builder.WriteString("\n")
+	builder.WriteString(renderFromMapMethod("Output", "o", request.Outputs))
+	builder.WriteString("\n")
+	builder.WriteString(renderToMapMethod("Output", "o", request.Outputs))
+
+	return builder.String()
+}
+
+func renderMetadataStruct(structName string, fields []contribField) string {
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("type %s struct {\n", structName))
+	for _, field := range fields {
+		builder.WriteString(fmt.Sprintf("\t%s %s `%s`\n",
+			exportedIdentifier(field.Name),
+			goTypeForField(field),
+			metadataTag(field),
+		))
+	}
+	builder.WriteString("}\n")
+	return builder.String()
+}
+
+func renderFromMapMethod(structName string, receiver string, fields []contribField) string {
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("func (%s *%s) FromMap(values map[string]interface{}) error {\n", receiver, structName))
+	if len(fields) == 0 {
+		builder.WriteString("\treturn nil\n}\n")
+		return builder.String()
+	}
+	for index, field := range fields {
+		goField := exportedIdentifier(field.Name)
+		valueName := fmt.Sprintf("value%d", index)
+		if normalizeScaffoldFieldType(field.Type) == "any" {
+			builder.WriteString(fmt.Sprintf("\t%s.%s = values[%q]\n", receiver, goField, field.Name))
+			continue
+		}
+		builder.WriteString(fmt.Sprintf("\t%s, err := %s(values[%q])\n", valueName, coerceFuncForField(field), field.Name))
+		builder.WriteString("\tif err != nil {\n\t\treturn err\n\t}\n")
+		builder.WriteString(fmt.Sprintf("\t%s.%s = %s\n", receiver, goField, valueName))
+	}
+	builder.WriteString("\treturn nil\n}\n")
+	return builder.String()
+}
+
+func renderToMapMethod(structName string, receiver string, fields []contribField) string {
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("func (%s *%s) ToMap() map[string]interface{} {\n", receiver, structName))
+	builder.WriteString("\treturn map[string]interface{}{\n")
+	for _, field := range fields {
+		builder.WriteString(fmt.Sprintf("\t\t%q: %s.%s,\n", field.Name, receiver, exportedIdentifier(field.Name)))
+	}
+	builder.WriteString("\t}\n}\n")
+	return builder.String()
+}
+
+func renderActivityImplementation(request activityScaffoldRequest, packageName string) string {
+	var builder strings.Builder
+	builder.WriteString("package " + packageName + "\n\n")
+	builder.WriteString("import (\n")
+	builder.WriteString("\t\"github.com/project-flogo/core/activity\"\n")
+	builder.WriteString("\t\"github.com/project-flogo/core/data/metadata\"\n")
+	builder.WriteString(")\n\n")
+	builder.WriteString("func init() {\n")
+	builder.WriteString("\t_ = activity.Register(&Activity{}, New)\n")
+	builder.WriteString("}\n\n")
+	builder.WriteString("var activityMd = activity.ToMetadata(&Settings{}, &Input{}, &Output{})\n\n")
+	builder.WriteString("// New creates one activity instance per configured handler.\n")
+	builder.WriteString("func New(ctx activity.InitContext) (activity.Activity, error) {\n")
+	builder.WriteString("\tsettings := &Settings{}\n")
+	builder.WriteString("\tif err := metadata.MapToStruct(ctx.Settings(), settings, true); err != nil {\n")
+	builder.WriteString("\t\treturn nil, err\n\t}\n")
+	builder.WriteString("\treturn &Activity{}, nil\n")
+	builder.WriteString("}\n\n")
+	builder.WriteString("// Activity is a scaffolded Flogo activity. Review Eval before production use.\n")
+	builder.WriteString("type Activity struct{}\n\n")
+	builder.WriteString("func (a *Activity) Metadata() *activity.Metadata {\n")
+	builder.WriteString("\treturn activityMd\n")
+	builder.WriteString("}\n\n")
+	builder.WriteString("func (a *Activity) Eval(ctx activity.Context) (done bool, err error) {\n")
+	builder.WriteString("\tinput := &Input{}\n")
+	builder.WriteString("\tif err = ctx.GetInputObject(input); err != nil {\n")
+	builder.WriteString("\t\treturn true, err\n\t}\n")
+	builder.WriteString("\toutput := &Output{}\n")
+	builder.WriteString("\tif err = ctx.SetOutputObject(output); err != nil {\n")
+	builder.WriteString("\t\treturn true, err\n\t}\n")
+	builder.WriteString("\treturn true, nil\n")
+	builder.WriteString("}\n")
+	return builder.String()
+}
+
+func renderActivityTest(request activityScaffoldRequest, packageName string) string {
+	var builder strings.Builder
+	builder.WriteString("package " + packageName + "\n\n")
+	builder.WriteString("import (\n")
+	builder.WriteString("\t\"testing\"\n\n")
+	builder.WriteString("\t\"github.com/project-flogo/core/activity\"\n")
+	builder.WriteString("\t\"github.com/project-flogo/core/support/test\"\n")
+	builder.WriteString(")\n\n")
+	builder.WriteString("func TestRegister(t *testing.T) {\n")
+	builder.WriteString("\tref := activity.GetRef(&Activity{})\n")
+	builder.WriteString("\tif activity.Get(ref) == nil {\n")
+	builder.WriteString("\t\tt.Fatalf(\"expected activity %s to be registered\", ref)\n\t}\n")
+	builder.WriteString("}\n\n")
+	builder.WriteString("func TestEval(t *testing.T) {\n")
+	builder.WriteString("\tact := &Activity{}\n")
+	builder.WriteString("\ttc := test.NewActivityContext(act.Metadata())\n")
+	builder.WriteString("\tinput := &Input{\n")
+	for _, field := range request.Inputs {
+		builder.WriteString(fmt.Sprintf("\t\t%s: %s,\n", exportedIdentifier(field.Name), goLiteralForField(field)))
+	}
+	builder.WriteString("\t}\n")
+	builder.WriteString("\tif err := tc.SetInputObject(input); err != nil {\n")
+	builder.WriteString("\t\tt.Fatalf(\"set input: %v\", err)\n\t}\n")
+	builder.WriteString("\tdone, err := act.Eval(tc)\n")
+	builder.WriteString("\tif err != nil {\n")
+	builder.WriteString("\t\tt.Fatalf(\"eval: %v\", err)\n\t}\n")
+	builder.WriteString("\tif !done {\n")
+	builder.WriteString("\t\tt.Fatal(\"expected Eval to report done\")\n\t}\n")
+	builder.WriteString("\toutput := &Output{}\n")
+	builder.WriteString("\tif err := tc.GetOutputObject(output); err != nil {\n")
+	builder.WriteString("\t\tt.Fatalf(\"get output: %v\", err)\n\t}\n")
+	builder.WriteString("}\n")
+	return builder.String()
+}
+
+func renderActivityReadme(request activityScaffoldRequest, descriptor contribDescriptor, packageName string) string {
+	var builder strings.Builder
+	builder.WriteString("# " + valueOrFallback(strings.TrimSpace(request.Title), request.ActivityName) + "\n\n")
+	builder.WriteString(strings.TrimSpace(request.Description) + "\n\n")
+	builder.WriteString("## Generated bundle\n\n")
+	builder.WriteString("- module path: `" + strings.TrimSpace(request.ModulePath) + "`\n")
+	builder.WriteString("- package name: `" + packageName + "`\n")
+	builder.WriteString("- activity ref: `" + descriptor.Ref + "`\n")
+	builder.WriteString("- version: `" + descriptor.Version + "`\n\n")
+	builder.WriteString("## Files\n\n")
+	builder.WriteString("- `descriptor.json`\n")
+	builder.WriteString("- `go.mod`\n")
+	builder.WriteString("- `metadata.go`\n")
+	builder.WriteString("- `activity.go`\n")
+	builder.WriteString("- `activity_test.go`\n\n")
+	builder.WriteString("## Review note\n\n")
+	builder.WriteString("This is a scaffold foundation bundle. Review `Eval` and metadata before publishing or wiring it into an app.\n")
+	return builder.String()
+}
+
+func runGoContributionCommand(dir string, args ...string) contribProofStep {
+	command := append([]string{"go"}, args...)
+	cmd := exec.Command("go", args...)
+	cmd.Dir = dir
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	exitCode := 0
+	if err != nil {
+		exitCode = 1
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+	output := strings.TrimSpace(stdout.String())
+	if stderr.String() != "" {
+		if output != "" {
+			output += "\n"
+		}
+		output += strings.TrimSpace(stderr.String())
+	}
+	kind := "build"
+	if len(args) > 0 && args[0] == "test" {
+		kind = "test"
+	}
+	summary := fmt.Sprintf("go %s succeeded", strings.Join(args, " "))
+	if err != nil {
+		summary = fmt.Sprintf("go %s failed", strings.Join(args, " "))
+	}
+	return contribProofStep{
+		Kind:     kind,
+		Ok:       err == nil,
+		Command:  command,
+		ExitCode: exitCode,
+		Summary:  summary,
+		Output:   output,
+	}
+}
+
+func buildActivityScaffoldValidation(prepareProof contribProofStep, testProof contribProofStep, buildProof contribProofStep) validationReport {
+	stages := []validationStageResult{
+		{Stage: "structural", Ok: prepareProof.Ok, Diagnostics: diagnosticsForProof(prepareProof, "flogo.contrib.activity.module_prepare_failed")},
+		{Stage: "regression", Ok: testProof.Ok, Diagnostics: diagnosticsForProof(testProof, "flogo.contrib.activity.test_failed")},
+		{Stage: "build", Ok: buildProof.Ok, Diagnostics: diagnosticsForProof(buildProof, "flogo.contrib.activity.build_failed")},
+	}
+	ok := prepareProof.Ok && buildProof.Ok && testProof.Ok
+	summary := "Activity scaffold generated and passed isolated go test/build proof."
+	if !ok {
+		summary = "Activity scaffold generated but isolated go test/build proof failed."
+	}
+	return validationReport{
+		Ok:        ok,
+		Stages:    stages,
+		Summary:   summary,
+		Artifacts: []map[string]any{},
+	}
+}
+
+func diagnosticsForProof(step contribProofStep, code string) []diagnostic {
+	if step.Ok {
+		return []diagnostic{}
+	}
+	return []diagnostic{{
+		Code:     code,
+		Message:  step.Summary,
+		Severity: "error",
+		Details: map[string]any{
+			"command": step.Command,
+			"output":  step.Output,
+		},
+	}}
+}
+
+func metadataTag(field contribField) string {
+	if field.Required {
+		return fmt.Sprintf("md:\"%s,required\"", field.Name)
+	}
+	return fmt.Sprintf("md:\"%s\"", field.Name)
+}
+
+func normalizeScaffoldFieldType(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return "any"
+	}
+	return normalized
+}
+
+func goTypeForField(field contribField) string {
+	switch normalizeScaffoldFieldType(field.Type) {
+	case "string":
+		return "string"
+	case "integer":
+		return "int"
+	case "number":
+		return "float64"
+	case "boolean":
+		return "bool"
+	case "object":
+		return "map[string]interface{}"
+	case "array":
+		return "[]interface{}"
+	default:
+		return "interface{}"
+	}
+}
+
+func coerceFuncForField(field contribField) string {
+	switch normalizeScaffoldFieldType(field.Type) {
+	case "string":
+		return "coerce.ToString"
+	case "integer":
+		return "coerce.ToInt"
+	case "number":
+		return "coerce.ToFloat64"
+	case "boolean":
+		return "coerce.ToBool"
+	case "object":
+		return "coerce.ToObject"
+	case "array":
+		return "coerce.ToArray"
+	default:
+		return ""
+	}
+}
+
+func goLiteralForField(field contribField) string {
+	switch normalizeScaffoldFieldType(field.Type) {
+	case "string":
+		return "\"sample\""
+	case "integer":
+		return "7"
+	case "number":
+		return "7.5"
+	case "boolean":
+		return "true"
+	case "object":
+		return "map[string]interface{}{\"sample\": \"value\"}"
+	case "array":
+		return "[]interface{}{\"sample\"}"
+	default:
+		return "\"sample\""
+	}
+}
+
+func sanitizePackageName(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(normalized, "_")
+	normalized = strings.Trim(normalized, "_")
+	if normalized == "" {
+		return "activity"
+	}
+	if normalized[0] >= '0' && normalized[0] <= '9' {
+		return "activity_" + normalized
+	}
+	return normalized
+}
+
+func exportedIdentifier(value string) string {
+	parts := regexp.MustCompile(`[^a-zA-Z0-9]+`).Split(strings.TrimSpace(value), -1)
+	var builder strings.Builder
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		lower := strings.ToLower(part)
+		builder.WriteString(strings.ToUpper(lower[:1]))
+		if len(lower) > 1 {
+			builder.WriteString(lower[1:])
+		}
+	}
+	identifier := builder.String()
+	if identifier == "" {
+		return "Field"
+	}
+	if identifier[0] >= '0' && identifier[0] <= '9' {
+		return "Field" + identifier
+	}
+	return identifier
 }
 
 func loadTriggerProfile(inputPath string) triggerProfile {

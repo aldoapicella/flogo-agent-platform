@@ -63,6 +63,7 @@ function getAnalysisMode(
   | "inventory"
   | "catalog"
   | "contrib_evidence"
+  | "activity_scaffold"
   | "mapping_preview"
   | "mapping_test"
   | "property_plan"
@@ -88,6 +89,7 @@ function getAnalysisMode(
     mode === "inventory" ||
     mode === "catalog" ||
     mode === "contrib_evidence" ||
+    mode === "activity_scaffold" ||
     mode === "mapping_preview" ||
     mode === "mapping_test" ||
     mode === "property_plan" ||
@@ -174,6 +176,8 @@ export class TaskPlanner {
       steps.push({ id: "catalog", label: "Catalog Flogo contributions and descriptors", tool: "runner.catalogContribs" });
     } else if (analysisMode === "contrib_evidence") {
       steps.push({ id: "evidence", label: "Inspect contribution evidence quality", tool: "runner.inspectContribEvidence" });
+    } else if (analysisMode === "activity_scaffold") {
+      steps.push({ id: "activity-scaffold", label: "Scaffold a custom Flogo activity bundle with isolated build/test proof", tool: "runner.scaffoldActivity" });
     } else if (analysisMode === "mapping_preview") {
       steps.push({ id: "mapping", label: "Preview mappings and suggest coercions", tool: "runner.previewMapping" });
       steps.push({ id: "properties", label: "Plan app properties and environment usage", tool: "flogo.planProperties" });
@@ -252,6 +256,15 @@ export class TaskPlanner {
 
       if (/(trigger|activity|action|contrib|descriptor|catalog)/i.test(summary)) {
         steps.push({ id: "catalog", label: "Catalog Flogo contributions and descriptors", tool: "runner.catalogContribs" });
+      }
+
+      if (/(scaffold activity|custom activity|author activity|new flogo activity|generate activity bundle)/i.test(summary)) {
+        steps.push({
+          id: "activity-scaffold",
+          label: "Scaffold a custom Flogo activity bundle with isolated build/test proof",
+          tool: "runner.scaffoldActivity"
+        });
+        skipMutationTail = true;
       }
 
       if (/(evidence|confidence|package metadata proof|contrib proof)/i.test(summary)) {

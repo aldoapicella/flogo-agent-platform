@@ -474,6 +474,77 @@ export const ContribDescriptorResponseSchema = z.object({
 });
 export type ContribDescriptorResponse = z.infer<typeof ContribDescriptorResponseSchema>;
 
+export const ActivityScaffoldRequestSchema = z.object({
+  activityName: z.string().min(1),
+  modulePath: z.string().min(1),
+  packageName: z.string().min(1).optional(),
+  title: z.string().min(1),
+  description: z.string().min(1),
+  version: z.string().min(1).default("0.0.1"),
+  homepage: z.string().min(1).optional(),
+  settings: z.array(ContribFieldSchema).default([]),
+  inputs: z.array(ContribFieldSchema).default([]),
+  outputs: z.array(ContribFieldSchema).default([]),
+  usage: z.string().optional()
+}).superRefine((value, ctx) => {
+  const supportedTypes = new Set(["string", "integer", "number", "boolean", "object", "array", "any"]);
+  for (const [group, fields] of [["settings", value.settings], ["inputs", value.inputs], ["outputs", value.outputs]] as const) {
+    fields.forEach((field, index) => {
+      const normalized = (field.type ?? "any").trim().toLowerCase();
+      if (!supportedTypes.has(normalized)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Unsupported activity scaffold field type ${JSON.stringify(field.type)}. Supported types: string, integer, number, boolean, object, array, any.`,
+          path: [group, index, "type"]
+        });
+      }
+    });
+  }
+});
+export type ActivityScaffoldRequest = z.infer<typeof ActivityScaffoldRequestSchema>;
+
+export const ContribGeneratedFileSchema = z.object({
+  path: z.string(),
+  kind: z.enum(["descriptor", "metadata", "implementation", "test", "module", "readme"]),
+  bytes: z.number().int().nonnegative(),
+  content: z.string().optional()
+});
+export type ContribGeneratedFile = z.infer<typeof ContribGeneratedFileSchema>;
+
+export const ContribProofStepSchema = z.object({
+  kind: z.enum(["build", "test"]),
+  ok: z.boolean(),
+  command: z.array(z.string()).default([]),
+  exitCode: z.number().int(),
+  summary: z.string(),
+  output: z.string().default("")
+});
+export type ContribProofStep = z.infer<typeof ContribProofStepSchema>;
+
+export const ActivityScaffoldBundleSchema = z.object({
+  kind: z.literal("activity"),
+  modulePath: z.string(),
+  packageName: z.string(),
+  bundleRoot: z.string(),
+  descriptor: ContribDescriptorSchema,
+  files: z.array(ContribGeneratedFileSchema).default([]),
+  readmePath: z.string().optional()
+});
+export type ActivityScaffoldBundle = z.infer<typeof ActivityScaffoldBundleSchema>;
+
+export const ActivityScaffoldResultSchema = z.object({
+  bundle: ActivityScaffoldBundleSchema,
+  validation: ValidationReportSchema,
+  build: ContribProofStepSchema,
+  test: ContribProofStepSchema
+});
+export type ActivityScaffoldResult = z.infer<typeof ActivityScaffoldResultSchema>;
+
+export const ActivityScaffoldResponseSchema = z.object({
+  result: ActivityScaffoldResultSchema
+});
+export type ActivityScaffoldResponse = z.infer<typeof ActivityScaffoldResponseSchema>;
+
 export const MappingKindSchema = z.enum(["literal", "expression", "object", "array"]);
 export type MappingKind = z.infer<typeof MappingKindSchema>;
 
@@ -1824,6 +1895,7 @@ export const RunnerStepTypeSchema = z.enum([
   "plan_properties",
   "validate_governance",
   "compare_composition",
+  "scaffold_activity",
   "diagnose_app"
 ]);
 export type RunnerStepType = z.infer<typeof RunnerStepTypeSchema>;
@@ -1852,6 +1924,7 @@ export const RunnerJobKindSchema = z.enum([
   "property_plan",
   "governance",
   "composition_compare",
+  "activity_scaffold",
   "diagnosis"
 ]);
 export type RunnerJobKind = z.infer<typeof RunnerJobKindSchema>;
@@ -1879,6 +1952,7 @@ export const AnalysisKindSchema = z.enum([
   "property_plan",
   "governance",
   "composition_compare",
+  "activity_scaffold",
   "diagnosis"
 ]);
 export type AnalysisKind = z.infer<typeof AnalysisKindSchema>;

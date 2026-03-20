@@ -370,6 +370,24 @@ export class RunnerTools {
     });
   }
 
+  async scaffoldActivity(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "scaffold_activity",
+      jobKind: "custom_contrib",
+      analysisKind: "activity_scaffold"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued activity scaffold job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
   async validateGovernance(spec: unknown): Promise<ToolResponse> {
     const parsed = RunnerJobSpecSchema.parse(spec);
     const result = await this.dispatcher.dispatch({

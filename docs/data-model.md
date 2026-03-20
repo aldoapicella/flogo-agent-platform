@@ -69,6 +69,7 @@ Important current `inputs` conventions:
 - `mode = "run_comparison_plan"` for analysis-only run-comparison preflight
 - `mode = "run_comparison"` for helper-backed run comparison execution
 - `mode = "diagnosis"` for analysis-only diagnosis planning and recommendation
+- `mode = "activity_scaffold"` for analysis-only Flogo Activity bundle scaffolding
 - `mode = "governance"` for analysis-only alias/orphan/version validation
 - `mode = "composition_compare"` for analysis-only JSON vs programmatic comparison
 
@@ -216,6 +217,25 @@ These describe:
 - examples,
 - compatibility notes,
 - response artifact references.
+
+### Activity scaffold contracts
+
+Important schemas:
+
+- `ActivityScaffoldRequest`
+- `ActivityScaffoldBundle`
+- `ActivityScaffoldResult`
+- `ActivityScaffoldResponse`
+- `ContribGeneratedFile`
+- `ContribProofStep`
+
+These describe:
+
+- one scaffold request for a custom Flogo Activity,
+- generated descriptor metadata and file summaries,
+- generated Go implementation, metadata, module, test, and readme files,
+- isolated `go test` and `go build` proof results,
+- persisted contribution bundle artifacts without auto-installing the bundle into an app.
 
 ### Mapping contracts
 

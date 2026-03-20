@@ -5,6 +5,9 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  ActivityScaffoldRequestSchema,
+  ActivityScaffoldResponseSchema,
+  type ActivityScaffoldResponse,
   type CompositionCompareResult,
   type ArtifactRef,
   DiagnosisRequestSchema,
@@ -148,6 +151,8 @@ function createCommand(spec: RunnerJobSpec): string[] {
         typeof spec.analysisPayload?.target === "string" ? String(spec.analysisPayload.target) : "app",
         ...(typeof spec.analysisPayload?.resourceId === "string" ? ["--resource", String(spec.analysisPayload.resourceId)] : [])
       );
+    case "scaffold_activity":
+      return createHelperCommand("contrib", "scaffold-activity");
     default:
       return ["echo", `runner:${spec.stepType}`];
   }
@@ -205,6 +210,7 @@ function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
     stepType === "plan_properties" ||
     stepType === "validate_governance" ||
     stepType === "compare_composition" ||
+    stepType === "scaffold_activity" ||
     stepType === "diagnose_app"
   );
 }
@@ -220,6 +226,21 @@ function createAnalysisArtifact(
     type,
     name: `${spec.taskId}-${suffix}.json`,
     uri: `memory://${spec.taskId}/${suffix}.json`,
+    metadata
+  };
+}
+
+function createNamedArtifact(
+  taskId: string,
+  type: ArtifactRef["type"],
+  name: string,
+  metadata: Record<string, unknown>
+): ArtifactRef {
+  return {
+    id: randomUUID(),
+    type,
+    name,
+    uri: `memory://${taskId}/${name}`,
     metadata
   };
 }
@@ -610,6 +631,7 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     spec.stepType !== "capture_run_trace" &&
     spec.stepType !== "replay_flow" &&
     spec.stepType !== "compare_runs"
+    && spec.stepType !== "scaffold_activity"
   ) {
     return {
       command: createCommand(spec)
@@ -764,6 +786,18 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     await fs.writeFile(requestPath, JSON.stringify(spec.analysisPayload ?? {}, null, 2), "utf8");
     return {
       command: createHelperCommand("flows", "compare-runs", "--app", spec.appPath, "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "scaffold_activity") {
+    const request = ActivityScaffoldRequestSchema.parse(spec.analysisPayload ?? {});
+    const requestPath = path.join(tempDir, "activity-scaffold-request.json");
+    await fs.writeFile(requestPath, JSON.stringify(request, null, 2), "utf8");
+    return {
+      command: createHelperCommand("contrib", "scaffold-activity", "--request", requestPath),
       cleanup: async () => {
         await fs.rm(tempDir, { recursive: true, force: true });
       }
@@ -1155,6 +1189,37 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
         createAnalysisArtifact(spec, "composition_compare", "composition-compare", {
           comparison,
           diagnostics
+        })
+      ];
+    }
+
+    if (spec.stepType === "scaffold_activity") {
+      const response = ActivityScaffoldResponseSchema.parse(JSON.parse(stdout) as ActivityScaffoldResponse);
+      const result = response.result;
+      return [
+        createAnalysisArtifact(spec, "contrib_bundle", `activity-bundle-${result.bundle.packageName}`, {
+          result,
+          descriptor: result.bundle.descriptor,
+          files: result.bundle.files,
+          bundleRoot: result.bundle.bundleRoot,
+          modulePath: result.bundle.modulePath,
+          packageName: result.bundle.packageName,
+          validation: result.validation,
+          build: result.build,
+          test: result.test,
+          diagnostics
+        }),
+        createNamedArtifact(spec.taskId, "build_log", `${spec.taskId}-activity-build.log`, {
+          command: result.build.command,
+          ok: result.build.ok,
+          output: result.build.output,
+          summary: result.build.summary
+        }),
+        createNamedArtifact(spec.taskId, "test_report", `${spec.taskId}-activity-test.json`, {
+          command: result.test.command,
+          ok: result.test.ok,
+          output: result.test.output,
+          summary: result.test.summary
         })
       ];
     }
