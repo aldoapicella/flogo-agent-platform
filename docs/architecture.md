@@ -238,7 +238,7 @@ Responsibilities:
 
 Current limitation:
 
-- the operator UI now surfaces the current runtime-evidence artifacts and diagnosis summaries on task detail pages, but it is still a thin shell without dedicated catalog, mapping-preview, richer diagnosis, or contribution-authoring workflows.
+- the operator UI now surfaces the current runtime-evidence artifacts and diagnosis summaries on task detail pages, but it is still a thin shell without dedicated catalog, mapping-preview, richer diagnosis drill-down, or contribution-authoring workflows.
 
 ## Shared package responsibilities
 
@@ -413,6 +413,8 @@ The platform has completed the Phase 1 capability area and has implemented Phase
 - artifact-backed run comparison that prefers normalized runtime evidence, REST envelope evidence, timer startup evidence, or Channel boundary evidence when the matching persisted artifacts provide them and recorder-backed evidence otherwise,
 - trigger-driven runtime startup is now partially implemented through narrow REST, timer, CLI, and Channel slices on top of the direct-flow helper path,
 - analysis-only diagnosis planning can now choose between validation, mapping, contracts, trigger-binding analysis, trace, replay, and compare to produce structured diagnosis reports and recommendation-oriented patch suggestions,
+- diagnosis confidence is now explicitly calibrated against runtime-backed, mixed, artifact-backed-only, simulated-fallback, and contract-inference-only proof quality rather than treated as a flat heuristic,
+- `packages/evals` now includes a diagnosis-focused regression corpus that exercises planner choice, confidence bands, fallback caveats, and recommendation stability across the current trigger families,
 - the web console now exposes task-detail runtime evidence, trigger-specific summaries, normalized steps, fallback reasons, comparison basis, and diagnosis summaries for the currently supported slices,
 - broader runtime coverage beyond the current narrow supported slices remains planned,
 - analysis-only orchestration modes.
@@ -450,7 +452,7 @@ Persisted through Prisma today:
 - `flogo.json` is still the canonical artifact even as the Go helper path grows.
 - The Go helper is intentionally a finite execution binary, not a new always-on service.
 - The current helper uses contribution inventory plus module-aware package discovery, evidence confidence, normalized Flogo metadata, static mapping evaluation, and known-registry inference for the Phase 1 analysis path; it is not yet a full Core/Flow-native runtime.
-- Runtime trace capture, replay, and run comparison are implemented as helper-backed artifact evidence with narrow live direct-flow, REST, timer, CLI, and Channel slices plus comparison-basis preference over persisted artifacts; diagnosis remains recommendation-oriented and does not auto-apply repository patches; contribution-authoring remains a roadmap item.
+- Runtime trace capture, replay, and run comparison are implemented as helper-backed artifact evidence with narrow live direct-flow, REST, timer, CLI, and Channel slices plus comparison-basis preference over persisted artifacts; diagnosis remains recommendation-oriented, confidence is conservatively calibrated against evidence quality and fallback state, and the platform still does not auto-apply repository patches; contribution-authoring remains a roadmap item.
 - In restricted shells on Windows, `next build` and Vitest can fail with `spawn EPERM` even when typecheck is clean.
 
 ## Reference documents

@@ -2,7 +2,14 @@
 
 ## Purpose
 
-This repository is building a Flogo-native engineering platform, not just a `flogo.json` editor.
+This repository is building a Flogo-native AI agent for Flogo development and operations, not just a `flogo.json` editor or a generic backend platform.
+
+The platform components in this repo exist to support that AI agent:
+
+- analyze Flogo apps with evidence-backed static reasoning,
+- diagnose runtime and mapping issues with trace/replay/compare plus static analysis,
+- recommend minimal patches grounded in Flogo trigger, flow, and mapping semantics,
+- and later help author and validate Flogo contributions.
 
 Future agents working here should preserve that direction and use this file as a repo-specific operating guide.
 
@@ -68,6 +75,8 @@ Do not let roadmap docs drift behind implementation.
 
 ### Platform shape
 
+Treat the deployables below as the execution surface for the AI agent, not as ends in themselves. Control-plane, orchestrator, runner-worker, web-console, and the Go helper should all move the repo toward a stronger Flogo development agent.
+
 The primary deployables are:
 
 - `apps/control-plane`
@@ -119,7 +128,7 @@ The repo has a completed Phase 1 foundation and has started Phase 2. Before addi
 - direct trigger-binding mutation and validate-only planning
 - direct advanced control-flow mutation and validate-only planning
 
-Treat the Phase 1 Core/mapping foundation as implemented, the main Phase 2 design-time flow-pattern surface as implemented, and Phase 3 runtime trace capture, replay, and run comparison as implemented in mixed form with the current narrow REST-backed slices, a narrow timer runtime-startup partial slice, a narrow CLI command-entry partial slice, and a narrow Channel internal-event partial slice. The repo also now has a dedicated trigger-family-aware runtime-evidence eval suite, task-detail runtime-evidence inspection in the web console, and a recommendation-oriented diagnosis loop that consumes trace/replay/compare plus static analysis evidence without auto-applying fixes. New Flogo-native work should generally target diagnosis hardening, operator-facing diagnosis UX, and contribution authoring unless the task is explicitly about hardening an existing capability.
+Treat the Phase 1 Core/mapping foundation as implemented, the main Phase 2 design-time flow-pattern surface as implemented, and Phase 3 runtime trace capture, replay, and run comparison as implemented in mixed form with the current narrow REST-backed slices, a narrow timer runtime-startup partial slice, a narrow CLI command-entry partial slice, and a narrow Channel internal-event partial slice. The repo also now has a dedicated trigger-family-aware runtime-evidence eval suite, task-detail runtime-evidence inspection in the web console, a recommendation-oriented diagnosis loop that consumes trace/replay/compare plus static analysis evidence without auto-applying fixes, and a dedicated diagnosis-focused eval/confidence-calibration layer. New Flogo-native work should generally target diagnosis hardening, operator-facing diagnosis UX, and contribution authoring unless the task is explicitly about hardening an existing capability.
 
 Do not accidentally regress these while implementing later phases.
 
@@ -266,7 +275,7 @@ Important files to consult before extending the platform:
 
 When making changes in this repo:
 
-1. identify which capability domain the work belongs to
+1. keep the AI-agent goal explicit: improve Flogo analysis, diagnosis, recommendation, or later contribution authoring rather than drifting into generic platform work
 2. confirm the current phase in `docs/flogo-native-runtime-plan.md`
 3. check whether the capability already exists in `docs/capability-matrix.md`
 4. update docs first if the roadmap or interface meaning changes

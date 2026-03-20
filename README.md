@@ -1,6 +1,8 @@
 # flogo-agent-platform
 
-`flogo-agent-platform` is a TypeScript monorepo for creating, updating, debugging, reviewing, and increasingly analyzing TIBCO Flogo applications with `flogo.json` as the canonical artifact.
+`flogo-agent-platform` is a TypeScript monorepo for building a Flogo-native AI agent that can create, update, debug, review, diagnose, and increasingly analyze TIBCO Flogo applications with `flogo.json` as the canonical artifact.
+
+The control-plane, orchestrator, runner-worker, web console, and Go helper are the execution and inspection surfaces for that agent, not a separate product direction.
 
 The platform is Container Apps-first:
 

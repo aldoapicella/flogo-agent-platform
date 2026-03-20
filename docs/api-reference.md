@@ -141,7 +141,8 @@ Important behavior:
 - the planner selects among static validation, mapping preview/test, flow-contract analysis, trigger-binding analysis, trace, replay, and compare based on the symptom, trigger family, and available evidence,
 - the task persists a `diagnosis_report` artifact plus any nested trace/replay/comparison artifacts actually used by the proof path,
 - diagnosis output is recommendation-oriented only; it does not auto-apply code changes in this slice,
-- confidence and evidence quality explicitly distinguish runtime-backed, simulated-fallback, artifact-backed, and mixed proof quality.
+- confidence and evidence quality explicitly distinguish runtime-backed, simulated-fallback, artifact-backed, and mixed proof quality,
+- confidence is calibrated down when the proof path is fallback-only, mixed, artifact-backed-only, contract-inference-only, or otherwise incomplete.
 
 ### `GET /v1/tasks`
 
@@ -445,7 +446,7 @@ Current implementation notes:
 
 - diagnosis planning is additive and symptom-driven rather than a replacement for the existing trace, replay, compare, validation, mapping, or trigger-binding APIs,
 - `diagnosis_report` artifacts persist structured `problemCategory`, `subtype`, `likelyRootCause`, `supportingEvidence`, `recommendedNextAction`, `recommendedPatch`, `confidence`, `evidenceQuality`, `limitations`, and related artifact IDs,
-- diagnosis confidence is intentionally lower when the proof path relies on simulated fallback, artifact-backed-only comparison, or insufficient evidence on unsupported shapes,
+- diagnosis confidence is intentionally calibrated lower when the proof path relies on simulated fallback, mixed evidence, artifact-backed-only comparison, contract-inference-only proof, or insufficient evidence on unsupported shapes,
 - the web console task detail view renders the latest diagnosis artifact as a summary panel alongside runtime evidence.
 
 ### `POST /v1/projects/:projectId/apps/:appId/triggers/bind`

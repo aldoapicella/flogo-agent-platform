@@ -440,13 +440,28 @@ Current status:
 
 - partially implemented: analysis-only tasks can now request `inputs.mode = "diagnosis"` to run a typed diagnosis planner over validation, mapping preview/test, flow-contract analysis, trigger-binding analysis, trace, replay, and compare on the current supported slices,
 - the runner persists a `diagnosis_report` artifact with problem category, subtype, supporting evidence references, recommended next action, recommended patch, confidence, evidence quality, and related artifact IDs,
-- the task-detail UI now renders a diagnosis summary from that artifact, but the diagnosis surface remains summary-first rather than a full operator workbench.
+- the task-detail UI now renders a diagnosis summary from that artifact, and the eval package now carries a dedicated diagnosis-focused corpus plus confidence-band calibration checks for direct-flow, REST, timer, CLI, and Channel diagnosis cases,
+- the diagnosis surface remains summary-first rather than a full operator workbench.
 
 Current limitations:
 
 - the diagnosis loop is additive and recommendation-oriented only; it does not auto-apply patches or replace existing mutation flows,
-- confidence is intentionally downgraded when the proof path lands on simulated fallback, artifact-backed-only comparison, or insufficient runtime evidence,
+- confidence is intentionally calibrated down when the proof path lands on simulated fallback, artifact-backed-only comparison, mixed evidence, contract-only inference, or insufficient runtime evidence,
 - diagnosis quality is still bounded by the current narrow runtime-backed slices and the available static evidence for each trigger family.
+
+## Phase 3.12: Diagnosis evals and confidence calibration
+
+Focus:
+
+- add a diagnosis-specific eval corpus for the current trigger families,
+- verify stable problem categories, evidence quality, confidence bands, and recommendation shape,
+- make confidence conservative when the proof path is mixed, simulated, artifact-backed-only, or unsupported.
+
+Current status:
+
+- implemented in repo: `packages/evals` now carries dedicated diagnosis cases for direct-flow, REST, timer, CLI, and Channel, including representative unsupported-shape fallback coverage,
+- `packages/flogo-graph` now calibrates diagnosis confidence against runtime-backed vs mixed vs artifact-backed vs simulated evidence, fallback detection, and contract-inference-only proofs,
+- targeted graph/planner/runner/web-console tests now assert stable diagnosis payload shape, confidence boundaries, and fallback-aware caveats.
 
 ## Phase 3.2: Recorder-backed evidence foundation
 
@@ -601,7 +616,7 @@ Use this section as the working tracker for future implementation slices.
 | Runner-worker | Flow-contract, runtime trace, replay, run comparison, trigger-binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, property-plan, and diagnosis execution support | Partial | `apps/runner-worker/src/services/*` | Add contribution-authoring job kinds later |
 | Go helper | Flow-contract, runtime trace, replay, run comparison, trigger-binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, and property planning | Partial | `go-runtime/flogo-helper/main.go` | Integrate deeper Flow runtime hooks and later runtime-backed debugging behavior |
 | Web console | Task detail runtime-evidence inspection plus diagnosis-summary rendering for trace, replay, compare, and diagnosis artifacts | Partial | `apps/web-console` | Add richer compare workflows and a deeper diagnosis workbench |
-| Eval coverage | Existing create/update/debug/review baseline plus a dedicated runtime-evidence suite for the current real runtime slices | Partial | `packages/evals` | Add broader UI-facing workflow evals and later contribution-authoring cases |
+| Eval coverage | Existing create/update/debug/review baseline plus dedicated runtime-evidence and diagnosis-confidence suites for the current real runtime slices | Partial | `packages/evals` | Add broader UI-facing workflow evals and later contribution-authoring cases |
 
 ## Rules For Future Implementation Passes
 
@@ -616,12 +631,12 @@ When implementing a Flogo-native feature:
 
 ## Recommended Next Slice
 
-The next implementation slice after the current baseline should deepen diagnosis quality and operator-facing diagnosis workflows on top of the now-visible runtime evidence rather than widening trigger breadth further.
+The next implementation slice after the current baseline should deepen operator-facing diagnosis workflows on top of the now-visible runtime evidence and calibrated diagnosis output rather than widening trigger breadth further.
 
 Recommended next items:
 
-1. Add diagnosis-focused eval coverage for planner selection, confidence scoring, and recommendation stability across the current trigger families.
-2. Expand the web console diagnosis surface from a summary panel into richer drill-down and compare-assisted diagnosis workflows.
+1. Expand the web console diagnosis surface from a summary panel into richer drill-down, caveat, and compare-assisted diagnosis workflows.
+2. Add focused operator-facing diagnosis UX tests and polish on top of the current runtime-evidence surface.
 3. Keep broader trigger-runtime parity beyond the current slices deferred until the supported trigger families share a coherent runtime evidence model, then begin Phase 4 contribution-authoring foundation work.
 
 ## Source References
