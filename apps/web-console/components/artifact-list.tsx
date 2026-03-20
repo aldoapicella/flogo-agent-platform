@@ -9,7 +9,8 @@ function artifactSummary(artifact: ArtifactRef) {
     (artifact.type !== "contrib_bundle" &&
       artifact.type !== "contrib_validation_report" &&
       artifact.type !== "contrib_package" &&
-      artifact.type !== "contrib_install_plan") ||
+      artifact.type !== "contrib_install_plan" &&
+      artifact.type !== "contrib_install_diff_plan") ||
     !isRecord(artifact.metadata)
   ) {
     return null;
@@ -17,13 +18,33 @@ function artifactSummary(artifact: ArtifactRef) {
 
   const result = isRecord(artifact.metadata.result) ? artifact.metadata.result : undefined;
   const bundle = result && isRecord(result.bundle) ? result.bundle : undefined;
+  const sourceContribution = result && isRecord(result.sourceContribution) ? result.sourceContribution : undefined;
   const validation = result && isRecord(result.validation) ? result.validation : undefined;
   const build = result && isRecord(result.build) ? result.build : undefined;
   const test = result && isRecord(result.test) ? result.test : undefined;
   const storage = isRecord(artifact.metadata.storage) ? artifact.metadata.storage : undefined;
-  const kind = typeof bundle?.kind === "string" ? bundle.kind : undefined;
-  const packageName = typeof bundle?.packageName === "string" ? bundle.packageName : undefined;
-  const modulePath = typeof bundle?.modulePath === "string" ? bundle.modulePath : undefined;
+  const kind =
+    typeof bundle?.kind === "string"
+      ? bundle.kind
+      : typeof result?.contributionKind === "string"
+        ? result.contributionKind
+        : typeof sourceContribution?.kind === "string"
+          ? sourceContribution.kind
+          : undefined;
+  const packageName =
+    typeof bundle?.packageName === "string"
+      ? bundle.packageName
+      : typeof sourceContribution?.packageName === "string"
+        ? sourceContribution.packageName
+        : undefined;
+  const modulePath =
+    typeof bundle?.modulePath === "string"
+      ? bundle.modulePath
+      : typeof result?.modulePath === "string"
+        ? result.modulePath
+        : typeof sourceContribution?.modulePath === "string"
+          ? sourceContribution.modulePath
+          : undefined;
   const files = Array.isArray(bundle?.files) ? bundle.files.filter(isRecord) : [];
   const generatedFileSummary =
     files.length > 0
@@ -46,14 +67,41 @@ function artifactSummary(artifact: ArtifactRef) {
       : typeof targetApp?.appName === "string"
         ? targetApp.appName
         : undefined;
-  const selectedAlias = typeof result?.selectedAlias === "string" ? result.selectedAlias : undefined;
+  const selectedAlias =
+    typeof result?.selectedAlias === "string"
+      ? result.selectedAlias
+      : typeof sourceContribution?.selectedAlias === "string"
+        ? sourceContribution.selectedAlias
+        : undefined;
   const installReady = typeof result?.installReady === "boolean" ? result.installReady : undefined;
   const readiness = typeof result?.readiness === "string" ? result.readiness : undefined;
+  const previewAvailable = typeof result?.previewAvailable === "boolean" ? result.previewAvailable : undefined;
+  const isStale = typeof result?.isStale === "boolean" ? result.isStale : undefined;
+  const staleReason = typeof result?.staleReason === "string" ? result.staleReason : undefined;
   const recommendedNextAction = typeof result?.recommendedNextAction === "string" ? result.recommendedNextAction : undefined;
   const warnings = Array.isArray(result?.warnings) ? result.warnings.filter((value): value is string => typeof value === "string") : [];
   const conflicts = Array.isArray(result?.conflicts) ? result.conflicts.filter(isRecord) : [];
-  const proposedImports = Array.isArray(result?.proposedImports) ? result.proposedImports.filter(isRecord) : [];
-  const proposedRefs = Array.isArray(result?.proposedRefs) ? result.proposedRefs.filter(isRecord) : [];
+  const predictedChanges = result && isRecord(result.predictedChanges) ? result.predictedChanges : undefined;
+  const proposedImports =
+    Array.isArray(result?.proposedImports)
+      ? result.proposedImports.filter(isRecord)
+      : [
+            ...(Array.isArray(predictedChanges?.importsToAdd) ? predictedChanges.importsToAdd.filter(isRecord) : []),
+            ...(Array.isArray(predictedChanges?.importsToUpdate) ? predictedChanges.importsToUpdate.filter(isRecord) : [])
+          ];
+  const proposedRefs =
+    Array.isArray(result?.proposedRefs)
+      ? result.proposedRefs.filter(isRecord)
+      : [
+            ...(Array.isArray(predictedChanges?.refsToAdd) ? predictedChanges.refsToAdd.filter(isRecord) : []),
+            ...(Array.isArray(predictedChanges?.refsToReuse) ? predictedChanges.refsToReuse.filter(isRecord) : [])
+          ];
+  const changedPaths = Array.isArray(predictedChanges?.changedPaths)
+    ? predictedChanges.changedPaths.filter((value): value is string => typeof value === "string")
+    : [];
+  const diffSummary = Array.isArray(result?.diffSummary)
+    ? result.diffSummary.filter((value): value is string => typeof value === "string")
+    : [];
   const proposedImportSummary =
     proposedImports.length > 0
       ? proposedImports
@@ -93,10 +141,15 @@ function artifactSummary(artifact: ArtifactRef) {
     installReady === undefined &&
     !readiness &&
     !recommendedNextAction &&
+    previewAvailable === undefined &&
+    isStale === undefined &&
+    !staleReason &&
     warnings.length === 0 &&
     conflicts.length === 0 &&
     !proposedImportSummary &&
     !proposedRefSummary &&
+    changedPaths.length === 0 &&
+    diffSummary.length === 0 &&
     !packageFormat &&
     !packageFileName &&
     packageBytes === undefined
@@ -119,6 +172,11 @@ function artifactSummary(artifact: ArtifactRef) {
       {selectedAlias ? <div>selected alias: {selectedAlias}</div> : null}
       {proposedImportSummary ? <div>proposed imports: {proposedImportSummary}</div> : null}
       {proposedRefSummary ? <div>proposed refs: {proposedRefSummary}</div> : null}
+      {previewAvailable !== undefined ? <div>preview available: {previewAvailable ? "yes" : "no"}</div> : null}
+      {isStale !== undefined ? <div>stale: {isStale ? "yes" : "no"}</div> : null}
+      {staleReason ? <div>stale reason: {staleReason}</div> : null}
+      {changedPaths.length > 0 ? <div>changed paths: {changedPaths.join(", ")}</div> : null}
+      {diffSummary.length > 0 ? <div>diff summary: {diffSummary.join("; ")}</div> : null}
       {installReady !== undefined ? <div>install ready: {installReady ? "yes" : "no"}</div> : null}
       {readiness ? <div>readiness: {readiness}</div> : null}
       {warnings.length > 0 ? <div>warnings: {warnings.length}</div> : null}

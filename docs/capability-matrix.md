@@ -56,6 +56,7 @@ Use it together with [Flogo-Native Runtime Plan](./flogo-native-runtime-plan.md)
 | Contribution factory | Contribution validation/build/test | Re-run shared proof for existing contrib bundles | `POST /v1/tasks` with `inputs.mode = "validate_contrib"`, `runner.validateContrib`, helper `contrib validate` | Persisted Blob-backed `contrib_validation_report`, `build_log`, and `test_report` artifacts with shared proof metadata for Activity, Action, and Trigger bundles | V4 | Partial | Implemented as the narrow Phase 4.4 shared validation slice over existing scaffold bundles only. It accepts persisted `contrib_bundle` artifacts or inline scaffold results, reruns `go mod tidy`, `go test ./...`, and `go build ./...`, and fails honestly on malformed bundles or missing durable storage configuration |
 | Contribution factory | Contribution packaging | Package validated contrib bundles into reviewable archives | `POST /v1/tasks` with `inputs.mode = "package_contrib"`, `runner.packageContrib`, helper `contrib package` | Persisted Blob-backed `contrib_package`, `build_log`, and `test_report` artifacts with package metadata and shared proof results for Activity, Action, and Trigger bundles | V4 | Partial | Implemented as the narrow Phase 4.4 packaging slice over existing scaffold bundles only. It accepts persisted `contrib_bundle` artifacts or inline scaffold results, reruns the shared proof path, and emits one conservative review archive format (`zip`) without implying install or publish behavior |
 | Contribution factory | Contribution install planning | Plan how an existing contrib bundle/package would be installed into one target app without mutating it | `POST /v1/tasks` with `inputs.mode = "install_contrib_plan"`, `runner.installContribPlan`, helper `contrib install-plan` | Persisted Blob-backed `contrib_install_plan` artifacts with predicted imports/refs, conflicts, warnings, readiness, target-app metadata, and recommended next action | V4 | Partial | Implemented as the narrow Phase 4.5 install-planning slice over existing Activity, Action, and Trigger bundles/packages only. It accepts persisted `contrib_bundle` or `contrib_package` artifacts or equivalent inline payloads, inspects the target app, predicts import/ref changes conservatively, fails honestly on malformed input or missing durable storage, and stops short of applying any install/update change |
+| Contribution factory | Contribution install diff preview | Materialize the exact canonical `flogo.json` preview for a previously planned install without mutating the target app | `POST /v1/tasks` with `inputs.mode = "install_contrib_diff_plan"`, `runner.installContribDiffPlan`, helper `contrib install-diff-plan` | Persisted Blob-backed `contrib_install_diff_plan` artifacts with app/install-plan fingerprints, exact before/after canonical preview, changed paths, predicted import/ref changes, stale-plan diagnostics, and recommended next action | V4 | Partial | Implemented as the narrow Phase 4.6 exact diff-preview slice over existing install plans only. It accepts a persisted `contrib_install_plan` artifact or equivalent inline payload, validates that the target app still matches the plan basis, materializes the exact canonical import mutation preview conservatively, and stops short of any install/apply behavior |
 | Flogo-native testing | Mapping resolution tests | Dedicated mapping correctness tests | `POST /v1/projects/:projectId/apps/:appId/mappings/test`, helper `mapping test` | Deterministic pass/fail result, expected-vs-actual diff, persisted Blob-backed test artifact | V1 | Implemented | Uses the same static mapping engine as preview and adds a first-class mapping test artifact |
 | Flogo-native testing | Flow contract tests | Contract tests for reusable flows | future `POST /v1/tests/flow` | Flow I/O assertions | V2 | Planned | Not started |
 | Flogo-native testing | Replay tests | Verify behavior across replay paths | `POST /v1/projects/:projectId/apps/:appId/flows/replay`, helper `flows replay` | Replay plan/report artifacts and targeted helper/graph/runner tests | V3 | Implemented | Replay behavior is covered through focused graph preflight, control-plane replay, and runner/helper regression tests and now feeds the run-comparison slice |
@@ -109,6 +110,7 @@ These are the core Flogo-native tool contracts that the platform should converge
 - `flogo_validate_contrib`
 - `flogo_package_contrib`
 - `flogo_install_contrib_plan`
+- `flogo_install_contrib_diff_plan`
 - `flogo_update_contrib`
 
 ## Validation Model By Domain
@@ -155,7 +157,7 @@ Evidence should come from:
 
 - generated descriptor bundles,
 - Go build/test output,
-- install planning evidence.
+- install planning and exact diff-preview evidence.
 
 ## How To Update This Matrix
 

@@ -293,4 +293,79 @@ describe("ArtifactList", () => {
     expect(html).toContain("next action: Reuse the existing alias before applying later app changes.");
     expect(html).toContain("blob path: task-artifacts/demo/task-6/contrib_install_plan/artifact-6.json");
   });
+
+  it("renders exact install diff-plan summaries with freshness, changed paths, and next action", () => {
+    const html = renderToStaticMarkup(
+      <ArtifactList
+        artifacts={[
+          {
+            id: "artifact-7",
+            type: "contrib_install_diff_plan",
+            name: "trigger-install-diff-plan-webhooktrigger",
+            uri: "memory://task-7/trigger-install-diff-plan-webhooktrigger",
+            metadata: {
+              storage: {
+                kind: "blob",
+                blobPath: "task-artifacts/demo/task-7/contrib_install_diff_plan/artifact-7.json",
+                durablePayload: true
+              },
+              result: {
+                contributionKind: "trigger",
+                sourceContribution: {
+                  kind: "trigger",
+                  packageName: "webhooktrigger",
+                  modulePath: "example.com/acme/webhook",
+                  selectedAlias: "webhooktrigger",
+                  source: "package_artifact"
+                },
+                targetApp: {
+                  appId: "hello-rest"
+                },
+                previewAvailable: true,
+                isStale: false,
+                installReady: true,
+                readiness: "high",
+                warnings: [],
+                conflicts: [],
+                predictedChanges: {
+                  importsToAdd: [
+                    {
+                      alias: "webhooktrigger",
+                      ref: "example.com/acme/webhook",
+                      action: "add"
+                    }
+                  ],
+                  importsToUpdate: [],
+                  refsToAdd: [
+                    {
+                      surface: "triggerRef",
+                      value: "#webhooktrigger"
+                    }
+                  ],
+                  refsToReuse: [],
+                  changedPaths: ["imports"],
+                  structuralChanges: ["Add import alias \"webhooktrigger\" for ref \"example.com/acme/webhook\"."],
+                  diffEntries: [],
+                  noMutation: true
+                },
+                diffSummary: ["imports: add \"webhooktrigger\" -> \"example.com/acme/webhook\""],
+                recommendedNextAction: "Review the exact canonical import diff."
+              }
+            }
+          }
+        ]}
+      />
+    );
+
+    expect(html).toContain("contribution type: trigger");
+    expect(html).toContain("target app: hello-rest");
+    expect(html).toContain("selected alias: webhooktrigger");
+    expect(html).toContain("preview available: yes");
+    expect(html).toContain("stale: no");
+    expect(html).toContain("changed paths: imports");
+    expect(html).toContain("diff summary: imports: add &quot;webhooktrigger&quot; -&gt; &quot;example.com/acme/webhook&quot;");
+    expect(html).toContain("proposed imports: webhooktrigger -&gt; example.com/acme/webhook (add)");
+    expect(html).toContain("proposed refs: triggerRef: #webhooktrigger");
+    expect(html).toContain("blob path: task-artifacts/demo/task-7/contrib_install_diff_plan/artifact-7.json");
+  });
 });

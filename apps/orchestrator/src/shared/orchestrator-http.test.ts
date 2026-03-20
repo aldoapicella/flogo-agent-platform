@@ -393,4 +393,46 @@ describe("orchestrator-http", () => {
       }
     });
   });
+
+  it("routes install_contrib_diff_plan mode to the exact canonical diff-preview runner step", () => {
+    const start: OrchestratorStartRequest = {
+      taskId: "task-install-contrib-diff-plan",
+      request: {
+        type: "review",
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json",
+        requestedBy: "operator",
+        summary: "Preview the exact canonical install diff for a packaged contribution",
+        inputs: {
+          mode: "install_contrib_diff_plan",
+          installPlanArtifactId: "artifact-install-plan-4"
+        },
+        constraints: {
+          allowDependencyChanges: false,
+          allowCustomCode: false,
+          targetEnv: "dev",
+          requireApproval: true
+        }
+      },
+      requiredApprovals: [],
+      planSummary: "Preview contribution install diff",
+      steps: []
+    };
+
+    expect(resolveWorkflowRunnerSteps(start)).toEqual(["install_contrib_diff_plan"]);
+
+    const spec = buildRunnerJobSpec(start, "install_contrib_diff_plan");
+
+    expect(spec.jobKind).toBe("contrib_install_diff_plan");
+    expect(spec.analysisKind).toBe("install_contrib_diff_plan");
+    expect(spec.analysisPayload).toMatchObject({
+      installPlanArtifactId: "artifact-install-plan-4",
+      targetApp: {
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json"
+      }
+    });
+  });
 });

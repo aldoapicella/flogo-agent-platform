@@ -75,6 +75,7 @@ Important current `inputs` conventions:
 - `mode = "validate_contrib"` for analysis-only shared contribution validation/build/test proof
 - `mode = "package_contrib"` for analysis-only shared contribution packaging after proof
 - `mode = "install_contrib_plan"` for analysis-only reviewable install planning against one target app
+- `mode = "install_contrib_diff_plan"` for analysis-only exact canonical install diff preview against one target app
 - `mode = "governance"` for analysis-only alias/orphan/version validation
 - `mode = "composition_compare"` for analysis-only JSON vs programmatic comparison
 
@@ -195,6 +196,7 @@ Current artifact kinds:
 - `contrib_validation_report`
 - `contrib_package`
 - `contrib_install_plan`
+- `contrib_install_diff_plan`
 
 ## Flogo-native contracts
 
@@ -215,6 +217,24 @@ These describe:
 - target-app conflicts, warnings, and readiness,
 - recommended next action and explicit limitations,
 - review-oriented install planning without any `flogo.json` mutation.
+
+### Contribution install-diff-planning contracts
+
+Important schemas:
+
+- `ContributionInstallDiffPlanRequest`
+- `ContributionInstallDiffPlanResult`
+- `ContributionInstallDiffPlanResponse`
+
+These describe:
+
+- one contribution install-plan source selected from a persisted or inline `contrib_install_plan`,
+- one target app identity and resolved app path,
+- exact canonical before/after `flogo.json` preview metadata for the current app state,
+- app/install-plan fingerprints used to detect stale plans,
+- machine-readable predicted import/ref changes plus changed paths and diff summary,
+- warnings, conflicts, limitations, and recommended next action,
+- review-oriented diff preview without any `flogo.json` mutation.
 
 ### Contribution catalog contracts
 
@@ -775,7 +795,7 @@ Current runtime behavior is mixed:
 
 - persisted metadata is stored in PostgreSQL,
 - inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test payloads are stored as Blob/Azurite-backed JSON objects,
-- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `build_log`, and `test_report` task artifacts are also stored as Blob/Azurite-backed JSON objects while retaining Prisma metadata for task detail rendering,
+- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `build_log`, and `test_report` task artifacts are also stored as Blob/Azurite-backed JSON objects while retaining Prisma metadata for task detail rendering,
 - many broader task artifacts still use logical or local URIs.
 
 This matters for operators:
@@ -814,6 +834,7 @@ Examples:
 - `contrib_validation_report` is now produced by the shared contribution validation slice, carries shared proof results plus bundle/source metadata for Activity, Action, and Trigger bundles, and is uploaded through the same Blob/Azurite storage seam.
 - `contrib_package` is now produced by the shared contribution packaging slice, carries conservative package metadata plus shared proof results for Activity, Action, and Trigger bundles, and is uploaded through the same Blob/Azurite storage seam.
 - `contrib_install_plan` is now produced by the shared contribution install-planning slice, carries target-app identity, predicted imports/refs, warnings, conflicts, readiness, recommended next action, and limitations for Activity, Action, and Trigger bundles/packages, and is uploaded through the same Blob/Azurite storage seam.
+- `contrib_install_diff_plan` is now produced by the exact install diff-preview slice, carries target-app/install-plan fingerprints, exact canonical before/after preview content, changed paths, predicted import/ref changes, stale-plan detection, warnings/conflicts, and recommended next action for Activity, Action, and Trigger bundles/packages, and is uploaded through the same Blob/Azurite storage seam.
 - graph projections in Prisma exist, but the current runtime does not fully maintain them.
 - task persistence is live, app-analysis payload storage is live, and contribution-authoring bundle/validation/package/proof payload storage is live, but workspace snapshots and broader blob-backed runtime artifact content are still planned work.
 

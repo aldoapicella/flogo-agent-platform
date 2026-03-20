@@ -696,6 +696,186 @@ func TestValidateContributionInstallPlanRequestRejectsUnsupportedFormats(t *test
 	}
 }
 
+func TestPlanContributionInstallDiffBuildsExactCanonicalPreview(t *testing.T) {
+	app := bindableTestApp()
+	response := scaffoldTrigger(triggerScaffoldRequest{
+		TriggerName: "Webhook Trigger",
+		ModulePath:  "example.com/acme/webhook",
+		Title:       "Webhook Trigger",
+		Description: "Dispatches an internal webhook event.",
+		Version:     "0.1.0",
+		Outputs: []contribField{
+			{Name: "payload", Type: "object"},
+		},
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	packaged := packageContribution(contributionPackageRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundleFromTrigger(result.Bundle),
+			Validation: result.Validation,
+			Build:      result.Build,
+			Test:       result.Test,
+		},
+		Source: "inline_result",
+		Format: "zip",
+	})
+
+	plan := planContributionInstall(app, "examples/hello-rest/flogo.json", contributionInstallPlanRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     packaged.Result.Bundle,
+			Validation: packaged.Result.Validation,
+			Build:      packaged.Result.Build,
+			Test:       packaged.Result.Test,
+		},
+		Package: &packaged.Result.Package,
+		Source:  "inline_package",
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   "examples/hello-rest/flogo.json",
+		},
+	})
+
+	if plan.Result.AppFingerprint == "" || plan.Result.PlanFingerprint == "" {
+		t.Fatalf("expected install plan fingerprints, got %+v", plan.Result)
+	}
+
+	diff := planContributionInstallDiff(app, "examples/hello-rest/flogo.json", contributionInstallDiffPlanRequest{
+		InstallPlan:         plan.Result,
+		InstallPlanArtifact: "install-plan-artifact-1",
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   "examples/hello-rest/flogo.json",
+		},
+	})
+
+	if !diff.Result.PreviewAvailable {
+		t.Fatalf("expected canonical diff preview to be available, got %+v", diff.Result)
+	}
+	if diff.Result.IsStale {
+		t.Fatalf("expected fresh install diff plan, got %+v", diff.Result)
+	}
+	if len(diff.Result.PredictedChanges.ImportsToAdd) != 1 {
+		t.Fatalf("expected one import addition in diff preview, got %+v", diff.Result.PredictedChanges)
+	}
+	if !containsString(diff.Result.PredictedChanges.ChangedPaths, "imports") {
+		t.Fatalf("expected imports to be marked as changed, got %+v", diff.Result.PredictedChanges)
+	}
+	if !containsString(diff.Result.DiffSummary, "imports: add \"webhook_trigger\" -> \"example.com/acme/webhook\"") {
+		t.Fatalf("expected diff summary to mention the exact import addition, got %+v", diff.Result.DiffSummary)
+	}
+	if diff.Result.CanonicalBeforeJSON == diff.Result.CanonicalAfterJSON {
+		t.Fatalf("expected before/after canonical JSON to differ, got %+v", diff.Result)
+	}
+	if diff.Result.BasedOnInstallPlan.SourceArtifact != "install-plan-artifact-1" {
+		t.Fatalf("expected diff preview to retain the install-plan artifact id, got %+v", diff.Result.BasedOnInstallPlan)
+	}
+}
+
+func TestPlanContributionInstallDiffMarksDriftedAppsAsStale(t *testing.T) {
+	app := bindableTestApp()
+	response := scaffoldActivity(activityScaffoldRequest{
+		ActivityName: "Echo Activity",
+		ModulePath:   "example.com/acme/echo",
+		Title:        "Echo Activity",
+		Description:  "Returns the provided input.",
+		Inputs: []contribField{
+			{Name: "message", Type: "string", Required: true},
+		},
+		Outputs: []contribField{
+			{Name: "result", Type: "string"},
+		},
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	plan := planContributionInstall(app, "examples/hello-rest/flogo.json", contributionInstallPlanRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundle(result.Bundle),
+			Validation: result.Validation,
+			Build:      result.Build,
+			Test:       result.Test,
+		},
+		Source: "inline_result",
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   "examples/hello-rest/flogo.json",
+		},
+	})
+
+	driftedRaw := cloneStringAnyMap(app.Raw)
+	driftedRaw["imports"] = append(buildRawImports(app.Imports), map[string]any{
+		"alias": "alreadyInstalled",
+		"ref":   "example.com/acme/already",
+	})
+	driftedApp := normalizeApp(driftedRaw)
+
+	diff := planContributionInstallDiff(driftedApp, "examples/hello-rest/flogo.json", contributionInstallDiffPlanRequest{
+		InstallPlan: plan.Result,
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   "examples/hello-rest/flogo.json",
+		},
+	})
+
+	if !diff.Result.IsStale {
+		t.Fatalf("expected drifted app to be marked stale, got %+v", diff.Result)
+	}
+	if diff.Result.PreviewAvailable {
+		t.Fatalf("expected stale diff preview to be unavailable, got %+v", diff.Result)
+	}
+	if !strings.Contains(diff.Result.StaleReason, "changed after install planning") {
+		t.Fatalf("expected stale reason to mention target app drift, got %+v", diff.Result)
+	}
+}
+
+func TestValidateContributionInstallDiffPlanRequestRequiresSelectedAlias(t *testing.T) {
+	err := validateContributionInstallDiffPlanRequest(contributionInstallDiffPlanRequest{
+		InstallPlan: contributionInstallPlanResult{
+			ContributionKind: "trigger",
+			Source:           "inline_result",
+			TargetApp:        contributionInstallTarget{},
+			Bundle: contributionScaffoldBundle{
+				Kind:        "trigger",
+				ModulePath:  "example.com/acme/webhook",
+				PackageName: "webhooktrigger",
+				BundleRoot:  t.TempDir(),
+				Descriptor: contribDescriptor{
+					Ref:  "example.com/acme/webhook",
+					Type: "trigger",
+				},
+				Files: []generatedContribFile{{Path: "descriptor.json", Kind: "descriptor", Bytes: 2}},
+			},
+			ModulePath:    "example.com/acme/webhook",
+			SelectedAlias: "",
+			InstallReady:  true,
+			Readiness:     "high",
+		},
+	})
+
+	if err == nil {
+		t.Fatal("expected missing selectedAlias to fail")
+	}
+	if !strings.Contains(err.Error(), "installPlan.selectedAlias is required") {
+		t.Fatalf("expected missing selectedAlias error, got %v", err)
+	}
+}
+
 func TestTraceFlowDistinguishesRuntimeBackedAndSimulatedPaths(t *testing.T) {
 	t.Run("runtime-backed direct trace", func(t *testing.T) {
 		app := runtimeBackedTraceTestApp()

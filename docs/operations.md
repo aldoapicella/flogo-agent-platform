@@ -164,10 +164,10 @@ Current behavior:
 
 - artifact metadata is persisted,
 - app-analysis payload URIs are Blob-backed,
-- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `build_log`, and `test_report` artifact payload URIs are also Blob-backed,
+- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `build_log`, and `test_report` artifact payload URIs are also Blob-backed,
 - some broader runtime/task artifact URIs are still logical/local.
 
-If a contribution scaffold, validate, package, or install-plan task fails immediately with a storage-configuration error, verify the same Blob/Azurite connection settings used for app-analysis artifacts.
+If a contribution scaffold, validate, package, install-plan, or install-diff-plan task fails immediately with a storage-configuration error, verify the same Blob/Azurite connection settings used for app-analysis artifacts.
 
 ### Container Apps Job execution does not complete in production mode
 
@@ -187,7 +187,7 @@ Check:
 - contribution catalog and mapping preview are implemented,
 - deeper Core-native composition is not yet implemented,
 - flow contracts, runtime trace capture, replay, and run comparison are now implemented,
-- narrow Activity, Action, and Trigger contribution scaffolding are implemented with isolated build/test proof, shared validation/package is implemented, and reviewable install planning is implemented; install/update apply workflows remain later work.
+- narrow Activity, Action, and Trigger contribution scaffolding are implemented with isolated build/test proof, shared validation/package is implemented, reviewable install planning is implemented, and exact canonical install diff preview is implemented; install/update apply workflows remain later work.
 
 ### Storage
 

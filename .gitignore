@@ -17,4 +17,6 @@ apps/control-plane/dist/
 apps/runner-worker/dist/
 packages/*/dist/
 prisma/dev.db
+docs/project-documentation.md
+scripts/export-project-docs.sh
 

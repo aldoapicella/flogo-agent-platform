@@ -332,13 +332,84 @@ export class OrchestrationService {
       };
     }
 
-    if (mode === "install_contrib_plan") {
+    if (
+      mode === "install_contrib_diff_plan" &&
+      typeof inputs["installPlanArtifactId"] === "string" &&
+      !inputs["installPlanArtifact"] &&
+      !inputs["installPlanResult"]
+    ) {
+      const artifact = await this.taskStore.getArtifact(inputs["installPlanArtifactId"] as string);
+      if (!artifact) {
+        throw new Error(`Contribution install-plan artifact ${String(inputs["installPlanArtifactId"])} was not found`);
+      }
+      if (artifact.type !== "contrib_install_plan") {
+        throw new Error(`Artifact ${artifact.id} is ${artifact.type}, expected contrib_install_plan`);
+      }
+      inputs = {
+        ...inputs,
+        installPlanArtifact: artifact
+      };
+    }
+
+    if (mode === "install_contrib_plan" || mode === "install_contrib_diff_plan") {
+      const targetApp =
+        inputs["targetApp"] && typeof inputs["targetApp"] === "object" && !Array.isArray(inputs["targetApp"])
+          ? (inputs["targetApp"] as Record<string, unknown>)
+          : {};
+      const inlinePlanResult =
+        inputs["installPlanResult"] && typeof inputs["installPlanResult"] === "object" && !Array.isArray(inputs["installPlanResult"])
+          ? (inputs["installPlanResult"] as Record<string, unknown>)
+          : undefined;
+      const artifactPlanResult =
+        inputs["installPlanArtifact"] &&
+        typeof inputs["installPlanArtifact"] === "object" &&
+        !Array.isArray(inputs["installPlanArtifact"]) &&
+        typeof (inputs["installPlanArtifact"] as Record<string, unknown>).metadata === "object" &&
+        !Array.isArray((inputs["installPlanArtifact"] as Record<string, unknown>).metadata)
+          ? ((((inputs["installPlanArtifact"] as Record<string, unknown>).metadata as Record<string, unknown>).result as Record<string, unknown> | undefined))
+          : undefined;
+      const planTargetApp =
+        inlinePlanResult?.targetApp && typeof inlinePlanResult.targetApp === "object" && !Array.isArray(inlinePlanResult.targetApp)
+          ? (inlinePlanResult.targetApp as Record<string, unknown>)
+          : artifactPlanResult?.targetApp && typeof artifactPlanResult.targetApp === "object" && !Array.isArray(artifactPlanResult.targetApp)
+            ? (artifactPlanResult.targetApp as Record<string, unknown>)
+            : undefined;
+
       if (!appPath && parsedRequest.appId) {
         appPath = await this.flogoAppsService.resolveTaskAppPath(parsedRequest.projectId, parsedRequest.appId);
       }
-      if (!appPath) {
-        throw new Error("Contribution install planning requires a target appPath or a resolvable appId.");
+      if (!appPath && typeof targetApp["appPath"] === "string") {
+        appPath = targetApp["appPath"] as string;
       }
+      if (!appPath && planTargetApp && typeof planTargetApp["appPath"] === "string") {
+        appPath = planTargetApp["appPath"] as string;
+      }
+      if (!appPath) {
+        const resolvedAppId =
+          parsedRequest.appId ??
+          (typeof targetApp["appId"] === "string" ? (targetApp["appId"] as string) : undefined) ??
+          (planTargetApp && typeof planTargetApp["appId"] === "string" ? (planTargetApp["appId"] as string) : undefined);
+        if (resolvedAppId) {
+          appPath = await this.flogoAppsService.resolveTaskAppPath(parsedRequest.projectId, resolvedAppId);
+        }
+      }
+      if (!appPath) {
+        throw new Error("Contribution install planning/diff planning requires a target appPath or a resolvable appId.");
+      }
+
+      inputs = {
+        ...inputs,
+        targetApp: {
+          ...planTargetApp,
+          ...targetApp,
+          projectId: parsedRequest.projectId,
+          appId:
+            parsedRequest.appId ??
+            (typeof targetApp["appId"] === "string" ? (targetApp["appId"] as string) : undefined) ??
+            (planTargetApp && typeof planTargetApp["appId"] === "string" ? (planTargetApp["appId"] as string) : undefined),
+          appPath
+        }
+      };
     }
 
     return {
@@ -358,7 +429,7 @@ export class OrchestrationService {
 
     if (!this.storage.isConfigured()) {
       throw new Error(
-        "Contribution artifact storage is not configured. Set APP_ANALYSIS_STORAGE_CONNECTION_STRING, AZURITE_CONNECTION_STRING, or DURABLE_STORAGE_CONNECTION_STRING before running contribution scaffold, validate, package, or install-plan tasks."
+        "Contribution artifact storage is not configured. Set APP_ANALYSIS_STORAGE_CONNECTION_STRING, AZURITE_CONNECTION_STRING, or DURABLE_STORAGE_CONNECTION_STRING before running contribution scaffold, validate, package, install-plan, or install-diff-plan tasks."
       );
     }
 
@@ -393,7 +464,7 @@ export class OrchestrationService {
   private shouldPersistTaskArtifact(
     artifact: ArtifactRef
   ): artifact is ArtifactRef & {
-    type: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "contrib_install_plan" | "build_log" | "test_report";
+    type: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "contrib_install_plan" | "contrib_install_diff_plan" | "build_log" | "test_report";
     metadata: Record<string, unknown>;
   } {
     return (
@@ -402,6 +473,7 @@ export class OrchestrationService {
         artifact.type === "contrib_validation_report" ||
         artifact.type === "contrib_package" ||
         artifact.type === "contrib_install_plan" ||
+        artifact.type === "contrib_install_diff_plan" ||
         artifact.type === "build_log" ||
         artifact.type === "test_report"
       ) &&

@@ -21,7 +21,8 @@
     "dev:web": "pnpm --filter @flogo-agent/web-console dev",
     "dev": "concurrently -n control-plane,orchestrator,runner-worker,web -c blue,cyan,green,magenta \"pnpm dev:control-plane\" \"pnpm dev:orchestrator\" \"pnpm dev:runner-worker\" \"pnpm dev:web\"",
     "compose:up": "docker compose -f infra/local/docker-compose.yml up --build",
-    "compose:down": "docker compose -f infra/local/docker-compose.yml down --remove-orphans"
+    "compose:down": "docker compose -f infra/local/docker-compose.yml down --remove-orphans",
+    "docs:bundle": "./scripts/export-project-docs.sh"
   },
   "devDependencies": {
     "@prisma/client": "^6.19.2",

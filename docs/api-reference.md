@@ -69,6 +69,7 @@ Important analysis-only modes:
 - `inputs.mode = "validate_contrib"`
 - `inputs.mode = "package_contrib"`
 - `inputs.mode = "install_contrib_plan"`
+- `inputs.mode = "install_contrib_diff_plan"`
 - `inputs.mode = "mapping_preview"`
 - `inputs.mode = "mapping_test"`
 - `inputs.mode = "property_plan"`
@@ -298,6 +299,29 @@ Important behavior:
 - if the shared Blob/Azurite storage seam is not configured, the install-planning task fails instead of silently degrading to `memory://` URIs,
 - the resulting plan is review-oriented and includes predicted imports, refs, alias proposals, conflicts, warnings, readiness, recommended next action, and limitations,
 - malformed bundle/package input, weak metadata, or conflicting target-app state fail honestly or lower readiness rather than pretending the install is safe.
+
+### Contribution install-diff-plan task mode
+
+Uses the existing task endpoint with `inputs.mode = "install_contrib_diff_plan"` to consume one previously generated install plan and materialize the exact canonical `flogo.json` preview that would result from that install plan without mutating the target app.
+
+Important input fields:
+
+- `installPlanArtifactId?`
+- `installPlanArtifact?`
+- `installPlanResult?`
+- `targetApp.projectId`
+- `targetApp.appId`
+- `targetApp.appPath?`
+
+Important behavior:
+
+- exact diff preview is analysis-oriented and does not install or mutate an app in this slice,
+- the planner routes the task to a single runner `install_contrib_diff_plan` step,
+- the task accepts exactly one existing install-plan source through a persisted `contrib_install_plan` artifact id, inline artifact metadata, or inline result payload,
+- the task persists a `contrib_install_diff_plan` artifact through the same Blob/Azurite storage seam used for contribution scaffolding, validation, packaging, and install planning,
+- the helper computes the exact predicted canonical import mutation preview against the current `flogo.json`, including before/after fingerprints, changed paths, diff summary, proposed aliases/refs, and recommended next action,
+- if the target app drifted from the install-plan basis or the install-plan fingerprint no longer matches, the diff preview fails honestly or marks the result stale instead of pretending the preview is safe,
+- later install/apply remains explicitly deferred.
 
 ### `GET /v1/tasks`
 
@@ -1169,7 +1193,7 @@ Request shape:
 Workflow behavior:
 
 - mutating workflows use build/run/smoke-oriented runner steps,
-- analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, `preview_mapping`, `infer_flow_contracts`, `extract_subflow`, `inline_subflow`, `add_iterator`, `add_retry_policy`, `add_dowhile`, `add_error_path`, `diagnose_app`, `scaffold_activity`, `scaffold_action`, `scaffold_trigger`, `validate_contrib`, `package_contrib`, or `install_contrib_plan`.
+- analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, `preview_mapping`, `infer_flow_contracts`, `extract_subflow`, `inline_subflow`, `add_iterator`, `add_retry_policy`, `add_dowhile`, `add_error_path`, `diagnose_app`, `scaffold_activity`, `scaffold_action`, `scaffold_trigger`, `validate_contrib`, `package_contrib`, `install_contrib_plan`, or `install_contrib_diff_plan`.
 - analysis-only workflows also support `test_mapping` and `plan_properties`.
 
 ## Runner-worker API

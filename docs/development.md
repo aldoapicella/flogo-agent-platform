@@ -188,10 +188,12 @@ go run ./go-runtime/flogo-helper contrib scaffold-action --request action-scaffo
 go run ./go-runtime/flogo-helper contrib scaffold-trigger --request trigger-scaffold-request.json
 go run ./go-runtime/flogo-helper contrib validate --request contrib-validate-request.json
 go run ./go-runtime/flogo-helper contrib package --request contrib-package-request.json
+go run ./go-runtime/flogo-helper contrib install-plan --app examples/hello-rest/flogo.json --request contrib-install-plan-request.json
+go run ./go-runtime/flogo-helper contrib install-diff-plan --app examples/hello-rest/flogo.json --request contrib-install-diff-plan-request.json
 ```
 
-Those contribution commands are analysis-oriented. The scaffold commands generate reviewable contribution bundles in a temporary workspace, and the validate/package commands accept one existing scaffold result or persisted `contrib_bundle` artifact. All five commands reuse isolated `go mod tidy`, `go test ./...`, and `go build ./...` proof, with packaging additionally emitting one conservative review archive.
-The control-plane now requires the shared Blob/Azurite storage seam to be configured before contribution scaffold, validate, or package tasks are synced; it fails loudly rather than silently keeping those authoring artifacts on `memory://` URIs.
+Those contribution commands are analysis-oriented. The scaffold commands generate reviewable contribution bundles in a temporary workspace, `validate` and `package` accept one existing scaffold result or persisted `contrib_bundle` artifact, `install-plan` accepts one existing bundle/package source plus one target app, and `install-diff-plan` accepts one existing install-plan source plus one target app. All seven commands reuse isolated `go mod tidy`, `go test ./...`, and `go build ./...` proof where applicable, with packaging additionally emitting one conservative review archive and diff planning additionally materializing the exact canonical `flogo.json` preview without mutation.
+The control-plane now requires the shared Blob/Azurite storage seam to be configured before contribution scaffold, validate, package, install-plan, or install-diff-plan tasks are synced; it fails loudly rather than silently keeping those authoring artifacts on `memory://` URIs.
 
 #### Model integration
 
@@ -405,7 +407,7 @@ Current important test areas:
 - Shared packages are consumed from `dist`, so stale package builds can look like app-level type errors.
 - `next build` and Vitest can hit environment-specific `spawn EPERM` failures in restricted Windows shells even when the code is type-correct.
 - Some artifact URIs are still logical/local rather than Blob-backed.
-- App-analysis inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test artifacts are Blob/Azurite-backed, and Activity/Trigger/Action contribution `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `build_log`, and `test_report` artifacts now use the same storage seam; broader runtime artifacts are not yet.
-- The Go helper currently covers the completed Phase 1 inventory/catalog/descriptor/contribution-evidence/governance/composition-compare/mapping-preview/mapping-test/property-plan slice plus the current Phase 2 flow-contract, trigger-binding, subflow-refactor, and advanced control-flow synthesis commands, the current Phase 3 runtime trace/replay/compare slices, and narrow Phase 4 Activity/Action/Trigger scaffold, validate, package, and install-plan commands.
+- App-analysis inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test artifacts are Blob/Azurite-backed, and Activity/Trigger/Action contribution `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `build_log`, and `test_report` artifacts now use the same storage seam; broader runtime artifacts are not yet.
+- The Go helper currently covers the completed Phase 1 inventory/catalog/descriptor/contribution-evidence/governance/composition-compare/mapping-preview/mapping-test/property-plan slice plus the current Phase 2 flow-contract, trigger-binding, subflow-refactor, and advanced control-flow synthesis commands, the current Phase 3 runtime trace/replay/compare slices, and narrow Phase 4 Activity/Action/Trigger scaffold, validate, package, install-plan, and install-diff-plan commands.
 
 If the environment blocks build/test execution, validate the same commands again in CI or an unrestricted local shell before assuming the code is broken.

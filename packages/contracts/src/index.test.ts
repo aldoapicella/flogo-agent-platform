@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ContributionInstallDiffPlanRequestSchema,
+  ContributionInstallDiffPlanResponseSchema,
   ActionScaffoldRequestSchema,
   ActionScaffoldResponseSchema,
   ContributionInstallPlanRequestSchema,
@@ -528,5 +530,163 @@ describe("ContributionInstallPlanResponseSchema", () => {
     expect(parsed.result.readiness).toBe("high");
     expect(parsed.result.proposedRefs[0]?.surface).toBe("triggerRef");
     expect(parsed.result.predictedChanges.noMutation).toBe(true);
+  });
+});
+
+describe("ContributionInstallDiffPlanRequestSchema", () => {
+  it("accepts install diff planning input backed by an install-plan artifact id", () => {
+    const parsed = ContributionInstallDiffPlanRequestSchema.parse({
+      installPlanArtifactId: "artifact-install-plan-1",
+      targetApp: {
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json"
+      }
+    });
+
+    expect(parsed.installPlanArtifactId).toBe("artifact-install-plan-1");
+  });
+
+  it("rejects missing install-plan sources", () => {
+    expect(() => ContributionInstallDiffPlanRequestSchema.parse({})).toThrow(/Provide installPlanArtifactId, installPlanArtifact, or installPlanResult/);
+  });
+
+  it("accepts additive install-plan resolution that carries both an id and a resolved payload", () => {
+    const parsed = ContributionInstallDiffPlanRequestSchema.parse({
+      installPlanArtifactId: "artifact-install-plan-1",
+      installPlanResult: {
+        contributionKind: "trigger",
+        source: "package_artifact",
+        targetApp: {},
+        bundle: {
+          kind: "trigger",
+          modulePath: "example.com/acme/webhook",
+          packageName: "webhooktrigger",
+          bundleRoot: "/tmp/flogo-trigger-webhooktrigger",
+          descriptor: {
+            ref: "example.com/acme/webhook",
+            alias: "webhooktrigger",
+            type: "trigger",
+            name: "webhook-trigger",
+            version: "0.1.0",
+            title: "Webhook Trigger",
+            settings: [],
+            handlerSettings: [],
+            outputs: [],
+            reply: [],
+            examples: [],
+            compatibilityNotes: ["Generated scaffold"],
+            source: "trigger_scaffold"
+          },
+          files: []
+        },
+        modulePath: "example.com/acme/webhook",
+        selectedAlias: "webhooktrigger",
+        installReady: true,
+        readiness: "high",
+        proposedImports: [],
+        proposedRefs: [],
+        predictedChanges: {
+          importsToAdd: [],
+          importsToUpdate: [],
+          reusableRefs: [],
+          summaryLines: [],
+          noMutation: true
+        },
+        warnings: [],
+        conflicts: [],
+        diagnostics: [],
+        recommendedNextAction: "Review the install plan.",
+        limitations: []
+      }
+    });
+
+    expect(parsed.installPlanArtifactId).toBe("artifact-install-plan-1");
+    expect(parsed.installPlanResult?.selectedAlias).toBe("webhooktrigger");
+  });
+});
+
+describe("ContributionInstallDiffPlanResponseSchema", () => {
+  it("parses a conservative exact install diff preview result", () => {
+    const parsed = ContributionInstallDiffPlanResponseSchema.parse({
+      result: {
+        contributionKind: "trigger",
+        sourceContribution: {
+          kind: "trigger",
+          modulePath: "example.com/acme/webhook",
+          packageName: "webhooktrigger",
+          packagePath: "example.com/acme/webhook",
+          descriptorRef: "example.com/acme/webhook",
+          selectedAlias: "webhooktrigger",
+          source: "package_artifact",
+          sourceArtifactId: "artifact-package-1"
+        },
+        targetApp: {
+          projectId: "demo",
+          appId: "hello-rest",
+          appPath: "examples/hello-rest/flogo.json",
+          appName: "hello-rest"
+        },
+        basedOnInstallPlan: {
+          sourceArtifactId: "artifact-install-plan-1",
+          appFingerprint: "app-sha",
+          planFingerprint: "plan-sha"
+        },
+        appFingerprintBefore: "app-sha",
+        appFingerprintAfter: "after-sha",
+        installPlanFingerprint: "plan-sha",
+        isStale: false,
+        previewAvailable: true,
+        installReady: true,
+        readiness: "high",
+        warnings: [],
+        conflicts: [],
+        limitations: ["Diff preview only."],
+        predictedChanges: {
+          importsBefore: [],
+          importsAfter: [
+            {
+              alias: "webhooktrigger",
+              ref: "example.com/acme/webhook",
+              action: "predicted"
+            }
+          ],
+          importsToAdd: [
+            {
+              alias: "webhooktrigger",
+              ref: "example.com/acme/webhook",
+              action: "add"
+            }
+          ],
+          importsToUpdate: [],
+          aliasesToAdd: ["webhooktrigger"],
+          refsToAdd: [
+            {
+              surface: "triggerRef",
+              value: "#webhooktrigger"
+            }
+          ],
+          refsToReuse: [],
+          structuralChanges: ["Add import alias \"webhooktrigger\" for ref \"example.com/acme/webhook\"."],
+          changedPaths: ["imports"],
+          diffEntries: [
+            {
+              path: "imports",
+              changeType: "add",
+              summary: "Add import alias \"webhooktrigger\" for ref \"example.com/acme/webhook\"."
+            }
+          ],
+          noMutation: true
+        },
+        diffSummary: ["imports: add \"webhooktrigger\" -> \"example.com/acme/webhook\""],
+        canonicalBeforeJson: "{\n  \"imports\": []\n}",
+        canonicalAfterJson: "{\n  \"imports\": [{\"alias\":\"webhooktrigger\"}]\n}",
+        recommendedNextAction: "Review the exact canonical import diff."
+      }
+    });
+
+    expect(parsed.result.previewAvailable).toBe(true);
+    expect(parsed.result.predictedChanges.changedPaths).toEqual(["imports"]);
+    expect(parsed.result.sourceContribution.selectedAlias).toBe("webhooktrigger");
   });
 });

@@ -478,6 +478,24 @@ export class RunnerTools {
     });
   }
 
+  async installContribDiffPlan(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "install_contrib_diff_plan",
+      jobKind: "contrib_install_diff_plan",
+      analysisKind: "install_contrib_diff_plan"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued contribution install diff planning job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
   async validateGovernance(spec: unknown): Promise<ToolResponse> {
     const parsed = RunnerJobSpecSchema.parse(spec);
     const result = await this.dispatcher.dispatch({

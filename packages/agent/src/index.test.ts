@@ -317,4 +317,31 @@ describe("TaskPlanner shared contribution lifecycle modes", () => {
       "runner.installContribPlan"
     ]);
   });
+
+  it("treats explicit contribution install diff planning mode as analysis-only authoring work", () => {
+    const planner = new TaskPlanner();
+    const plan = planner.plan({
+      type: "review",
+      projectId: "demo",
+      appId: "hello-rest",
+      requestedBy: "operator",
+      summary: "Preview the exact canonical install diff for a packaged Flogo contribution",
+      inputs: {
+        mode: "install_contrib_diff_plan",
+        installPlanArtifactId: "artifact-install-plan-1"
+      },
+      constraints: {
+        allowDependencyChanges: false,
+        allowCustomCode: false,
+        targetEnv: "dev",
+        requireApproval: true
+      }
+    });
+
+    expect(plan.steps.map((step) => step.tool)).toEqual([
+      "flogo.parseApp",
+      "flogo.validateApp",
+      "runner.installContribDiffPlan"
+    ]);
+  });
 });

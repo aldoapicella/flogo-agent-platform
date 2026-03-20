@@ -12,6 +12,9 @@ import {
   ActionScaffoldResponseSchema,
   type ActionScaffoldResponse,
   ContributionPackageArchiveSchema,
+  ContributionInstallDiffPlanRequestSchema,
+  ContributionInstallDiffPlanResponseSchema,
+  type ContributionInstallDiffPlanResponse,
   ContributionInstallPlanRequestSchema,
   ContributionInstallPlanResponseSchema,
   type ContributionInstallPlanResponse,
@@ -180,6 +183,8 @@ function createCommand(spec: RunnerJobSpec): string[] {
       return createHelperCommand("contrib", "package");
     case "install_contrib_plan":
       return createHelperCommand("contrib", "install-plan", "--app", spec.appPath);
+    case "install_contrib_diff_plan":
+      return createHelperCommand("contrib", "install-diff-plan", "--app", spec.appPath);
     default:
       return ["echo", `runner:${spec.stepType}`];
   }
@@ -243,6 +248,7 @@ function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
     stepType === "validate_contrib" ||
     stepType === "package_contrib" ||
     stepType === "install_contrib_plan" ||
+    stepType === "install_contrib_diff_plan" ||
     stepType === "diagnose_app"
   );
 }
@@ -387,6 +393,107 @@ type ContributionInstallPlanResultLike = {
   limitations: string[];
 };
 
+type ContributionInstallDiffPlanResultLike = {
+  contributionKind: "activity" | "action" | "trigger";
+  sourceContribution: {
+    kind: "activity" | "action" | "trigger";
+    modulePath: string;
+    packageName?: string;
+    packagePath?: string;
+    descriptorRef?: string;
+    selectedAlias: string;
+    source: "inline_result" | "bundle_artifact" | "inline_package" | "package_artifact";
+    sourceArtifactId?: string;
+  };
+  targetApp: {
+    projectId?: string;
+    appId?: string;
+    appPath?: string;
+    appName?: string;
+  };
+  basedOnInstallPlan: {
+    sourceArtifactId?: string;
+    appFingerprint?: string;
+    planFingerprint?: string;
+    targetApp?: {
+      projectId?: string;
+      appId?: string;
+      appPath?: string;
+      appName?: string;
+    };
+  };
+  appFingerprintBefore: string;
+  appFingerprintAfter?: string;
+  installPlanFingerprint?: string;
+  isStale: boolean;
+  staleReason?: string;
+  previewAvailable: boolean;
+  installReady: boolean;
+  readiness: "high" | "medium" | "low";
+  warnings: string[];
+  conflicts: Array<{
+    kind: string;
+    severity: "info" | "warning" | "error";
+    message: string;
+    existingAlias?: string;
+    existingRef?: string;
+    proposedAlias?: string;
+    proposedRef?: string;
+  }>;
+  limitations: string[];
+  predictedChanges: {
+    importsBefore: Array<{
+      alias: string;
+      ref: string;
+      version?: string;
+      action: "add" | "reuse_existing" | "update_existing" | "conflict";
+    }>;
+    importsAfter: Array<{
+      alias: string;
+      ref: string;
+      version?: string;
+      action: "add" | "reuse_existing" | "update_existing" | "conflict";
+    }>;
+    importsToAdd: Array<{
+      alias: string;
+      ref: string;
+      version?: string;
+      action: "add" | "reuse_existing" | "update_existing" | "conflict";
+    }>;
+    importsToUpdate: Array<{
+      alias: string;
+      ref: string;
+      version?: string;
+      action: "add" | "reuse_existing" | "update_existing" | "conflict";
+    }>;
+    aliasesToAdd: string[];
+    refsToAdd: Array<{
+      surface: "activityRef" | "actionRef" | "triggerRef";
+      value: string;
+      note?: string;
+    }>;
+    refsToReuse: Array<{
+      surface: "activityRef" | "actionRef" | "triggerRef";
+      value: string;
+      note?: string;
+    }>;
+    structuralChanges: string[];
+    changedPaths: string[];
+    diffEntries: Array<{
+      path: string;
+      changeType: "add" | "update" | "reuse" | "none";
+      summary: string;
+      before?: unknown;
+      after?: unknown;
+    }>;
+    noMutation: true;
+  };
+  diffSummary: string[];
+  canonicalBeforeJson: string;
+  canonicalAfterJson?: string;
+  recommendedNextAction: string;
+};
+
 function resolveContributionScaffoldResultFromPayload(
   analysisPayload: Record<string, unknown> | undefined
 ): { result: ContributionScaffoldResultLike; source: "inline_result" | "bundle_artifact"; sourceArtifactId?: string } {
@@ -484,6 +591,31 @@ function resolveContributionInstallSourceFromPayload(
     source: resolved.source,
     sourceArtifactId: resolved.sourceArtifactId
   };
+}
+
+function resolveContributionInstallPlanFromPayload(
+  analysisPayload: Record<string, unknown> | undefined
+): { result: ContributionInstallPlanResultLike; sourceArtifactId?: string } {
+  const parsedResult = ContributionInstallPlanResponseSchema.shape.result.safeParse(analysisPayload?.installPlanResult);
+  if (parsedResult.success) {
+    return {
+      result: parsedResult.data as ContributionInstallPlanResultLike
+    };
+  }
+
+  const installPlanArtifact = isRecord(analysisPayload?.installPlanArtifact) ? analysisPayload.installPlanArtifact : undefined;
+  if (installPlanArtifact) {
+    const metadata = isRecord(installPlanArtifact.metadata) ? installPlanArtifact.metadata : undefined;
+    const artifactResult = ContributionInstallPlanResponseSchema.shape.result.safeParse(metadata?.result);
+    if (artifactResult.success) {
+      return {
+        result: artifactResult.data as ContributionInstallPlanResultLike,
+        sourceArtifactId: typeof installPlanArtifact.id === "string" ? installPlanArtifact.id : undefined
+      };
+    }
+  }
+
+  throw new Error("Contribution install diff planning requires an installPlanResult or contrib_install_plan artifact metadata.result payload");
 }
 
 function createContributionScaffoldArtifacts(
@@ -639,6 +771,44 @@ function createContributionInstallPlanArtifacts(
       limitations: result.limitations,
       diagnostics
     })
+  ];
+}
+
+function createContributionInstallDiffPlanArtifacts(
+  spec: RunnerJobSpec,
+  result: ContributionInstallDiffPlanResultLike,
+  diagnostics: Diagnostic[]
+): ArtifactRef[] {
+  return [
+    createAnalysisArtifact(
+      spec,
+      "contrib_install_diff_plan",
+      `${result.contributionKind}-install-diff-plan-${result.sourceContribution.packageName ?? result.sourceContribution.selectedAlias}`,
+      {
+        result,
+        contributionKind: result.contributionKind,
+        sourceContribution: result.sourceContribution,
+        targetApp: result.targetApp,
+        basedOnInstallPlan: result.basedOnInstallPlan,
+        appFingerprintBefore: result.appFingerprintBefore,
+        appFingerprintAfter: result.appFingerprintAfter,
+        installPlanFingerprint: result.installPlanFingerprint,
+        isStale: result.isStale,
+        staleReason: result.staleReason,
+        previewAvailable: result.previewAvailable,
+        installReady: result.installReady,
+        readiness: result.readiness,
+        warnings: result.warnings,
+        conflicts: result.conflicts,
+        limitations: result.limitations,
+        predictedChanges: result.predictedChanges,
+        diffSummary: result.diffSummary,
+        canonicalBeforeJson: result.canonicalBeforeJson,
+        canonicalAfterJson: result.canonicalAfterJson,
+        recommendedNextAction: result.recommendedNextAction,
+        diagnostics
+      }
+    )
   ];
 }
 
@@ -1034,6 +1204,7 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     && spec.stepType !== "validate_contrib"
     && spec.stepType !== "package_contrib"
     && spec.stepType !== "install_contrib_plan"
+    && spec.stepType !== "install_contrib_diff_plan"
   ) {
     return {
       command: createCommand(spec)
@@ -1282,6 +1453,23 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     }, null, 2), "utf8");
     return {
       command: createHelperCommand("contrib", "install-plan", "--app", spec.appPath, "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "install_contrib_diff_plan") {
+    const request = ContributionInstallDiffPlanRequestSchema.parse(spec.analysisPayload ?? {});
+    const resolved = resolveContributionInstallPlanFromPayload(spec.analysisPayload);
+    const requestPath = path.join(tempDir, "contrib-install-diff-plan-request.json");
+    await fs.writeFile(requestPath, JSON.stringify({
+      installPlan: resolved.result,
+      installPlanArtifactId: request.installPlanArtifactId ?? resolved.sourceArtifactId,
+      targetApp: request.targetApp
+    }, null, 2), "utf8");
+    return {
+      command: createHelperCommand("contrib", "install-diff-plan", "--app", spec.appPath, "--request", requestPath),
       cleanup: async () => {
         await fs.rm(tempDir, { recursive: true, force: true });
       }
@@ -1705,6 +1893,11 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
     if (spec.stepType === "install_contrib_plan") {
       const response = ContributionInstallPlanResponseSchema.parse(JSON.parse(stdout) as ContributionInstallPlanResponse);
       return createContributionInstallPlanArtifacts(spec, response.result as ContributionInstallPlanResultLike, diagnostics);
+    }
+
+    if (spec.stepType === "install_contrib_diff_plan") {
+      const response = ContributionInstallDiffPlanResponseSchema.parse(JSON.parse(stdout) as ContributionInstallDiffPlanResponse);
+      return createContributionInstallDiffPlanArtifacts(spec, response.result as ContributionInstallDiffPlanResultLike, diagnostics);
     }
   } catch (error) {
     diagnostics.push({
