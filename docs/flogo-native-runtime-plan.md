@@ -512,6 +512,7 @@ Focus:
 Current status:
 
 - partially implemented in two narrow slices: custom Activity scaffolding and custom Trigger scaffolding now exist as analysis-oriented task modes that generate descriptor metadata plus Go/module/test/readme files and run isolated `go test` / `go build` proof before persisting reviewable artifacts,
+- the resulting `contrib_bundle`, `build_log`, and `test_report` artifacts are now persisted through the control-plane task pipeline and uploaded through the Blob/Azurite storage seam used for app-analysis payloads,
 - action authoring, generalized contribution validation/package/install flows, and automatic install/update into apps remain later work.
 
 ## Current Implementation Baseline
@@ -574,7 +575,7 @@ Analysis-only planner modes:
 - `inputs.mode = "property_plan"`
 - `inputs.mode = "activity_scaffold"`
 - `inputs.mode = "trigger_scaffold"`
-Runner job kinds and execution steps for flow contracts, runtime trace capture, replay, run comparison, trigger binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, contribution evidence, governance, composition comparison, and mapping preview
+Runner job kinds and execution steps for flow contracts, runtime trace capture, replay, run comparison, diagnosis, trigger binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, contribution evidence, governance, composition comparison, mapping preview, and narrow Activity/Trigger scaffolding
 Go helper commands:
 - `flows contracts`
 - `triggers bind`
@@ -617,7 +618,7 @@ Use this section as the working tracker for future implementation slices.
 | Tool layer | Flogo core/mapping tools split plus flow-contract, trigger-binding, subflow-refactor, advanced control-flow dispatch, runtime trace dispatch, replay dispatch, run-comparison dispatch, diagnosis dispatch, and Activity/Trigger scaffold dispatch | Partial | `packages/tools/src/*.ts` | Add action/package authoring tool modules later |
 | Planner | Analysis-only modes, runtime trace/replay/run-comparison/diagnosis planning-execution routing, Flogo-aware step selection, and narrow activity/trigger-scaffold authoring routes | Partial | `packages/agent/src/index.ts` | Expand authoring heuristics beyond Activity/Trigger scaffolding later |
 | Control-plane APIs | Graph, inventory, catalog, descriptor inspection, contribution evidence inspection, flow contracts, runtime trace, replay, run comparison, trigger binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, governance, composition comparison, mapping preview, mapping test, property plan, activity scaffold tasks, trigger scaffold tasks, app artifact listing | Partial | `apps/control-plane/src/modules/flogo-apps/*` | Add dedicated contribution-authoring APIs later if needed |
-| Persistence | Prisma-backed task/event/artifact state plus hidden app-analysis records and Blob-backed analysis payloads | Partial | `apps/control-plane/src/modules/agent/task-store.service.ts`, `apps/control-plane/src/modules/flogo-apps/app-analysis-storage.service.ts` | Extend Blob-backed storage beyond app-analysis artifacts |
+| Persistence | Prisma-backed task/event/artifact state plus hidden app-analysis records, Blob-backed analysis payloads, and Blob-backed contribution authoring bundle/proof payloads | Partial | `apps/control-plane/src/modules/agent/task-store.service.ts`, `apps/control-plane/src/modules/flogo-apps/app-analysis-storage.service.ts` | Extend Blob-backed storage to broader runtime/task artifacts beyond the current analysis and contribution-authoring slices |
 | Runner-worker | Flow-contract, runtime trace, replay, run comparison, trigger-binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, property-plan, diagnosis, and Activity/Trigger scaffold execution support | Partial | `apps/runner-worker/src/services/*` | Add action/package authoring job kinds later |
 | Go helper | Flow-contract, runtime trace, replay, run comparison, trigger-binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, property planning, and Activity/Trigger scaffolding/build-proof | Partial | `go-runtime/flogo-helper/main.go` | Expand contribution authoring beyond Activity/Trigger scaffolding later |
 | Web console | Task detail runtime-evidence inspection plus diagnosis-summary rendering for trace, replay, compare, and diagnosis artifacts | Partial | `apps/web-console` | Add richer compare workflows and a deeper diagnosis workbench |
@@ -636,13 +637,13 @@ When implementing a Flogo-native feature:
 
 ## Recommended Next Slice
 
-The next implementation slice after the current baseline should deepen contribution authoring from the new Activity/Trigger foundation rather than widening runtime trigger breadth again.
+The next implementation slice after the current baseline should harden contribution authoring from the new Activity/Trigger foundation before adding a third authoring family.
 
 Recommended next items:
 
-1. Extend isolated contribution validation/build/test/package/install workflows beyond the current Activity/Trigger-only slices.
-2. Add Phase 4.3 action contribution authoring on the same typed, reviewable scaffold/build-test model.
-3. Keep autonomous install/update behavior deferred until contribution artifacts, validation proof, and review workflows are broader and more explicit.
+1. Extract a shared contribution-authoring proof pipeline so Activity and Trigger scaffolding reuse the same temp-workspace, manifest, `go mod tidy`, `go test ./...`, and `go build ./...` result shaping.
+2. Add Phase 4.3 action contribution authoring on the same typed, reviewable scaffold/build-test model only after that shared proof pipeline is in place.
+3. Keep package/install planning additive and reviewable, and keep autonomous install/update behavior deferred until contribution artifacts, validation proof, and review workflows are broader and more explicit.
 
 ## Source References
 

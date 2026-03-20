@@ -26,6 +26,10 @@ export class AppAnalysisStorageService {
   private readonly config = this.resolveConfig();
   private containerEnsured = false;
 
+  isConfigured(): boolean {
+    return this.config !== undefined;
+  }
+
   async storeJsonArtifact(args: {
     projectId: string;
     appId: string;
@@ -63,37 +67,19 @@ export class AppAnalysisStorageService {
       | "composition_compare";
     payload: Record<string, unknown>;
   }): Promise<StoredJsonArtifact> {
-    if (!this.config) {
-      throw new Error("App analysis storage is not configured");
-    }
-
-    await this.ensureContainer();
-
     const blobPath = `app-analysis/${args.projectId}/${args.appId}/${args.kind}/${args.artifactId}.json`;
-    const body = JSON.stringify(args.payload, null, 2);
-    const url = this.buildBlobUrl(blobPath);
-    const headers = this.createBaseHeaders(Buffer.byteLength(body).toString());
-    headers.set("x-ms-blob-type", "BlockBlob");
-    headers.set("Content-Type", "application/json");
-    headers.set("Authorization", this.buildAuthorizationHeader("PUT", url, headers));
+    return this.storeJsonBlob(blobPath, args.payload);
+  }
 
-    const response = await fetch(url.toString(), {
-      method: "PUT",
-      headers,
-      body
-    });
-
-    if (!response.ok) {
-      const message = await response.text();
-      this.logger.error(`Failed to upload app-analysis artifact ${blobPath}: ${message}`);
-      throw new Error(`Failed to upload app-analysis artifact ${blobPath}: ${response.status}`);
-    }
-
-    return {
-      uri: url.toString(),
-      blobPath,
-      contentType: "application/json"
-    };
+  async storeTaskArtifact(args: {
+    projectId: string;
+    taskId: string;
+    artifactId: string;
+    kind: "contrib_bundle" | "build_log" | "test_report";
+    payload: Record<string, unknown>;
+  }): Promise<StoredJsonArtifact> {
+    const blobPath = `task-artifacts/${args.projectId}/${args.taskId}/${args.kind}/${args.artifactId}.json`;
+    return this.storeJsonBlob(blobPath, args.payload);
   }
 
   async loadJsonArtifact(blobPath: string): Promise<Record<string, unknown>> {
@@ -246,6 +232,39 @@ export class AppAnalysisStorageService {
       .digest("base64");
 
     return `SharedKey ${this.config.accountName}:${signature}`;
+  }
+
+  private async storeJsonBlob(blobPath: string, payload: Record<string, unknown>): Promise<StoredJsonArtifact> {
+    if (!this.config) {
+      throw new Error("App analysis storage is not configured");
+    }
+
+    await this.ensureContainer();
+
+    const body = JSON.stringify(payload, null, 2);
+    const url = this.buildBlobUrl(blobPath);
+    const headers = this.createBaseHeaders(Buffer.byteLength(body).toString());
+    headers.set("x-ms-blob-type", "BlockBlob");
+    headers.set("Content-Type", "application/json");
+    headers.set("Authorization", this.buildAuthorizationHeader("PUT", url, headers));
+
+    const response = await fetch(url.toString(), {
+      method: "PUT",
+      headers,
+      body
+    });
+
+    if (!response.ok) {
+      const message = await response.text();
+      this.logger.error(`Failed to upload JSON artifact ${blobPath}: ${message}`);
+      throw new Error(`Failed to upload JSON artifact ${blobPath}: ${response.status}`);
+    }
+
+    return {
+      uri: url.toString(),
+      blobPath,
+      contentType: "application/json"
+    };
   }
 }
 

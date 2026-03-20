@@ -3078,10 +3078,11 @@ func scaffoldActivity(request activityScaffoldRequest) activityScaffoldResponse 
 		fail(err.Error())
 	}
 
-	prepareProof := runGoContributionCommand(bundleRoot, "mod", "tidy")
-	testProof := runGoContributionCommand(bundleRoot, "test", "./...")
-	buildProof := runGoContributionCommand(bundleRoot, "build", "./...")
-	validation := buildActivityScaffoldValidation(prepareProof, testProof, buildProof)
+	validation, buildProof, testProof := runContributionScaffoldProof(
+		bundleRoot,
+		"Activity",
+		"flogo.contrib.activity",
+	)
 
 	return activityScaffoldResponse{
 		Result: activityScaffoldResult{
@@ -3118,10 +3119,11 @@ func scaffoldTrigger(request triggerScaffoldRequest) triggerScaffoldResponse {
 		fail(err.Error())
 	}
 
-	prepareProof := runGoContributionCommand(bundleRoot, "mod", "tidy")
-	testProof := runGoContributionCommand(bundleRoot, "test", "./...")
-	buildProof := runGoContributionCommand(bundleRoot, "build", "./...")
-	validation := buildTriggerScaffoldValidation(prepareProof, testProof, buildProof)
+	validation, buildProof, testProof := runContributionScaffoldProof(
+		bundleRoot,
+		"Trigger",
+		"flogo.contrib.trigger",
+	)
 
 	return triggerScaffoldResponse{
 		Result: triggerScaffoldResult{
@@ -3760,35 +3762,24 @@ func runGoContributionCommand(dir string, args ...string) contribProofStep {
 	}
 }
 
-func buildActivityScaffoldValidation(prepareProof contribProofStep, testProof contribProofStep, buildProof contribProofStep) validationReport {
-	stages := []validationStageResult{
-		{Stage: "structural", Ok: prepareProof.Ok, Diagnostics: diagnosticsForProof(prepareProof, "flogo.contrib.activity.module_prepare_failed")},
-		{Stage: "regression", Ok: testProof.Ok, Diagnostics: diagnosticsForProof(testProof, "flogo.contrib.activity.test_failed")},
-		{Stage: "build", Ok: buildProof.Ok, Diagnostics: diagnosticsForProof(buildProof, "flogo.contrib.activity.build_failed")},
-	}
-	ok := prepareProof.Ok && buildProof.Ok && testProof.Ok
-	summary := "Activity scaffold generated and passed isolated go test/build proof."
-	if !ok {
-		summary = "Activity scaffold generated but isolated go test/build proof failed."
-	}
-	return validationReport{
-		Ok:        ok,
-		Stages:    stages,
-		Summary:   summary,
-		Artifacts: []map[string]any{},
-	}
+func runContributionScaffoldProof(bundleRoot string, contributionLabel string, diagnosticPrefix string) (validationReport, contribProofStep, contribProofStep) {
+	prepareProof := runGoContributionCommand(bundleRoot, "mod", "tidy")
+	testProof := runGoContributionCommand(bundleRoot, "test", "./...")
+	buildProof := runGoContributionCommand(bundleRoot, "build", "./...")
+	validation := buildContributionScaffoldValidation(contributionLabel, diagnosticPrefix, prepareProof, testProof, buildProof)
+	return validation, buildProof, testProof
 }
 
-func buildTriggerScaffoldValidation(prepareProof contribProofStep, testProof contribProofStep, buildProof contribProofStep) validationReport {
+func buildContributionScaffoldValidation(contributionLabel string, diagnosticPrefix string, prepareProof contribProofStep, testProof contribProofStep, buildProof contribProofStep) validationReport {
 	stages := []validationStageResult{
-		{Stage: "structural", Ok: prepareProof.Ok, Diagnostics: diagnosticsForProof(prepareProof, "flogo.contrib.trigger.module_prepare_failed")},
-		{Stage: "regression", Ok: testProof.Ok, Diagnostics: diagnosticsForProof(testProof, "flogo.contrib.trigger.test_failed")},
-		{Stage: "build", Ok: buildProof.Ok, Diagnostics: diagnosticsForProof(buildProof, "flogo.contrib.trigger.build_failed")},
+		{Stage: "structural", Ok: prepareProof.Ok, Diagnostics: diagnosticsForProof(prepareProof, diagnosticPrefix+".module_prepare_failed")},
+		{Stage: "regression", Ok: testProof.Ok, Diagnostics: diagnosticsForProof(testProof, diagnosticPrefix+".test_failed")},
+		{Stage: "build", Ok: buildProof.Ok, Diagnostics: diagnosticsForProof(buildProof, diagnosticPrefix+".build_failed")},
 	}
 	ok := prepareProof.Ok && buildProof.Ok && testProof.Ok
-	summary := "Trigger scaffold generated and passed isolated go test/build proof."
+	summary := fmt.Sprintf("%s scaffold generated and passed isolated go test/build proof.", contributionLabel)
 	if !ok {
-		summary = "Trigger scaffold generated but isolated go test/build proof failed."
+		summary = fmt.Sprintf("%s scaffold generated but isolated go test/build proof failed.", contributionLabel)
 	}
 	return validationReport{
 		Ok:        ok,

@@ -240,6 +240,7 @@ describe("RunnerExecutorService", () => {
     const bundleMetadata = bundleArtifact?.metadata as
       | {
           result?: { bundle?: { packageName?: string; modulePath?: string; files?: Array<{ kind?: string }> }; validation?: { ok?: boolean }; build?: { ok?: boolean }; test?: { ok?: boolean } };
+          proof?: { validation?: { ok?: boolean }; build?: { ok?: boolean }; test?: { ok?: boolean } };
         }
       | undefined;
 
@@ -253,6 +254,9 @@ describe("RunnerExecutorService", () => {
     expect(bundleMetadata?.result?.validation?.ok).toBe(true);
     expect(bundleMetadata?.result?.build?.ok).toBe(true);
     expect(bundleMetadata?.result?.test?.ok).toBe(true);
+    expect(bundleMetadata?.proof?.validation?.ok).toBe(true);
+    expect((buildArtifact?.metadata as { contributionKind?: string } | undefined)?.contributionKind).toBe("activity");
+    expect((testArtifact?.metadata as { contributionKind?: string } | undefined)?.contributionKind).toBe("activity");
   });
 
   it("rejects invalid activity scaffold input before dispatching the helper", async () => {
@@ -383,6 +387,7 @@ describe("RunnerExecutorService", () => {
             build?: { ok?: boolean };
             test?: { ok?: boolean };
           };
+          proof?: { validation?: { ok?: boolean }; build?: { ok?: boolean }; test?: { ok?: boolean } };
         }
       | undefined;
 
@@ -397,6 +402,9 @@ describe("RunnerExecutorService", () => {
     expect(bundleMetadata?.result?.validation?.ok).toBe(true);
     expect(bundleMetadata?.result?.build?.ok).toBe(true);
     expect(bundleMetadata?.result?.test?.ok).toBe(true);
+    expect(bundleMetadata?.proof?.validation?.ok).toBe(true);
+    expect((buildArtifact?.metadata as { contributionKind?: string } | undefined)?.contributionKind).toBe("trigger");
+    expect((testArtifact?.metadata as { contributionKind?: string } | undefined)?.contributionKind).toBe("trigger");
   });
 
   it("rejects invalid trigger scaffold input before dispatching the helper", async () => {

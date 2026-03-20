@@ -177,6 +177,9 @@ Current workflow modes:
   - `preview_mapping`
   - `test_mapping`
   - `plan_properties`
+  - `diagnose_app`
+  - `scaffold_activity`
+  - `scaffold_trigger`
 
 ## Runner-worker
 
@@ -238,7 +241,7 @@ Responsibilities:
 
 Current limitation:
 
-- the operator UI now surfaces the current runtime-evidence artifacts and diagnosis summaries on task detail pages, but it is still a thin shell without dedicated catalog, mapping-preview, richer diagnosis drill-down, or contribution-authoring workflows.
+- the operator UI now surfaces the current runtime-evidence artifacts, diagnosis summaries, and minimal contribution-authoring artifact summaries on task detail pages, but it is still a thin shell without dedicated catalog, mapping-preview, richer diagnosis drill-down, or a full contribution-authoring workflow.
 
 ## Shared package responsibilities
 
@@ -313,6 +316,7 @@ Implements the current Go-side Flogo-native command surface:
 
 - `flows trace`
 - `flows replay`
+- `flows compare-runs`
 - `flows contracts`
 - `triggers bind`
 - `flows extract-subflow`
@@ -330,6 +334,8 @@ Implements the current Go-side Flogo-native command surface:
 - `preview mapping`
 - `mapping test`
 - `properties plan`
+- `contrib scaffold-activity`
+- `contrib scaffold-trigger`
 
 ## End-to-end runtime flows
 
@@ -416,6 +422,7 @@ The platform has completed the Phase 1 capability area and has implemented Phase
 - diagnosis confidence is now explicitly calibrated against runtime-backed, mixed, artifact-backed-only, simulated-fallback, and contract-inference-only proof quality rather than treated as a flat heuristic,
 - `packages/evals` now includes a diagnosis-focused regression corpus that exercises planner choice, confidence bands, fallback caveats, and recommendation stability across the current trigger families,
 - the web console now exposes task-detail runtime evidence, trigger-specific summaries, normalized steps, fallback reasons, comparison basis, and diagnosis summaries for the currently supported slices,
+- the same task-detail artifact surface now exposes minimal Activity/Trigger authoring result summaries, including contribution type, package/module, generated files, and build/test status from persisted `contrib_bundle` metadata,
 - broader runtime coverage beyond the current narrow supported slices remains planned,
 - analysis-only orchestration modes.
 
@@ -439,20 +446,21 @@ Persisted through Prisma today:
 - app-scoped inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, mapping-test, runtime-trace, replay, and run-comparison artifacts are persisted through hidden synthetic analysis tasks,
 - task-scoped `diagnosis_report` artifacts are persisted through the normal task pipeline and can reference nested trace, replay, and comparison artifacts used during diagnosis,
 - those app-analysis payloads are stored in Blob/Azurite-backed JSON objects,
-- broader task artifacts outside the app-analysis slice still include logical/local URIs.
+- task-scoped `contrib_bundle`, `build_log`, and `test_report` artifacts from Activity/Trigger scaffolding are now also uploaded as Blob/Azurite-backed JSON payloads through the same storage seam while retaining Prisma metadata for task/detail rendering,
+- broader task artifacts outside the app-analysis and contribution-authoring slices can still include logical/local URIs.
 
 ### Planned persistence growth
 
 - blob-backed workspace snapshots,
 - richer Flogo graph projections,
-- contribution bundle artifacts.
+- broader runtime/task artifact payload coverage beyond the current app-analysis and contribution-authoring slices.
 
 ## Key constraints
 
 - `flogo.json` is still the canonical artifact even as the Go helper path grows.
 - The Go helper is intentionally a finite execution binary, not a new always-on service.
 - The current helper uses contribution inventory plus module-aware package discovery, evidence confidence, normalized Flogo metadata, static mapping evaluation, and known-registry inference for the Phase 1 analysis path; it is not yet a full Core/Flow-native runtime.
-- Runtime trace capture, replay, and run comparison are implemented as helper-backed artifact evidence with narrow live direct-flow, REST, timer, CLI, and Channel slices plus comparison-basis preference over persisted artifacts; diagnosis remains recommendation-oriented, confidence is conservatively calibrated against evidence quality and fallback state, and the platform still does not auto-apply repository patches. Contribution authoring now has an activity-only scaffold/build-test foundation, but broader trigger/action/package/install flows remain roadmap work.
+- Runtime trace capture, replay, and run comparison are implemented as helper-backed artifact evidence with narrow live direct-flow, REST, timer, CLI, and Channel slices plus comparison-basis preference over persisted artifacts; diagnosis remains recommendation-oriented, confidence is conservatively calibrated against evidence quality and fallback state, and the platform still does not auto-apply repository patches. Contribution authoring now has a narrow Activity/Trigger scaffold/build-test foundation with blob-backed bundle/proof artifacts and minimal task-detail visibility, but broader action/package/install flows remain roadmap work.
 - In restricted shells on Windows, `next build` and Vitest can fail with `spawn EPERM` even when typecheck is clean.
 
 ## Reference documents

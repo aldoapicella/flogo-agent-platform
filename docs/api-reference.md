@@ -168,7 +168,8 @@ Important behavior:
 
 - activity scaffolding is analysis-oriented and does not install the generated bundle into an app in this slice,
 - the planner routes the task to a single runner `scaffold_activity` step,
-- the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path,
+- the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path, and those artifact payloads are uploaded through the control-plane Blob/Azurite storage seam while remaining visible in task detail metadata,
+- if the shared Blob/Azurite storage seam is not configured, the scaffold task now fails instead of silently degrading those authoring artifacts to `memory://` URIs,
 - supported field types are currently limited to `string`, `integer`, `number`, `boolean`, `object`, `array`, and `any`,
 - this slice covers Activity authoring only; action scaffolding plus broader package/install workflows remain later work.
 
@@ -195,7 +196,8 @@ Important behavior:
 
 - trigger scaffolding is analysis-oriented and does not install the generated bundle into an app in this slice,
 - the planner routes the task to a single runner `scaffold_trigger` step,
-- the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path,
+- the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path, and those artifact payloads are uploaded through the control-plane Blob/Azurite storage seam while remaining visible in task detail metadata,
+- if the shared Blob/Azurite storage seam is not configured, the scaffold task now fails instead of silently degrading those authoring artifacts to `memory://` URIs,
 - supported field types are currently limited to `string`, `integer`, `number`, `boolean`, `object`, `array`, and `any`,
 - this slice covers Trigger authoring only; action scaffolding plus broader package/install workflows remain later work.
 
@@ -1069,7 +1071,7 @@ Request shape:
 Workflow behavior:
 
 - mutating workflows use build/run/smoke-oriented runner steps,
-- analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, `preview_mapping`, `infer_flow_contracts`, `extract_subflow`, `inline_subflow`, `add_iterator`, `add_retry_policy`, `add_dowhile`, or `add_error_path`.
+- analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, `preview_mapping`, `infer_flow_contracts`, `extract_subflow`, `inline_subflow`, `add_iterator`, `add_retry_policy`, `add_dowhile`, `add_error_path`, `diagnose_app`, `scaffold_activity`, or `scaffold_trigger`.
 - analysis-only workflows also support `test_mapping` and `plan_properties`.
 
 ## Runner-worker API

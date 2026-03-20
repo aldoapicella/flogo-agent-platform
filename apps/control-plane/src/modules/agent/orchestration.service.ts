@@ -17,6 +17,7 @@ import {
 } from "@flogo-agent/contracts";
 
 import { TaskEventsService } from "../events/task-events.service.js";
+import { AppAnalysisStorageService } from "../flogo-apps/app-analysis-storage.service.js";
 import { ToolsetService } from "../tools/toolset.service.js";
 import { FlogoAppsService } from "../flogo-apps/flogo-apps.service.js";
 import { OrchestratorClientService } from "./orchestrator-client.service.js";
@@ -31,7 +32,8 @@ export class OrchestrationService {
     private readonly orchestratorClient: OrchestratorClientService,
     private readonly eventsService: TaskEventsService,
     private readonly taskStore: TaskStoreService,
-    private readonly flogoAppsService: FlogoAppsService
+    private readonly flogoAppsService: FlogoAppsService,
+    private readonly storage: AppAnalysisStorageService
   ) {
     this.orchestrator = new OrchestratorAgent({
       modelClient: new StaticModelClient(),
@@ -179,8 +181,9 @@ export class OrchestrationService {
   }
 
   async attachArtifact(taskId: string, artifact: ArtifactRef): Promise<void> {
-    await this.taskStore.syncTaskState(taskId, { artifact });
-    await this.publishEvent(taskId, "artifact", `Artifact published: ${artifact.name}`, { artifact });
+    const persistedArtifact = await this.persistArtifactIfNeeded(taskId, artifact);
+    await this.taskStore.syncTaskState(taskId, { artifact: persistedArtifact });
+    await this.publishEvent(taskId, "artifact", `Artifact published: ${persistedArtifact.name}`, { artifact: persistedArtifact });
   }
 
   async publishExternalEvent(taskId: string, payload: unknown): Promise<StoredTask | undefined> {
@@ -195,7 +198,13 @@ export class OrchestrationService {
   }
 
   async syncTaskState(taskId: string, payload: unknown): Promise<StoredTask | undefined> {
-    const sync = TaskStateSyncSchema.parse(payload);
+    const parsed = TaskStateSyncSchema.parse(payload);
+    const sync = parsed.artifact
+      ? {
+          ...parsed,
+          artifact: await this.persistArtifactIfNeeded(taskId, parsed.artifact)
+        }
+      : parsed;
     const task = await this.taskStore.syncTaskState(taskId, sync);
     if (!task) {
       return undefined;
@@ -282,6 +291,57 @@ export class OrchestrationService {
     return task;
   }
 
+  private async persistArtifactIfNeeded(taskId: string, artifact: ArtifactRef): Promise<ArtifactRef> {
+    if (
+      !this.shouldPersistTaskArtifact(artifact) ||
+      (isRecord(artifact.metadata.storage) && artifact.metadata.storage.kind === "blob")
+    ) {
+      return artifact;
+    }
+
+    if (!this.storage.isConfigured()) {
+      throw new Error(
+        "Contribution artifact storage is not configured. Set APP_ANALYSIS_STORAGE_CONNECTION_STRING, AZURITE_CONNECTION_STRING, or DURABLE_STORAGE_CONNECTION_STRING before running Activity/Trigger scaffolding."
+      );
+    }
+
+    const task = await this.taskStore.getTask(taskId);
+    if (!task) {
+      return artifact;
+    }
+
+    const stored = await this.storage.storeTaskArtifact({
+      projectId: task.request.projectId,
+      taskId,
+      artifactId: artifact.id,
+      kind: artifact.type,
+      payload: artifact.metadata
+    });
+
+    return {
+      ...artifact,
+      uri: stored.uri,
+      metadata: {
+        ...artifact.metadata,
+        storage: {
+          kind: "blob",
+          blobPath: stored.blobPath,
+          contentType: stored.contentType,
+          durablePayload: true
+        }
+      }
+    };
+  }
+
+  private shouldPersistTaskArtifact(
+    artifact: ArtifactRef
+  ): artifact is ArtifactRef & { type: "contrib_bundle" | "build_log" | "test_report"; metadata: Record<string, unknown> } {
+    return (
+      (artifact.type === "contrib_bundle" || artifact.type === "build_log" || artifact.type === "test_report") &&
+      isRecord(artifact.metadata)
+    );
+  }
+
   private mapPlanStepType(tool?: string): TaskStep["type"] {
     if (!tool) {
       return "plan";
@@ -303,4 +363,8 @@ export class OrchestrationService {
     }
     return "plan";
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

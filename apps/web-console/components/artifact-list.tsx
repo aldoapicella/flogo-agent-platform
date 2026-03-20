@@ -14,6 +14,7 @@ function artifactSummary(artifact: ArtifactRef) {
   const validation = result && isRecord(result.validation) ? result.validation : undefined;
   const build = result && isRecord(result.build) ? result.build : undefined;
   const test = result && isRecord(result.test) ? result.test : undefined;
+  const storage = isRecord(artifact.metadata.storage) ? artifact.metadata.storage : undefined;
   const kind = typeof bundle?.kind === "string" ? bundle.kind : undefined;
   const packageName = typeof bundle?.packageName === "string" ? bundle.packageName : undefined;
   const modulePath = typeof bundle?.modulePath === "string" ? bundle.modulePath : undefined;
@@ -28,12 +29,16 @@ function artifactSummary(artifact: ArtifactRef) {
   const validationOk = typeof validation?.ok === "boolean" ? validation.ok : undefined;
   const buildOk = typeof build?.ok === "boolean" ? build.ok : undefined;
   const testOk = typeof test?.ok === "boolean" ? test.ok : undefined;
+  const durablePayload = typeof storage?.durablePayload === "boolean" ? storage.durablePayload : undefined;
+  const blobPath = typeof storage?.blobPath === "string" ? storage.blobPath : undefined;
 
   if (
     !kind &&
     !packageName &&
     !modulePath &&
     !generatedFileSummary &&
+    durablePayload === undefined &&
+    !blobPath &&
     validationOk === undefined &&
     buildOk === undefined &&
     testOk === undefined
@@ -47,6 +52,8 @@ function artifactSummary(artifact: ArtifactRef) {
       {packageName ? <div>package: {packageName}</div> : null}
       {modulePath ? <div>module: {modulePath}</div> : null}
       {generatedFileSummary ? <div>generated files: {generatedFileSummary}</div> : null}
+      {durablePayload !== undefined ? <div>durable payload: {durablePayload ? "blob-backed" : "no"}</div> : null}
+      {blobPath ? <div>blob path: {blobPath}</div> : null}
       {validationOk !== undefined ? <div>validation: {validationOk ? "passed" : "failed"}</div> : null}
       {testOk !== undefined ? <div>test proof: {testOk ? "passed" : "failed"}</div> : null}
       {buildOk !== undefined ? <div>build proof: {buildOk ? "passed" : "failed"}</div> : null}

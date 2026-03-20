@@ -251,6 +251,74 @@ function createNamedArtifact(
   };
 }
 
+type ContributionScaffoldResultLike = {
+  bundle: {
+    kind: "activity" | "trigger";
+    modulePath: string;
+    packageName: string;
+    bundleRoot: string;
+    descriptor: unknown;
+    files: unknown[];
+    readmePath?: string;
+  };
+  validation: unknown;
+  build: {
+    command: string[];
+    ok: boolean;
+    output: string;
+    summary: string;
+  };
+  test: {
+    command: string[];
+    ok: boolean;
+    output: string;
+    summary: string;
+  };
+};
+
+function createContributionScaffoldArtifacts(
+  spec: RunnerJobSpec,
+  result: ContributionScaffoldResultLike,
+  diagnostics: Diagnostic[]
+): ArtifactRef[] {
+  const scaffoldKind = result.bundle.kind;
+  const proof = {
+    validation: result.validation,
+    build: result.build,
+    test: result.test
+  };
+
+  return [
+    createAnalysisArtifact(spec, "contrib_bundle", `${scaffoldKind}-bundle-${result.bundle.packageName}`, {
+      result,
+      descriptor: result.bundle.descriptor,
+      files: result.bundle.files,
+      bundleRoot: result.bundle.bundleRoot,
+      modulePath: result.bundle.modulePath,
+      packageName: result.bundle.packageName,
+      validation: result.validation,
+      build: result.build,
+      test: result.test,
+      proof,
+      diagnostics
+    }),
+    createNamedArtifact(spec.taskId, "build_log", `${spec.taskId}-${scaffoldKind}-build.log`, {
+      command: result.build.command,
+      ok: result.build.ok,
+      output: result.build.output,
+      summary: result.build.summary,
+      contributionKind: scaffoldKind
+    }),
+    createNamedArtifact(spec.taskId, "test_report", `${spec.taskId}-${scaffoldKind}-test.json`, {
+      command: result.test.command,
+      ok: result.test.ok,
+      output: result.test.output,
+      summary: result.test.summary,
+      contributionKind: scaffoldKind
+    })
+  ];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -1214,64 +1282,12 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
 
     if (spec.stepType === "scaffold_activity") {
       const response = ActivityScaffoldResponseSchema.parse(JSON.parse(stdout) as ActivityScaffoldResponse);
-      const result = response.result;
-      return [
-        createAnalysisArtifact(spec, "contrib_bundle", `activity-bundle-${result.bundle.packageName}`, {
-          result,
-          descriptor: result.bundle.descriptor,
-          files: result.bundle.files,
-          bundleRoot: result.bundle.bundleRoot,
-          modulePath: result.bundle.modulePath,
-          packageName: result.bundle.packageName,
-          validation: result.validation,
-          build: result.build,
-          test: result.test,
-          diagnostics
-        }),
-        createNamedArtifact(spec.taskId, "build_log", `${spec.taskId}-activity-build.log`, {
-          command: result.build.command,
-          ok: result.build.ok,
-          output: result.build.output,
-          summary: result.build.summary
-        }),
-        createNamedArtifact(spec.taskId, "test_report", `${spec.taskId}-activity-test.json`, {
-          command: result.test.command,
-          ok: result.test.ok,
-          output: result.test.output,
-          summary: result.test.summary
-        })
-      ];
+      return createContributionScaffoldArtifacts(spec, response.result, diagnostics);
     }
 
     if (spec.stepType === "scaffold_trigger") {
       const response = TriggerScaffoldResponseSchema.parse(JSON.parse(stdout) as TriggerScaffoldResponse);
-      const result = response.result;
-      return [
-        createAnalysisArtifact(spec, "contrib_bundle", `trigger-bundle-${result.bundle.packageName}`, {
-          result,
-          descriptor: result.bundle.descriptor,
-          files: result.bundle.files,
-          bundleRoot: result.bundle.bundleRoot,
-          modulePath: result.bundle.modulePath,
-          packageName: result.bundle.packageName,
-          validation: result.validation,
-          build: result.build,
-          test: result.test,
-          diagnostics
-        }),
-        createNamedArtifact(spec.taskId, "build_log", `${spec.taskId}-trigger-build.log`, {
-          command: result.build.command,
-          ok: result.build.ok,
-          output: result.build.output,
-          summary: result.build.summary
-        }),
-        createNamedArtifact(spec.taskId, "test_report", `${spec.taskId}-trigger-test.json`, {
-          command: result.test.command,
-          ok: result.test.ok,
-          output: result.test.output,
-          summary: result.test.summary
-        })
-      ];
+      return createContributionScaffoldArtifacts(spec, response.result, diagnostics);
     }
   } catch (error) {
     diagnostics.push({

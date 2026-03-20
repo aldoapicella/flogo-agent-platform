@@ -14,6 +14,11 @@ describe("ArtifactList", () => {
             name: "activity-bundle-echoactivity",
             uri: "memory://task-1/activity-bundle-echoactivity",
             metadata: {
+              storage: {
+                kind: "blob",
+                blobPath: "task-artifacts/demo/task-1/contrib_bundle/artifact-1.json",
+                durablePayload: true
+              },
               result: {
                 bundle: {
                   kind: "activity",
@@ -39,6 +44,8 @@ describe("ArtifactList", () => {
     expect(html).toContain("package: echoactivity");
     expect(html).toContain("module: example.com/acme/echo");
     expect(html).toContain("generated files: descriptor, implementation, test");
+    expect(html).toContain("durable payload: blob-backed");
+    expect(html).toContain("blob path: task-artifacts/demo/task-1/contrib_bundle/artifact-1.json");
     expect(html).toContain("validation: passed");
     expect(html).toContain("build proof: passed");
     expect(html).toContain("test proof: failed");
@@ -54,6 +61,11 @@ describe("ArtifactList", () => {
             name: "trigger-bundle-webhooktrigger",
             uri: "memory://task-2/trigger-bundle-webhooktrigger",
             metadata: {
+              storage: {
+                kind: "blob",
+                blobPath: "task-artifacts/demo/task-2/contrib_bundle/artifact-2.json",
+                durablePayload: true
+              },
               result: {
                 bundle: {
                   kind: "trigger",
@@ -80,6 +92,7 @@ describe("ArtifactList", () => {
     expect(html).toContain("package: webhooktrigger");
     expect(html).toContain("module: example.com/acme/webhook");
     expect(html).toContain("generated files: descriptor, metadata, implementation, test");
+    expect(html).toContain("durable payload: blob-backed");
     expect(html).toContain("test proof: passed");
   });
 });
