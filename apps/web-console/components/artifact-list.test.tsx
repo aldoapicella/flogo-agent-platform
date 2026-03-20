@@ -95,4 +95,49 @@ describe("ArtifactList", () => {
     expect(html).toContain("durable payload: blob-backed");
     expect(html).toContain("test proof: passed");
   });
+
+  it("renders action scaffold bundle summaries using the shared contribution artifact surface", () => {
+    const html = renderToStaticMarkup(
+      <ArtifactList
+        artifacts={[
+          {
+            id: "artifact-3",
+            type: "contrib_bundle",
+            name: "action-bundle-flowaction",
+            uri: "memory://task-3/action-bundle-flowaction",
+            metadata: {
+              storage: {
+                kind: "blob",
+                blobPath: "task-artifacts/demo/task-3/contrib_bundle/artifact-3.json",
+                durablePayload: true
+              },
+              result: {
+                bundle: {
+                  kind: "action",
+                  packageName: "flowaction",
+                  modulePath: "example.com/acme/flow-action",
+                  files: [
+                    { kind: "descriptor" },
+                    { kind: "metadata" },
+                    { kind: "implementation" },
+                    { kind: "test" }
+                  ]
+                },
+                validation: { ok: true },
+                build: { ok: true },
+                test: { ok: true }
+              }
+            }
+          }
+        ]}
+      />
+    );
+
+    expect(html).toContain("contribution type: action");
+    expect(html).toContain("package: flowaction");
+    expect(html).toContain("module: example.com/acme/flow-action");
+    expect(html).toContain("generated files: descriptor, metadata, implementation, test");
+    expect(html).toContain("durable payload: blob-backed");
+    expect(html).toContain("build proof: passed");
+  });
 });

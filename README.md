@@ -46,8 +46,8 @@ The current repo supports:
 - trigger binding for REST, Timer, CLI, and Channel trigger profiles,
 - subflow extraction and inlining for explicit contiguous linear task selections,
 - advanced control-flow synthesis for iterators, retry-on-error, and doWhile,
-- analysis-only activity and trigger scaffolding with descriptor metadata, Go skeletons, and isolated build/test proof,
-- a Go helper binary for contribution inventory, contribution catalog, descriptor inspection, contribution evidence inspection, governance validation, composition comparison, mapping preview, mapping test, property planning, flow contract inference, trigger binding, subflow extraction/inlining, advanced control-flow commands, and narrow Activity/Trigger scaffolding/build-proof commands.
+- analysis-only activity, trigger, and narrow action scaffolding with descriptor metadata, Go skeletons, isolated build/test proof, and durable bundle/proof artifacts,
+- a Go helper binary for contribution inventory, contribution catalog, descriptor inspection, contribution evidence inspection, governance validation, composition comparison, mapping preview, mapping test, property planning, flow contract inference, trigger binding, subflow extraction/inlining, advanced control-flow commands, and narrow Activity/Trigger/Action scaffolding/build-proof commands.
 
 ## Flogo-native roadmap
 
@@ -203,7 +203,7 @@ Current notable gaps:
 - Contribution inventory now exists as the evidence layer for catalog/governance/composition analysis and includes module-aware workspace/package discovery plus contribution-evidence confidence, but it still stops short of full `project-flogo/core` package introspection.
 - Contribution inventory, catalog, governance, composition comparison, mapping preview, mapping tests, coercion suggestions, and property planning now cover the intended Phase 1 static-analysis surface.
 - Phase 2 now includes flow contract inference, trigger polymorphism, subflow extraction/inlining, and advanced control-flow synthesis exposed through direct APIs and helper-backed runner/orchestration paths, including error-path templates.
-- Go helper behavior is real for runtime trace capture, replay, and run comparison, flow contracts, trigger binding, subflow extraction/inlining, iterator synthesis, retry-policy synthesis, doWhile synthesis, error-path templates, inventory/catalog/descriptor/contribution-evidence/governance/composition comparison/mapping preview/mapping test/property planning, and narrow Activity/Trigger scaffold/build-test proof paths, but not yet for action scaffolding or broader contribution packaging/install flows.
+- Go helper behavior is real for runtime trace capture, replay, and run comparison, flow contracts, trigger binding, subflow extraction/inlining, iterator synthesis, retry-policy synthesis, doWhile synthesis, error-path templates, inventory/catalog/descriptor/contribution-evidence/governance/composition comparison/mapping preview/mapping test/property planning, and narrow Activity/Trigger/Action scaffold/build-test proof paths, but not yet for broader contribution packaging/install flows.
 - Phase 3 now includes helper-backed runtime trace capture, replay, and run comparison.
-- The next roadmap target is to harden contribution authoring from the new Activity/Trigger foundation with durable bundle/proof artifacts and a shared proof pipeline before adding action scaffolding or broader package/install flows.
+- The next roadmap target is to generalize contribution authoring beyond the current Activity/Trigger/Action scaffold slices into shared validate/build/test/package and later reviewable install/update flows.
 - `next build` and Vitest can hit environment-specific `spawn EPERM` failures in restricted shells even when workspace typecheck is clean.

@@ -253,6 +253,87 @@ func TestValidateActivityScaffoldRequestRejectsUnsupportedFieldTypes(t *testing.
 	}
 }
 
+func TestScaffoldActionGeneratesBundleAndProof(t *testing.T) {
+	response := scaffoldAction(actionScaffoldRequest{
+		ActionName:  "Flow Action",
+		ModulePath:  "example.com/acme/flow-action",
+		Title:       "Flow Action",
+		Description: "Executes reusable flow work.",
+		Version:     "0.1.0",
+		Settings: []contribField{
+			{Name: "mode", Type: "string", Required: true},
+		},
+		Inputs: []contribField{
+			{Name: "payload", Type: "object", Required: true},
+		},
+		Outputs: []contribField{
+			{Name: "result", Type: "object"},
+		},
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	if result.Bundle.Kind != "action" {
+		t.Fatalf("expected action bundle kind, got %+v", result.Bundle)
+	}
+	if result.Bundle.PackageName != "flow_action" {
+		t.Fatalf("expected sanitized package name, got %+v", result.Bundle)
+	}
+	if result.Bundle.ModulePath != "example.com/acme/flow-action" {
+		t.Fatalf("expected module path to round-trip, got %+v", result.Bundle)
+	}
+	if result.Bundle.Descriptor.Type != "action" || result.Bundle.Descriptor.Ref != "example.com/acme/flow-action" {
+		t.Fatalf("expected scaffold descriptor metadata, got %+v", result.Bundle.Descriptor)
+	}
+	if len(result.Bundle.Files) != 6 {
+		t.Fatalf("expected six generated files, got %+v", result.Bundle.Files)
+	}
+	if !generatedFileKindsInclude(result.Bundle.Files, "descriptor", "implementation", "metadata", "test", "module", "readme") {
+		t.Fatalf("expected all scaffold file kinds, got %+v", result.Bundle.Files)
+	}
+	if !result.Validation.Ok {
+		t.Fatalf("expected scaffold validation to pass, got %+v", result.Validation)
+	}
+	if !result.Test.Ok {
+		t.Fatalf("expected isolated go test proof to pass, got %+v", result.Test)
+	}
+	if !result.Build.Ok {
+		t.Fatalf("expected isolated go build proof to pass, got %+v", result.Build)
+	}
+	if !strings.Contains(generatedFileContent(result.Bundle.Files, "descriptor"), "\"type\": \"flogo:action\"") {
+		t.Fatalf("expected descriptor.json scaffold content, got %+v", result.Bundle.Files)
+	}
+	if !strings.Contains(generatedFileContent(result.Bundle.Files, "metadata"), "type Input struct") {
+		t.Fatalf("expected metadata.go scaffold content, got %+v", result.Bundle.Files)
+	}
+	if !strings.Contains(generatedFileContent(result.Bundle.Files, "implementation"), "type Action struct") {
+		t.Fatalf("expected action.go scaffold content, got %+v", result.Bundle.Files)
+	}
+}
+
+func TestValidateActionScaffoldRequestRejectsUnsupportedFieldTypes(t *testing.T) {
+	err := validateActionScaffoldRequest(actionScaffoldRequest{
+		ActionName:  "Broken Action",
+		ModulePath:  "example.com/acme/broken-action",
+		Title:       "Broken Action",
+		Description: "Uses an unsupported field type.",
+		Inputs: []contribField{
+			{Name: "payload", Type: "xml"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected scaffold validation to fail on unsupported field types")
+	}
+	if !strings.Contains(err.Error(), "unsupported action scaffold field type") {
+		t.Fatalf("expected unsupported field type error, got %v", err)
+	}
+}
+
 func TestScaffoldTriggerGeneratesBundleAndProof(t *testing.T) {
 	response := scaffoldTrigger(triggerScaffoldRequest{
 		TriggerName: "Webhook Trigger",

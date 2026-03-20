@@ -64,6 +64,7 @@ Important analysis-only modes:
 - `inputs.mode = "run_comparison"`
 - `inputs.mode = "diagnosis"`
 - `inputs.mode = "activity_scaffold"`
+- `inputs.mode = "action_scaffold"`
 - `inputs.mode = "trigger_scaffold"`
 - `inputs.mode = "mapping_preview"`
 - `inputs.mode = "mapping_test"`
@@ -171,7 +172,34 @@ Important behavior:
 - the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path, and those artifact payloads are uploaded through the control-plane Blob/Azurite storage seam while remaining visible in task detail metadata,
 - if the shared Blob/Azurite storage seam is not configured, the scaffold task now fails instead of silently degrading those authoring artifacts to `memory://` URIs,
 - supported field types are currently limited to `string`, `integer`, `number`, `boolean`, `object`, `array`, and `any`,
-- this slice covers Activity authoring only; action scaffolding plus broader package/install workflows remain later work.
+- this slice covers Activity authoring only; broader contribution validation/package/install workflows remain later work.
+
+### Action scaffold task mode
+
+Uses the existing task endpoint with `inputs.mode = "action_scaffold"` to scaffold one reviewable Flogo Action bundle and run isolated Go build/test proof against that generated bundle.
+
+Important input fields:
+
+- `actionName`
+- `modulePath`
+- `packageName?`
+- `title`
+- `description`
+- `version?`
+- `homepage?`
+- `settings[]`
+- `inputs[]`
+- `outputs[]`
+- `usage?`
+
+Important behavior:
+
+- action scaffolding is analysis-oriented and does not install the generated bundle into an app in this slice,
+- the planner routes the task to a single runner `scaffold_action` step,
+- the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path, and those artifact payloads are uploaded through the control-plane Blob/Azurite storage seam while remaining visible in task detail metadata,
+- if the shared Blob/Azurite storage seam is not configured, the scaffold task now fails instead of silently degrading those authoring artifacts to `memory://` URIs,
+- supported field types are currently limited to `string`, `integer`, `number`, `boolean`, `object`, `array`, and `any`,
+- this slice is narrower than the Activity and Trigger authoring slices because it is based on the repo's current core action model rather than a fuller public authoring workflow, and broader contribution validation/package/install workflows remain later work.
 
 ### Trigger scaffold task mode
 
@@ -199,7 +227,7 @@ Important behavior:
 - the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path, and those artifact payloads are uploaded through the control-plane Blob/Azurite storage seam while remaining visible in task detail metadata,
 - if the shared Blob/Azurite storage seam is not configured, the scaffold task now fails instead of silently degrading those authoring artifacts to `memory://` URIs,
 - supported field types are currently limited to `string`, `integer`, `number`, `boolean`, `object`, `array`, and `any`,
-- this slice covers Trigger authoring only; action scaffolding plus broader package/install workflows remain later work.
+- this slice covers Trigger authoring only; broader contribution validation/package/install workflows remain later work.
 
 ### `GET /v1/tasks`
 

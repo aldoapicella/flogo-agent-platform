@@ -505,6 +505,35 @@ export const ActivityScaffoldRequestSchema = z.object({
 });
 export type ActivityScaffoldRequest = z.infer<typeof ActivityScaffoldRequestSchema>;
 
+export const ActionScaffoldRequestSchema = z.object({
+  actionName: z.string().min(1),
+  modulePath: z.string().min(1),
+  packageName: z.string().min(1).optional(),
+  title: z.string().min(1),
+  description: z.string().min(1),
+  version: z.string().min(1).default("0.0.1"),
+  homepage: z.string().min(1).optional(),
+  settings: z.array(ContribFieldSchema).default([]),
+  inputs: z.array(ContribFieldSchema).default([]),
+  outputs: z.array(ContribFieldSchema).default([]),
+  usage: z.string().optional()
+}).superRefine((value, ctx) => {
+  const supportedTypes = new Set(["string", "integer", "number", "boolean", "object", "array", "any"]);
+  for (const [group, fields] of [["settings", value.settings], ["inputs", value.inputs], ["outputs", value.outputs]] as const) {
+    fields.forEach((field, index) => {
+      const normalized = (field.type ?? "any").trim().toLowerCase();
+      if (!supportedTypes.has(normalized)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Unsupported action scaffold field type ${JSON.stringify(field.type)}. Supported types: string, integer, number, boolean, object, array, any.`,
+          path: [group, index, "type"]
+        });
+      }
+    });
+  }
+});
+export type ActionScaffoldRequest = z.infer<typeof ActionScaffoldRequestSchema>;
+
 export const TriggerScaffoldRequestSchema = z.object({
   triggerName: z.string().min(1),
   modulePath: z.string().min(1),
@@ -569,6 +598,17 @@ export const ActivityScaffoldBundleSchema = z.object({
 });
 export type ActivityScaffoldBundle = z.infer<typeof ActivityScaffoldBundleSchema>;
 
+export const ActionScaffoldBundleSchema = z.object({
+  kind: z.literal("action"),
+  modulePath: z.string(),
+  packageName: z.string(),
+  bundleRoot: z.string(),
+  descriptor: ContribDescriptorSchema,
+  files: z.array(ContribGeneratedFileSchema).default([]),
+  readmePath: z.string().optional()
+});
+export type ActionScaffoldBundle = z.infer<typeof ActionScaffoldBundleSchema>;
+
 export const TriggerScaffoldBundleSchema = z.object({
   kind: z.literal("trigger"),
   modulePath: z.string(),
@@ -592,6 +632,19 @@ export const ActivityScaffoldResponseSchema = z.object({
   result: ActivityScaffoldResultSchema
 });
 export type ActivityScaffoldResponse = z.infer<typeof ActivityScaffoldResponseSchema>;
+
+export const ActionScaffoldResultSchema = z.object({
+  bundle: ActionScaffoldBundleSchema,
+  validation: ValidationReportSchema,
+  build: ContribProofStepSchema,
+  test: ContribProofStepSchema
+});
+export type ActionScaffoldResult = z.infer<typeof ActionScaffoldResultSchema>;
+
+export const ActionScaffoldResponseSchema = z.object({
+  result: ActionScaffoldResultSchema
+});
+export type ActionScaffoldResponse = z.infer<typeof ActionScaffoldResponseSchema>;
 
 export const TriggerScaffoldResultSchema = z.object({
   bundle: TriggerScaffoldBundleSchema,
@@ -1957,6 +2010,7 @@ export const RunnerStepTypeSchema = z.enum([
   "validate_governance",
   "compare_composition",
   "scaffold_activity",
+  "scaffold_action",
   "scaffold_trigger",
   "diagnose_app"
 ]);
@@ -1987,6 +2041,7 @@ export const RunnerJobKindSchema = z.enum([
   "governance",
   "composition_compare",
   "activity_scaffold",
+  "action_scaffold",
   "trigger_scaffold",
   "diagnosis"
 ]);
@@ -2016,6 +2071,7 @@ export const AnalysisKindSchema = z.enum([
   "governance",
   "composition_compare",
   "activity_scaffold",
+  "action_scaffold",
   "trigger_scaffold",
   "diagnosis"
 ]);

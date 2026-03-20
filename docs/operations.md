@@ -164,10 +164,10 @@ Current behavior:
 
 - artifact metadata is persisted,
 - app-analysis payload URIs are Blob-backed,
-- Activity/Trigger `contrib_bundle`, `build_log`, and `test_report` artifact payload URIs are also Blob-backed,
+- Activity/Trigger/Action `contrib_bundle`, `build_log`, and `test_report` artifact payload URIs are also Blob-backed,
 - some broader runtime/task artifact URIs are still logical/local.
 
-If an Activity or Trigger scaffold task fails immediately with a storage-configuration error, verify the same Blob/Azurite connection settings used for app-analysis artifacts.
+If an Activity, Action, or Trigger scaffold task fails immediately with a storage-configuration error, verify the same Blob/Azurite connection settings used for app-analysis artifacts.
 
 ### Container Apps Job execution does not complete in production mode
 
@@ -187,7 +187,7 @@ Check:
 - contribution catalog and mapping preview are implemented,
 - deeper Core-native composition is not yet implemented,
 - flow contracts, runtime trace capture, replay, and run comparison are now implemented,
-- narrow Activity and Trigger contribution scaffolding are implemented with isolated build/test proof; broader package/install workflows remain later work.
+- narrow Activity, Action, and Trigger contribution scaffolding are implemented with isolated build/test proof; broader package/install workflows remain later work.
 
 ### Storage
 

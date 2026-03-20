@@ -202,4 +202,59 @@ describe("orchestrator-http", () => {
     expect(spec.analysisPayload?.outputs).toEqual([{ name: "payload", type: "object" }]);
     expect(spec.analysisPayload?.replies).toEqual([{ name: "status", type: "integer" }]);
   });
+
+  it("routes action scaffold mode to the custom contribution runner step", () => {
+    const start: OrchestratorStartRequest = {
+      taskId: "task-action-scaffold",
+      request: {
+        type: "create",
+        projectId: "demo",
+        requestedBy: "operator",
+        summary: "Scaffold an action bundle",
+        inputs: {
+          mode: "action_scaffold",
+          actionName: "Flow Action",
+          modulePath: "example.com/acme/flow-action",
+          packageName: "flowaction",
+          title: "Flow Action",
+          description: "Executes reusable flow work",
+          version: "0.1.0",
+          homepage: "https://example.com/flow-action",
+          usage: "Reference this action from a trigger handler.",
+          settings: [{ name: "mode", type: "string", required: true }],
+          inputs: [{ name: "payload", type: "object", required: true }],
+          outputs: [{ name: "result", type: "object" }]
+        },
+        constraints: {
+          allowDependencyChanges: false,
+          allowCustomCode: false,
+          targetEnv: "dev",
+          requireApproval: true
+        }
+      },
+      requiredApprovals: [],
+      planSummary: "Scaffold action bundle",
+      steps: []
+    };
+
+    expect(resolveWorkflowRunnerSteps(start)).toEqual(["scaffold_action"]);
+
+    const spec = buildRunnerJobSpec(start, "scaffold_action");
+
+    expect(spec.jobKind).toBe("custom_contrib");
+    expect(spec.analysisKind).toBe("action_scaffold");
+    expect(spec.analysisPayload).toMatchObject({
+      actionName: "Flow Action",
+      modulePath: "example.com/acme/flow-action",
+      packageName: "flowaction",
+      title: "Flow Action",
+      description: "Executes reusable flow work",
+      version: "0.1.0",
+      homepage: "https://example.com/flow-action",
+      usage: "Reference this action from a trigger handler."
+    });
+    expect(spec.analysisPayload?.settings).toEqual([{ name: "mode", type: "string", required: true }]);
+    expect(spec.analysisPayload?.inputs).toEqual([{ name: "payload", type: "object", required: true }]);
+    expect(spec.analysisPayload?.outputs).toEqual([{ name: "result", type: "object" }]);
+  });
 });

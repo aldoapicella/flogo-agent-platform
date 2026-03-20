@@ -288,6 +288,152 @@ describe("RunnerExecutorService", () => {
     ).rejects.toThrow(/Unsupported activity scaffold field type/);
   });
 
+  it("executes helper-backed action scaffolding and publishes bundle plus build/test proof artifacts", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          bundle: {
+            kind: "action",
+            modulePath: "example.com/acme/flow-action",
+            packageName: "flowaction",
+            bundleRoot: "/tmp/flogo-action-flowaction",
+            descriptor: {
+              ref: "example.com/acme/flow-action",
+              alias: "flowaction",
+              type: "action",
+              name: "flow-action",
+              version: "0.1.0",
+              title: "Flow Action",
+              settings: [{ name: "mode", type: "string", required: true }],
+              inputs: [{ name: "payload", type: "object", required: true }],
+              outputs: [{ name: "result", type: "object" }],
+              examples: ["Import the module and wire the action into a handler."],
+              compatibilityNotes: ["Generated scaffold"],
+              source: "action_scaffold"
+            },
+            files: [
+              { path: "/tmp/flogo-action-flowaction/descriptor.json", kind: "descriptor", bytes: 160, content: "{}" },
+              { path: "/tmp/flogo-action-flowaction/action.go", kind: "implementation", bytes: 360, content: "package flowaction" }
+            ],
+            readmePath: "/tmp/flogo-action-flowaction/README.md"
+          },
+          validation: {
+            ok: true,
+            summary: "Action scaffold generated and passed isolated go test/build proof.",
+            stages: [
+              { stage: "structural", ok: true, diagnostics: [] },
+              { stage: "regression", ok: true, diagnostics: [] },
+              { stage: "build", ok: true, diagnostics: [] }
+            ],
+            artifacts: []
+          },
+          build: {
+            kind: "build",
+            ok: true,
+            command: ["go", "build", "./..."],
+            exitCode: 0,
+            summary: "go build ./... succeeded",
+            output: ""
+          },
+          test: {
+            kind: "test",
+            ok: true,
+            command: ["go", "test", "./..."],
+            exitCode: 0,
+            summary: "go test ./... succeeded",
+            output: ""
+          }
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-action-scaffold",
+      jobKind: "custom_contrib",
+      stepType: "scaffold_action",
+      analysisKind: "action_scaffold",
+      snapshotUri: ".",
+      appPath: "flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://action-scaffold",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        actionName: "Flow Action",
+        modulePath: "example.com/acme/flow-action",
+        title: "Flow Action",
+        description: "Executes reusable flow work",
+        version: "0.1.0",
+        settings: [{ name: "mode", type: "string", required: true }],
+        inputs: [{ name: "payload", type: "object", required: true }],
+        outputs: [{ name: "result", type: "object" }]
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    const bundleArtifact = result.artifacts.find((artifact) => artifact.type === "contrib_bundle");
+    const buildArtifact = result.artifacts.find((artifact) => artifact.type === "build_log");
+    const testArtifact = result.artifacts.find((artifact) => artifact.type === "test_report");
+    const bundleMetadata = bundleArtifact?.metadata as
+      | {
+          result?: {
+            bundle?: { kind?: string; packageName?: string; modulePath?: string; files?: Array<{ kind?: string }> };
+            validation?: { ok?: boolean };
+            build?: { ok?: boolean };
+            test?: { ok?: boolean };
+          };
+          proof?: { validation?: { ok?: boolean }; build?: { ok?: boolean }; test?: { ok?: boolean } };
+        }
+      | undefined;
+
+    expect(result.ok).toBe(true);
+    expect(bundleArtifact).toBeDefined();
+    expect(buildArtifact).toBeDefined();
+    expect(testArtifact).toBeDefined();
+    expect(bundleMetadata?.result?.bundle?.kind).toBe("action");
+    expect(bundleMetadata?.result?.bundle?.packageName).toBe("flowaction");
+    expect(bundleMetadata?.result?.bundle?.modulePath).toBe("example.com/acme/flow-action");
+    expect(bundleMetadata?.result?.bundle?.files?.some((file) => file.kind === "descriptor")).toBe(true);
+    expect(bundleMetadata?.result?.validation?.ok).toBe(true);
+    expect(bundleMetadata?.result?.build?.ok).toBe(true);
+    expect(bundleMetadata?.result?.test?.ok).toBe(true);
+    expect(bundleMetadata?.proof?.validation?.ok).toBe(true);
+    expect((buildArtifact?.metadata as { contributionKind?: string } | undefined)?.contributionKind).toBe("action");
+    expect((testArtifact?.metadata as { contributionKind?: string } | undefined)?.contributionKind).toBe("action");
+  });
+
+  it("rejects invalid action scaffold input before dispatching the helper", async () => {
+    const service = new RunnerExecutorService();
+
+    await expect(
+      service.execute({
+        taskId: "task-invalid-action-scaffold",
+        jobKind: "custom_contrib",
+        stepType: "scaffold_action",
+        analysisKind: "action_scaffold",
+        snapshotUri: ".",
+        appPath: "flogo.json",
+        env: {},
+        envSecretRefs: {},
+        timeoutSeconds: 60,
+        artifactOutputUri: "memory://invalid-action-scaffold",
+        jobTemplateName: "flogo-runner",
+        analysisPayload: {
+          actionName: "Broken Action",
+          modulePath: "example.com/acme/broken-action",
+          title: "Broken Action",
+          description: "Has an unsupported field type",
+          inputs: [{ name: "payload", type: "xml" }]
+        },
+        command: [],
+        containerArgs: []
+      })
+    ).rejects.toThrow(/Unsupported action scaffold field type/);
+  });
+
   it("executes helper-backed trigger scaffolding and publishes bundle plus build/test proof artifacts", async () => {
     process.env.FLOGO_HELPER_BIN = await createHelperScript(
       JSON.stringify({

@@ -64,6 +64,7 @@ function getAnalysisMode(
   | "catalog"
   | "contrib_evidence"
   | "activity_scaffold"
+  | "action_scaffold"
   | "trigger_scaffold"
   | "mapping_preview"
   | "mapping_test"
@@ -91,6 +92,7 @@ function getAnalysisMode(
     mode === "catalog" ||
     mode === "contrib_evidence" ||
     mode === "activity_scaffold" ||
+    mode === "action_scaffold" ||
     mode === "trigger_scaffold" ||
     mode === "mapping_preview" ||
     mode === "mapping_test" ||
@@ -180,6 +182,8 @@ export class TaskPlanner {
       steps.push({ id: "evidence", label: "Inspect contribution evidence quality", tool: "runner.inspectContribEvidence" });
     } else if (analysisMode === "activity_scaffold") {
       steps.push({ id: "activity-scaffold", label: "Scaffold a custom Flogo activity bundle with isolated build/test proof", tool: "runner.scaffoldActivity" });
+    } else if (analysisMode === "action_scaffold") {
+      steps.push({ id: "action-scaffold", label: "Scaffold a custom Flogo action bundle with isolated build/test proof", tool: "runner.scaffoldAction" });
     } else if (analysisMode === "trigger_scaffold") {
       steps.push({ id: "trigger-scaffold", label: "Scaffold a custom Flogo trigger bundle with isolated build/test proof", tool: "runner.scaffoldTrigger" });
     } else if (analysisMode === "mapping_preview") {
@@ -267,6 +271,15 @@ export class TaskPlanner {
           id: "activity-scaffold",
           label: "Scaffold a custom Flogo activity bundle with isolated build/test proof",
           tool: "runner.scaffoldActivity"
+        });
+        skipMutationTail = true;
+      }
+
+      if (/(scaffold action|custom action|author action|new flogo action|generate action bundle)/i.test(summary)) {
+        steps.push({
+          id: "action-scaffold",
+          label: "Scaffold a custom Flogo action bundle with isolated build/test proof",
+          tool: "runner.scaffoldAction"
         });
         skipMutationTail = true;
       }

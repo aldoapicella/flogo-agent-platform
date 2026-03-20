@@ -204,7 +204,7 @@ Intended future behavior:
 ## Deployment caveats
 
 - The control-plane runtime now uses Prisma-backed task, event, artifact, build-run, and test-run persistence in the live request path.
-- Blob/Azurite storage is integrated for app-analysis payloads and for contribution-authoring `contrib_bundle`, `build_log`, and `test_report` artifacts; broader runtime/task artifact payloads are still mixed, and Activity/Trigger scaffold tasks now require that storage seam to be configured.
+- Blob/Azurite storage is integrated for app-analysis payloads and for contribution-authoring `contrib_bundle`, `build_log`, and `test_report` artifacts; broader runtime/task artifact payloads are still mixed, and Activity/Action/Trigger scaffold tasks now require that storage seam to be configured.
 - The runner-worker does not yet invoke Azure management APIs to launch real ACA Job executions.
 - The orchestrator app contains Durable Functions definitions, but the repo’s default local path uses the Fastify host.
 

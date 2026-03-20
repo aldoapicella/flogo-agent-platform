@@ -1,9 +1,104 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ActionScaffoldRequestSchema,
+  ActionScaffoldResponseSchema,
   TriggerScaffoldRequestSchema,
   TriggerScaffoldResponseSchema
 } from "./index.js";
+
+describe("ActionScaffoldRequestSchema", () => {
+  it("accepts the narrow supported action scaffold shape", () => {
+    const parsed = ActionScaffoldRequestSchema.parse({
+      actionName: "Flow Action",
+      modulePath: "example.com/acme/flow-action",
+      title: "Flow Action",
+      description: "Executes reusable flow work",
+      settings: [{ name: "mode", type: "string", required: true }],
+      inputs: [{ name: "payload", type: "object", required: true }],
+      outputs: [{ name: "result", type: "object" }]
+    });
+
+    expect(parsed.version).toBe("0.0.1");
+    expect(parsed.settings).toHaveLength(1);
+    expect(parsed.outputs[0]?.name).toBe("result");
+  });
+
+  it("rejects unsupported action scaffold field types", () => {
+    expect(() =>
+      ActionScaffoldRequestSchema.parse({
+        actionName: "Broken Action",
+        modulePath: "example.com/acme/broken-action",
+        title: "Broken Action",
+        description: "Uses an unsupported type",
+        inputs: [{ name: "payload", type: "xml" }]
+      })
+    ).toThrow(/Unsupported action scaffold field type/);
+  });
+});
+
+describe("ActionScaffoldResponseSchema", () => {
+  it("parses action bundle proof metadata with settings and io fields", () => {
+    const parsed = ActionScaffoldResponseSchema.parse({
+      result: {
+        bundle: {
+          kind: "action",
+          modulePath: "example.com/acme/flow-action",
+          packageName: "flowaction",
+          bundleRoot: "/tmp/flogo-action-flowaction",
+          descriptor: {
+            ref: "example.com/acme/flow-action",
+            alias: "flowaction",
+            type: "action",
+            name: "flow-action",
+            version: "0.1.0",
+            title: "Flow Action",
+            settings: [{ name: "mode", type: "string", required: true }],
+            inputs: [{ name: "payload", type: "object", required: true }],
+            outputs: [{ name: "result", type: "object" }],
+            examples: [],
+            compatibilityNotes: ["Generated scaffold"],
+            source: "action_scaffold"
+          },
+          files: [
+            { path: "/tmp/flogo-action-flowaction/descriptor.json", kind: "descriptor", bytes: 180, content: "{}" }
+          ],
+          readmePath: "/tmp/flogo-action-flowaction/README.md"
+        },
+        validation: {
+          ok: true,
+          stages: [
+            { stage: "structural", ok: true, diagnostics: [] },
+            { stage: "regression", ok: true, diagnostics: [] },
+            { stage: "build", ok: true, diagnostics: [] }
+          ],
+          summary: "Action scaffold generated and passed isolated go test/build proof.",
+          artifacts: []
+        },
+        build: {
+          kind: "build",
+          ok: true,
+          command: ["go", "build", "./..."],
+          exitCode: 0,
+          summary: "go build ./... succeeded",
+          output: ""
+        },
+        test: {
+          kind: "test",
+          ok: true,
+          command: ["go", "test", "./..."],
+          exitCode: 0,
+          summary: "go test ./... succeeded",
+          output: ""
+        }
+      }
+    });
+
+    expect(parsed.result.bundle.descriptor.type).toBe("action");
+    expect(parsed.result.bundle.descriptor.inputs[0]?.name).toBe("payload");
+    expect(parsed.result.bundle.kind).toBe("action");
+  });
+});
 
 describe("TriggerScaffoldRequestSchema", () => {
   it("accepts the narrow supported trigger scaffold shape", () => {

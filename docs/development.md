@@ -180,15 +180,16 @@ Run comparison builds on persisted trace and replay artifacts. The helper parity
 go run ./go-runtime/flogo-helper flows compare-runs --app examples/hello-rest/flogo.json --request compare-runs-request.json
 ```
 
-Contribution authoring now has narrow Activity and Trigger scaffold commands. The helper commands are:
+Contribution authoring now has narrow Activity, Action, and Trigger scaffold commands. The helper commands are:
 
 ```bash
 go run ./go-runtime/flogo-helper contrib scaffold-activity --request activity-scaffold-request.json
+go run ./go-runtime/flogo-helper contrib scaffold-action --request action-scaffold-request.json
 go run ./go-runtime/flogo-helper contrib scaffold-trigger --request trigger-scaffold-request.json
 ```
 
 Those scaffold commands are analysis-oriented. They generate reviewable contribution bundles in a temporary workspace, run isolated `go mod tidy`, `go test ./...`, and `go build ./...`, and return persisted `contrib_bundle`, `build_log`, and `test_report` artifacts through the runner path.
-The control-plane now requires the shared Blob/Azurite storage seam to be configured before Activity or Trigger scaffold tasks are synced; it fails loudly rather than silently keeping those authoring artifacts on `memory://` URIs.
+The control-plane now requires the shared Blob/Azurite storage seam to be configured before Activity, Action, or Trigger scaffold tasks are synced; it fails loudly rather than silently keeping those authoring artifacts on `memory://` URIs.
 
 #### Model integration
 
@@ -402,7 +403,7 @@ Current important test areas:
 - Shared packages are consumed from `dist`, so stale package builds can look like app-level type errors.
 - `next build` and Vitest can hit environment-specific `spawn EPERM` failures in restricted Windows shells even when the code is type-correct.
 - Some artifact URIs are still logical/local rather than Blob-backed.
-- App-analysis inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test artifacts are Blob/Azurite-backed, and Activity/Trigger `contrib_bundle`, `build_log`, and `test_report` artifacts now use the same storage seam; broader runtime artifacts are not yet.
-- The Go helper currently covers the completed Phase 1 inventory/catalog/descriptor/contribution-evidence/governance/composition-compare/mapping-preview/mapping-test/property-plan slice plus the current Phase 2 flow-contract, trigger-binding, subflow-refactor, and advanced control-flow synthesis commands, the current Phase 3 runtime trace/replay/compare slices, and narrow Phase 4 Activity/Trigger scaffold commands.
+- App-analysis inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test artifacts are Blob/Azurite-backed, and Activity/Trigger/Action `contrib_bundle`, `build_log`, and `test_report` artifacts now use the same storage seam; broader runtime artifacts are not yet.
+- The Go helper currently covers the completed Phase 1 inventory/catalog/descriptor/contribution-evidence/governance/composition-compare/mapping-preview/mapping-test/property-plan slice plus the current Phase 2 flow-contract, trigger-binding, subflow-refactor, and advanced control-flow synthesis commands, the current Phase 3 runtime trace/replay/compare slices, and narrow Phase 4 Activity/Action/Trigger scaffold commands.
 
 If the environment blocks build/test execution, validate the same commands again in CI or an unrestricted local shell before assuming the code is broken.
