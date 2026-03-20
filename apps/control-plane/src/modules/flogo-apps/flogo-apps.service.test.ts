@@ -651,6 +651,114 @@ describe("FlogoAppsService", () => {
     expect(storedPayloads.some((entry) => entry.blobPath.includes("/run_trace/"))).toBe(true);
   });
 
+  it("persists Channel runtime trace metadata for the narrow Channel slice", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        trace: {
+          appName: "channel-app",
+          flowId: "orchestrate",
+          evidenceKind: "runtime_backed",
+          runtimeEvidence: {
+            kind: "runtime_backed",
+            recorderBacked: true,
+            recorderKind: "flow_state_recorder",
+            recorderMode: "full",
+            runtimeMode: "channel_trigger",
+            channelTriggerRuntime: {
+              kind: "channel",
+              settings: {
+                channels: ["orders:1"]
+              },
+              handler: {
+                name: "channel",
+                channel: "orders",
+                bufferSize: 1
+              },
+              data: {
+                orderId: "123"
+              },
+              flowInput: {
+                order: {
+                  id: "123"
+                }
+              },
+              flowOutput: {
+                status: "accepted"
+              },
+              unavailableFields: [],
+              diagnostics: []
+            },
+            normalizedSteps: [
+              {
+                taskId: "prepare",
+                status: "completed",
+                resolvedInputs: {
+                  order: {
+                    id: "123"
+                  }
+                },
+                producedOutputs: {
+                  status: "accepted"
+                },
+                unavailableFields: [],
+                diagnostics: []
+              }
+            ],
+            steps: [{ id: "prepare" }]
+          },
+          summary: {
+            flowId: "orchestrate",
+            status: "completed",
+            input: {
+              order: {
+                id: "123"
+              }
+            },
+            output: {
+              status: "accepted"
+            },
+            stepCount: 1,
+            diagnostics: []
+          },
+          steps: [
+            {
+              taskId: "prepare",
+              status: "completed",
+              diagnostics: []
+            }
+          ],
+          diagnostics: []
+        }
+      })
+    );
+
+    const storedAppPath = await createSubflowStoredAppFile();
+    const { service, storedPayloads } = createService({
+      storedAppPath,
+      storedAppId: "subflow-app",
+      storedAppName: "subflow-app"
+    });
+
+    const response = await service.traceFlow("demo", "subflow-app", {
+      flowId: "orchestrate",
+      sampleInput: {
+        data: {
+          orderId: "123"
+        }
+      }
+    });
+
+    expect(response?.trace?.runtimeEvidence?.channelTriggerRuntime?.kind).toBe("channel");
+    expect(response?.artifact?.metadata?.traceComparisonBasisPreference).toBe("channel_runtime_boundary");
+    expect(response?.artifact?.metadata?.traceChannelTriggerRuntimeEvidence).toBe(true);
+    expect(response?.artifact?.metadata?.traceChannelTriggerRuntimeKind).toBe("channel");
+    expect(response?.artifact?.metadata?.traceChannelTriggerRuntimeChannel).toBe("orders");
+    expect(response?.artifact?.metadata?.traceChannelTriggerRuntimeHasData).toBe(true);
+    expect(response?.artifact?.metadata?.traceChannelTriggerRuntimeHasMappedFlowInput).toBe(true);
+    expect(response?.artifact?.metadata?.traceChannelTriggerRuntimeHasMappedFlowOutput).toBe(true);
+    expect(storedPayloads.some((entry) => entry.blobPath.includes("/run_trace/"))).toBe(true);
+  });
+
   it("plans a replay with explicit input without mutating the app file", async () => {
     const storedAppPath = await createSubflowStoredAppFile();
     const { service, storedPayloads } = createService({
@@ -924,6 +1032,182 @@ describe("FlogoAppsService", () => {
     expect(response?.artifact?.metadata?.replayTimerTriggerRuntimeStartDelay).toBe("10s");
     expect(response?.artifact?.metadata?.replayTimerTriggerRuntimeRepeatInterval).toBe("30s");
     expect(response?.artifact?.metadata?.replayTimerTriggerRuntimeTickObserved).toBe(true);
+    expect(storedPayloads.some((entry) => entry.blobPath.includes("/replay_report/"))).toBe(true);
+  });
+
+  it("replays a channel-backed trace and persists channel replay metadata", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          summary: {
+            flowId: "orchestrate",
+            status: "completed",
+            inputSource: "explicit_input",
+            baseInput: {
+              data: {
+                orderId: "123"
+              }
+            },
+            effectiveInput: {
+              data: {
+                orderId: "123"
+              }
+            },
+            overridesApplied: false,
+            diagnostics: []
+          },
+          runtimeEvidence: {
+            kind: "runtime_backed",
+            recorderBacked: true,
+            recorderKind: "flow_state_recorder",
+            recorderMode: "full",
+            runtimeMode: "channel_trigger_replay",
+            channelTriggerRuntime: {
+              kind: "channel",
+              settings: {
+                channels: ["orders:1"]
+              },
+              handler: {
+                name: "channel",
+                channel: "orders",
+                bufferSize: 1
+              },
+              data: {
+                orderId: "123"
+              },
+              flowInput: {
+                order: {
+                  id: "123"
+                }
+              },
+              flowOutput: {
+                status: "accepted"
+              },
+              unavailableFields: [],
+              diagnostics: []
+            },
+            normalizedSteps: [
+              {
+                taskId: "prepare",
+                status: "completed",
+                resolvedInputs: {
+                  order: {
+                    id: "123"
+                  }
+                },
+                producedOutputs: {
+                  status: "accepted"
+                },
+                unavailableFields: [],
+                diagnostics: []
+              }
+            ],
+            steps: [{ id: "prepare" }]
+          },
+          trace: {
+            appName: "subflow-app",
+            flowId: "orchestrate",
+            evidenceKind: "runtime_backed",
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "channel_trigger_replay",
+              channelTriggerRuntime: {
+                kind: "channel",
+                settings: {
+                  channels: ["orders:1"]
+                },
+                handler: {
+                  name: "channel",
+                  channel: "orders",
+                  bufferSize: 1
+                },
+                data: {
+                  orderId: "123"
+                },
+                flowInput: {
+                  order: {
+                    id: "123"
+                  }
+                },
+                flowOutput: {
+                  status: "accepted"
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              normalizedSteps: [
+                {
+                  taskId: "prepare",
+                  status: "completed",
+                  resolvedInputs: {
+                    order: {
+                      id: "123"
+                    }
+                  },
+                  producedOutputs: {
+                    status: "accepted"
+                  },
+                  unavailableFields: [],
+                  diagnostics: []
+                }
+              ],
+              steps: [{ id: "prepare" }]
+            },
+            summary: {
+              flowId: "orchestrate",
+              status: "completed",
+              input: {
+                data: {
+                  orderId: "123"
+                }
+              },
+              output: {
+                status: "accepted"
+              },
+              stepCount: 1,
+              diagnostics: []
+            },
+            steps: [
+              {
+                taskId: "prepare",
+                status: "completed",
+                diagnostics: []
+              }
+            ],
+            diagnostics: []
+          }
+        }
+      })
+    );
+
+    const storedAppPath = await createSubflowStoredAppFile();
+    const { service, storedPayloads } = createService({
+      storedAppPath,
+      storedAppId: "subflow-app",
+      storedAppName: "subflow-app"
+    });
+
+    const response = await service.replayFlow("demo", "subflow-app", {
+      flowId: "orchestrate",
+      baseInput: {
+        data: {
+          orderId: "123"
+        }
+      },
+      validateOnly: false
+    });
+
+    expect(response?.artifact?.metadata?.replayComparisonBasisPreference).toBe("channel_runtime_boundary");
+    expect(response?.artifact?.metadata?.replayChannelTriggerRuntimeEvidence).toBe(true);
+    expect(response?.artifact?.metadata?.replayChannelTriggerRuntimeKind).toBe("channel");
+    expect(response?.artifact?.metadata?.replayChannelTriggerRuntimeChannel).toBe("orders");
+    expect(response?.artifact?.metadata?.replayChannelTriggerRuntimeHasData).toBe(true);
+    expect(response?.artifact?.metadata?.replayChannelTriggerRuntimeHasMappedFlowInput).toBe(true);
+    expect(response?.artifact?.metadata?.replayChannelTriggerRuntimeHasMappedFlowOutput).toBe(true);
+    expect(response?.artifact?.metadata?.channelReplay?.comparisonBasis).toBe("channel_runtime_boundary");
     expect(storedPayloads.some((entry) => entry.blobPath.includes("/replay_report/"))).toBe(true);
   });
 
@@ -1635,6 +1919,288 @@ describe("FlogoAppsService", () => {
     expect(response?.result?.timerComparison?.flowInputCompared).toBe(true);
     expect(response?.result?.timerComparison?.flowOutputCompared).toBe(true);
     expect(response?.result?.timerComparison?.tickCompared).toBe(true);
+    expect(storedPayloads.some((entry) => entry.blobPath.includes("/run_comparison/"))).toBe(true);
+  });
+
+  it("compares channel-backed trace and replay artifacts using channel boundary evidence", async () => {
+    const traceHelper = await createHelperScript(
+      JSON.stringify({
+        trace: {
+          appName: "channel-app",
+          flowId: "orchestrate",
+          evidenceKind: "runtime_backed",
+          runtimeEvidence: {
+            kind: "runtime_backed",
+            recorderBacked: true,
+            recorderKind: "flow_state_recorder",
+            recorderMode: "full",
+            runtimeMode: "channel_trigger",
+            channelTriggerRuntime: {
+              kind: "channel",
+              settings: {
+                channels: ["orders:1"]
+              },
+              handler: {
+                name: "channel",
+                channel: "orders",
+                bufferSize: 1
+              },
+              data: {
+                orderId: "123"
+              },
+              flowInput: {
+                order: {
+                  id: "123"
+                }
+              },
+              flowOutput: {
+                status: "accepted"
+              },
+              unavailableFields: [],
+              diagnostics: []
+            },
+            normalizedSteps: [
+              {
+                taskId: "prepare",
+                status: "completed",
+                resolvedInputs: {
+                  order: {
+                    id: "123"
+                  }
+                },
+                producedOutputs: {
+                  status: "accepted"
+                },
+                unavailableFields: [],
+                diagnostics: []
+              }
+            ],
+            steps: [{ id: "prepare" }]
+          },
+          summary: {
+            flowId: "orchestrate",
+            status: "completed",
+            input: {
+              data: {
+                orderId: "123"
+              }
+            },
+            output: {
+              status: "accepted"
+            },
+            stepCount: 1,
+            diagnostics: []
+          },
+          steps: [
+            {
+              taskId: "prepare",
+              status: "completed",
+              diagnostics: []
+            }
+          ],
+          diagnostics: []
+        }
+      })
+    );
+    const replayHelper = await createHelperScript(
+      JSON.stringify({
+        result: {
+          summary: {
+            flowId: "orchestrate",
+            status: "completed",
+            inputSource: "explicit_input",
+            baseInput: {
+              data: {
+                orderId: "123"
+              }
+            },
+            effectiveInput: {
+              data: {
+                orderId: "456"
+              }
+            },
+            overridesApplied: true,
+            diagnostics: []
+          },
+          runtimeEvidence: {
+            kind: "runtime_backed",
+            recorderBacked: true,
+            recorderKind: "flow_state_recorder",
+            recorderMode: "full",
+            runtimeMode: "channel_trigger_replay",
+            channelTriggerRuntime: {
+              kind: "channel",
+              settings: {
+                channels: ["orders:1"]
+              },
+              handler: {
+                name: "channel",
+                channel: "orders",
+                bufferSize: 1
+              },
+              data: {
+                orderId: "456"
+              },
+              flowInput: {
+                order: {
+                  id: "456"
+                }
+              },
+              flowOutput: {
+                status: "accepted"
+              },
+              unavailableFields: [],
+              diagnostics: []
+            },
+            normalizedSteps: [
+              {
+                taskId: "prepare",
+                status: "completed",
+                resolvedInputs: {
+                  order: {
+                    id: "456"
+                  }
+                },
+                producedOutputs: {
+                  status: "accepted"
+                },
+                unavailableFields: [],
+                diagnostics: []
+              }
+            ],
+            steps: [{ id: "prepare" }]
+          },
+          trace: {
+            appName: "channel-app",
+            flowId: "orchestrate",
+            evidenceKind: "runtime_backed",
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "channel_trigger_replay",
+              channelTriggerRuntime: {
+                kind: "channel",
+                settings: {
+                  channels: ["orders:1"]
+                },
+                handler: {
+                  name: "channel",
+                  channel: "orders",
+                  bufferSize: 1
+                },
+                data: {
+                  orderId: "456"
+                },
+                flowInput: {
+                  order: {
+                    id: "456"
+                  }
+                },
+                flowOutput: {
+                  status: "accepted"
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              normalizedSteps: [
+                {
+                  taskId: "prepare",
+                  status: "completed",
+                  resolvedInputs: {
+                    order: {
+                      id: "456"
+                    }
+                  },
+                  producedOutputs: {
+                    status: "accepted"
+                  },
+                  unavailableFields: [],
+                  diagnostics: []
+                }
+              ],
+              steps: [{ id: "prepare" }]
+            },
+            summary: {
+              flowId: "orchestrate",
+              status: "completed",
+              input: {
+                data: {
+                  orderId: "456"
+                }
+              },
+              output: {
+                status: "accepted"
+              },
+              stepCount: 1,
+              diagnostics: []
+            },
+            steps: [
+              {
+                taskId: "prepare",
+                status: "completed",
+                diagnostics: []
+              }
+            ],
+            diagnostics: []
+          }
+        }
+      })
+    );
+
+    const storedAppPath = await createSubflowStoredAppFile();
+    const { service, storedPayloads } = createService({
+      storedAppPath,
+      storedAppId: "subflow-app",
+      storedAppName: "subflow-app"
+    });
+
+    process.env.FLOGO_HELPER_BIN = traceHelper;
+    await service.traceFlow("demo", "subflow-app", {
+      flowId: "orchestrate",
+      sampleInput: {
+        data: {
+          orderId: "123"
+        }
+      }
+    });
+
+    process.env.FLOGO_HELPER_BIN = replayHelper;
+    await service.replayFlow("demo", "subflow-app", {
+      flowId: "orchestrate",
+      baseInput: {
+        data: {
+          orderId: "123"
+        }
+      },
+      overrides: {
+        data: {
+          orderId: "456"
+        }
+      }
+    });
+
+    const artifacts = await service.listArtifacts("demo", "subflow-app");
+    const left = artifacts?.find((artifact) => artifact.type === "run_trace");
+    const right = artifacts?.find((artifact) => artifact.type === "replay_report");
+    const response = await service.compareRuns("demo", "subflow-app", {
+      leftArtifactId: left?.id,
+      rightArtifactId: right?.id
+    });
+
+    expect(response?.artifact?.metadata?.comparisonBasis).toBe("channel_runtime_boundary");
+    expect(response?.artifact?.metadata?.leftChannelTriggerRuntimeEvidence).toBe(true);
+    expect(response?.artifact?.metadata?.rightChannelTriggerRuntimeEvidence).toBe(true);
+    expect(response?.artifact?.metadata?.leftChannelTriggerRuntimeKind).toBe("channel");
+    expect(response?.artifact?.metadata?.rightChannelTriggerRuntimeKind).toBe("channel");
+    expect(response?.artifact?.metadata?.leftChannelTriggerRuntimeChannel).toBe("orders");
+    expect(response?.artifact?.metadata?.rightChannelTriggerRuntimeChannel).toBe("orders");
+    expect(response?.artifact?.metadata?.channelComparisonBasis).toBe("channel_runtime_boundary");
+    expect(response?.artifact?.metadata?.channelCompared).toBe(true);
+    expect(response?.artifact?.metadata?.channelDataCompared).toBe(true);
+    expect(response?.result?.channelComparison?.comparisonBasis).toBe("channel_runtime_boundary");
+    expect(response?.result?.channelComparison?.channelCompared).toBe(true);
     expect(storedPayloads.some((entry) => entry.blobPath.includes("/run_comparison/"))).toBe(true);
   });
 

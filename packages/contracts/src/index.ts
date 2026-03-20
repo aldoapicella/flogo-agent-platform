@@ -676,6 +676,7 @@ export type RunTraceEvidenceKind = z.infer<typeof RunTraceEvidenceKindSchema>;
 
 export const RunComparisonBasisSchema = z.enum([
   "normalized_runtime_evidence",
+  "channel_runtime_boundary",
   "rest_runtime_envelope",
   "timer_runtime_startup",
   "recorder_backed",
@@ -831,6 +832,36 @@ export const CLITriggerRuntimeEvidenceSchema = z
   .passthrough();
 export type CLITriggerRuntimeEvidence = z.infer<typeof CLITriggerRuntimeEvidenceSchema>;
 
+export const ChannelTriggerRuntimeSettingsEvidenceSchema = z
+  .object({
+    channels: z.array(z.string()).default([])
+  })
+  .passthrough();
+export type ChannelTriggerRuntimeSettingsEvidence = z.infer<typeof ChannelTriggerRuntimeSettingsEvidenceSchema>;
+
+export const ChannelTriggerRuntimeHandlerEvidenceSchema = z
+  .object({
+    name: z.string().optional(),
+    channel: z.string().optional(),
+    bufferSize: z.number().int().optional()
+  })
+  .passthrough();
+export type ChannelTriggerRuntimeHandlerEvidence = z.infer<typeof ChannelTriggerRuntimeHandlerEvidenceSchema>;
+
+export const ChannelTriggerRuntimeEvidenceSchema = z
+  .object({
+    kind: z.literal("channel"),
+    settings: ChannelTriggerRuntimeSettingsEvidenceSchema.optional(),
+    handler: ChannelTriggerRuntimeHandlerEvidenceSchema.optional(),
+    data: z.unknown().optional(),
+    flowInput: z.record(z.string(), z.unknown()).optional(),
+    flowOutput: z.record(z.string(), z.unknown()).optional(),
+    unavailableFields: z.array(z.string()).default([]),
+    diagnostics: z.array(DiagnosticSchema).default([])
+  })
+  .passthrough();
+export type ChannelTriggerRuntimeEvidence = z.infer<typeof ChannelTriggerRuntimeEvidenceSchema>;
+
 export const NormalizedRuntimeStepEvidenceSchema = z
   .object({
     taskId: z.string(),
@@ -870,7 +901,8 @@ export const RuntimeEvidenceSchema = z.object({
   normalizedSteps: z.array(NormalizedRuntimeStepEvidenceSchema).optional(),
   restTriggerRuntime: RestTriggerRuntimeEvidenceSchema.optional(),
   cliTriggerRuntime: CLITriggerRuntimeEvidenceSchema.optional(),
-  timerTriggerRuntime: TimerTriggerRuntimeEvidenceSchema.optional()
+  timerTriggerRuntime: TimerTriggerRuntimeEvidenceSchema.optional(),
+  channelTriggerRuntime: ChannelTriggerRuntimeEvidenceSchema.optional()
 });
 export type RuntimeEvidence = z.infer<typeof RuntimeEvidenceSchema>;
 
@@ -995,6 +1027,9 @@ export const RunComparisonArtifactRefSchema = z.object({
   cliTriggerRuntimeKind: z.string().optional(),
   timerTriggerRuntimeEvidence: z.boolean().optional(),
   timerTriggerRuntimeKind: z.string().optional(),
+  channelTriggerRuntimeEvidence: z.boolean().optional(),
+  channelTriggerRuntimeKind: z.string().optional(),
+  channelTriggerRuntimeChannel: z.string().optional(),
   comparisonBasisPreference: RunComparisonBasisSchema.optional()
 });
 export type RunComparisonArtifactRef = z.infer<typeof RunComparisonArtifactRefSchema>;
@@ -1023,6 +1058,24 @@ export const TimerRuntimeComparisonSchema = z
   })
   .passthrough();
 export type TimerRuntimeComparison = z.infer<typeof TimerRuntimeComparisonSchema>;
+
+export const ChannelRuntimeComparisonSchema = z
+  .object({
+    comparisonBasis: z.literal("channel_runtime_boundary"),
+    runtimeMode: z.string().optional(),
+    channelCompared: z.boolean(),
+    dataCompared: z.boolean(),
+    flowInputCompared: z.boolean(),
+    flowOutputCompared: z.boolean(),
+    channelDiff: RunComparisonValueDiffSchema.optional(),
+    dataDiff: RunComparisonValueDiffSchema.optional(),
+    flowInputDiff: RunComparisonValueDiffSchema.optional(),
+    flowOutputDiff: RunComparisonValueDiffSchema.optional(),
+    unsupportedFields: z.array(z.string()).default([]),
+    diagnostics: z.array(DiagnosticSchema).default([])
+  })
+  .passthrough();
+export type ChannelRuntimeComparison = z.infer<typeof ChannelRuntimeComparisonSchema>;
 
 export const RestEnvelopeComparisonSchema = z
   .object({
@@ -1069,6 +1122,7 @@ export const RunComparisonResultSchema = z.object({
   right: RunComparisonArtifactRefSchema,
   comparisonBasis: RunComparisonBasisSchema.optional(),
   restComparison: RestEnvelopeComparisonSchema.optional(),
+  channelComparison: ChannelRuntimeComparisonSchema.optional(),
   timerComparison: TimerRuntimeComparisonSchema.optional(),
   summary: RunComparisonSummaryDiffSchema,
   steps: z.array(RunComparisonStepDiffSchema).default([]),
@@ -1827,7 +1881,46 @@ export const EvalCaseSchema = z.object({
   type: TaskTypeSchema,
   title: z.string(),
   prompt: z.string(),
-  expectedSignals: z.array(z.string()).default([])
+  expectedSignals: z.array(z.string()).default([]),
+  suite: z.string().optional(),
+  runtimeEvidence: z
+    .object({
+      family: z.enum(["direct_flow", "rest", "timer", "cli", "channel"]),
+      scenario: z.enum(["supported", "fallback"]),
+      operations: z.array(z.enum(["trace", "replay", "compare"])).default([]),
+      artifacts: z.array(z.enum(["run_trace", "replay_report", "run_comparison"])).default([]),
+      trace: z.object({
+        evidenceKind: RunTraceEvidenceKindSchema,
+        runtimeMode: z.string().optional(),
+        normalizedStepsExpected: z.boolean().default(false),
+        triggerEvidenceField: z
+          .enum(["restTriggerRuntime", "timerTriggerRuntime", "cliTriggerRuntime", "channelTriggerRuntime"])
+          .optional(),
+        fallbackReasonExpected: z.boolean().default(false),
+        fallbackDiagnosticCode: z.string().optional()
+      }),
+      replay: z
+        .object({
+          implemented: z.boolean().default(false),
+          evidenceKind: RunTraceEvidenceKindSchema.optional(),
+          runtimeMode: z.string().optional(),
+          normalizedStepsExpected: z.boolean().default(false),
+          triggerEvidenceField: z
+            .enum(["restTriggerRuntime", "timerTriggerRuntime", "cliTriggerRuntime", "channelTriggerRuntime"])
+            .optional(),
+          fallbackReasonExpected: z.boolean().default(false),
+          fallbackDiagnosticCode: z.string().optional()
+        })
+        .optional(),
+      comparison: z
+        .object({
+          basis: RunComparisonBasisSchema,
+          runtimePreferred: z.boolean().default(true)
+        })
+        .optional(),
+      mirrors: z.array(z.string()).default([])
+    })
+    .optional()
 });
 export type EvalCase = z.infer<typeof EvalCaseSchema>;
 

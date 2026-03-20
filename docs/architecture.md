@@ -64,7 +64,7 @@ It currently supports:
 - retry-on-error synthesis,
 - doWhile synthesis,
 - error-path templates,
-- runtime trace capture with narrow recorder-backed runtime helper paths for the supported direct-flow, REST, timer, and CLI slices, narrow real replay on those same slices, and artifact-backed run comparison with runtime-artifact preference,
+- runtime trace capture with narrow recorder-backed runtime helper paths for the supported direct-flow, REST, timer, CLI, and Channel slices, narrow real replay on those same slices, and artifact-backed run comparison with runtime-artifact preference,
 - normalized recorder-backed step evidence on those same slices so compare-runs can prefer normalized runtime artifacts when both sides provide them,
 - contribution inventory,
 - contribution catalog generation,
@@ -83,7 +83,7 @@ It is expected to grow into:
 - programmatic Core composition,
 - contribution scaffolding and validation.
 
-The runtime-evidence commands above are still mostly artifact-backed, but direct trace capture now has narrow in-process Core/Flow runtime paths for the existing direct-flow slice, one supported REST trigger-driven slice, a narrow timer startup slice, and a narrow CLI command-entry slice. Replay reuses those same supported slices, and run comparison prefers normalized runtime artifacts when both sides provide them, REST envelope comparison when both sides are REST-backed, and timer startup comparison when both sides carry timer evidence. Those narrow slices expose normalized per-step task identity, I/O, and flow-state deltas where observable, the REST slice additionally carries request, mapped flow input/output, and reply evidence in `runtimeEvidence.restTriggerRuntime`, the timer slice carries timer settings plus observed tick evidence in `runtimeEvidence.timerTriggerRuntime`, and the CLI slice carries command identity, args, flags, mapped flow input, and reply/stdout evidence in `runtimeEvidence.cliTriggerRuntime`, but the helper is still not a broad live engine trace tap across trigger profiles or flow shapes.
+The runtime-evidence commands above are still mostly artifact-backed, but direct trace capture now has narrow in-process Core/Flow runtime paths for the existing direct-flow slice, one supported REST trigger-driven slice, a narrow timer startup slice, a narrow CLI command-entry slice, and a narrow Channel internal-event slice. Replay reuses those same supported slices, and run comparison prefers normalized runtime artifacts when both sides provide them, REST envelope comparison when both sides are REST-backed, timer startup comparison when both sides carry timer evidence, and Channel boundary comparison when both sides carry channel evidence. Those narrow slices expose normalized per-step task identity, I/O, and flow-state deltas where observable, the REST slice additionally carries request, mapped flow input/output, and reply evidence in `runtimeEvidence.restTriggerRuntime`, the timer slice carries timer settings plus observed tick evidence in `runtimeEvidence.timerTriggerRuntime`, the CLI slice carries command identity, args, flags, mapped flow input, and reply/stdout evidence in `runtimeEvidence.cliTriggerRuntime`, and the Channel slice carries named-channel data, mapped flow input/output, and evidence metadata in `runtimeEvidence.channelTriggerRuntime`, but the helper is still not a broad live engine trace tap across trigger profiles or flow shapes.
 
 ## High-level topology
 

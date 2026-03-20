@@ -243,6 +243,9 @@ function comparisonBasisPreference(
   runtimeEvidence?: RuntimeEvidence,
   evidenceKind?: unknown
 ): RunComparisonBasis | undefined {
+  if (runtimeEvidence?.channelTriggerRuntime) {
+    return "channel_runtime_boundary";
+  }
   if (runtimeEvidence?.restTriggerRuntime) {
     return "rest_runtime_envelope";
   }
@@ -359,6 +362,22 @@ function restTriggerRuntimeMetadata(prefix: "trace" | "replay", runtimeEvidence?
   };
 }
 
+function channelTriggerRuntimeMetadata(prefix: "trace" | "replay", runtimeEvidence?: RuntimeEvidence) {
+  const channelTriggerRuntime = runtimeEvidence?.channelTriggerRuntime;
+  if (!channelTriggerRuntime) {
+    return {};
+  }
+
+  return {
+    [`${prefix}ChannelTriggerRuntimeEvidence`]: true,
+    [`${prefix}ChannelTriggerRuntimeKind`]: channelTriggerRuntime.kind,
+    [`${prefix}ChannelTriggerRuntimeChannel`]: channelTriggerRuntime.handler?.channel,
+    [`${prefix}ChannelTriggerRuntimeHasData`]: channelTriggerRuntime.data !== undefined,
+    [`${prefix}ChannelTriggerRuntimeHasMappedFlowInput`]: Object.keys(channelTriggerRuntime.flowInput ?? {}).length > 0,
+    [`${prefix}ChannelTriggerRuntimeHasMappedFlowOutput`]: Object.keys(channelTriggerRuntime.flowOutput ?? {}).length > 0
+  };
+}
+
 function cliTriggerRuntimeMetadata(prefix: "trace" | "replay", runtimeEvidence?: RuntimeEvidence) {
   const cliTriggerRuntime = runtimeEvidence?.cliTriggerRuntime;
   if (!cliTriggerRuntime) {
@@ -393,6 +412,24 @@ function timerTriggerRuntimeMetadata(prefix: "trace" | "replay", runtimeEvidence
     [`${prefix}TimerTriggerRuntimeTickObserved`]: Boolean(timerTriggerRuntime.tick),
     [`${prefix}TimerTriggerRuntimeHasMappedFlowInput`]: Object.keys(timerTriggerRuntime.flowInput ?? {}).length > 0,
     [`${prefix}TimerTriggerRuntimeHasMappedFlowOutput`]: Object.keys(timerTriggerRuntime.flowOutput ?? {}).length > 0
+  };
+}
+
+function buildChannelReplayEvidence(runtimeEvidence?: RuntimeEvidence) {
+  const channelTriggerRuntime = runtimeEvidence?.channelTriggerRuntime;
+  if (!channelTriggerRuntime) {
+    return undefined;
+  }
+
+  return {
+    comparisonBasis: "channel_runtime_boundary" as const,
+    runtimeMode: runtimeEvidence?.runtimeMode,
+    channelObserved: Boolean(channelTriggerRuntime.handler?.channel),
+    dataObserved: channelTriggerRuntime.data !== undefined,
+    flowInputObserved: Boolean(channelTriggerRuntime.flowInput && Object.keys(channelTriggerRuntime.flowInput).length > 0),
+    flowOutputObserved: Boolean(channelTriggerRuntime.flowOutput && Object.keys(channelTriggerRuntime.flowOutput).length > 0),
+    unsupportedFields: [...(channelTriggerRuntime.unavailableFields ?? [])],
+    diagnostics: [...(channelTriggerRuntime.diagnostics ?? [])]
   };
 }
 
@@ -507,6 +544,41 @@ function timerComparisonMetadata(timerComparison?: {
     timerTickDiff: timerComparison.tickDiff,
     timerComparisonUnsupportedFields: timerComparison.unsupportedFields,
     timerComparisonDiagnostics: timerComparison.diagnostics
+  };
+}
+
+function channelComparisonMetadata(channelComparison?: {
+  comparisonBasis: "channel_runtime_boundary";
+  runtimeMode?: string;
+  channelCompared: boolean;
+  dataCompared: boolean;
+  flowInputCompared: boolean;
+  flowOutputCompared: boolean;
+  channelDiff?: unknown;
+  dataDiff?: unknown;
+  flowInputDiff?: unknown;
+  flowOutputDiff?: unknown;
+  unsupportedFields: string[];
+  diagnostics: unknown[];
+}) {
+  if (!channelComparison) {
+    return {};
+  }
+
+  return {
+    channelComparison,
+    channelComparisonBasis: channelComparison.comparisonBasis,
+    channelRuntimeMode: channelComparison.runtimeMode,
+    channelCompared: channelComparison.channelCompared,
+    channelDataCompared: channelComparison.dataCompared,
+    channelFlowInputCompared: channelComparison.flowInputCompared,
+    channelFlowOutputCompared: channelComparison.flowOutputCompared,
+    channelChannelDiff: channelComparison.channelDiff,
+    channelDataDiff: channelComparison.dataDiff,
+    channelFlowInputDiff: channelComparison.flowInputDiff,
+    channelFlowOutputDiff: channelComparison.flowOutputDiff,
+    channelComparisonUnsupportedFields: channelComparison.unsupportedFields,
+    channelComparisonDiagnostics: channelComparison.diagnostics
   };
 }
 
@@ -862,6 +934,7 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
             ...restTriggerRuntimeMetadata("trace", trace?.runtimeEvidence ?? runtimeEvidence),
             ...cliTriggerRuntimeMetadata("trace", trace?.runtimeEvidence ?? runtimeEvidence),
             ...timerTriggerRuntimeMetadata("trace", trace?.runtimeEvidence ?? runtimeEvidence),
+            ...channelTriggerRuntimeMetadata("trace", trace?.runtimeEvidence ?? runtimeEvidence),
             diagnostics
           }
         )
@@ -918,6 +991,8 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
             ...restTriggerRuntimeMetadata("replay", result.runtimeEvidence),
             ...cliTriggerRuntimeMetadata("replay", result.runtimeEvidence),
             ...timerTriggerRuntimeMetadata("replay", result.runtimeEvidence),
+            ...channelTriggerRuntimeMetadata("replay", result.runtimeEvidence),
+            replayChannelReplayEvidence: buildChannelReplayEvidence(result.runtimeEvidence),
             diagnostics
           }
         )
@@ -973,7 +1048,14 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
             rightTimerTriggerRuntimeEvidence: result?.right.timerTriggerRuntimeEvidence,
             leftTimerTriggerRuntimeKind: result?.left.timerTriggerRuntimeKind,
             rightTimerTriggerRuntimeKind: result?.right.timerTriggerRuntimeKind,
+            leftChannelTriggerRuntimeEvidence: result?.left.channelTriggerRuntimeEvidence,
+            rightChannelTriggerRuntimeEvidence: result?.right.channelTriggerRuntimeEvidence,
+            leftChannelTriggerRuntimeKind: result?.left.channelTriggerRuntimeKind,
+            rightChannelTriggerRuntimeKind: result?.right.channelTriggerRuntimeKind,
+            leftChannelTriggerRuntimeChannel: result?.left.channelTriggerRuntimeChannel,
+            rightChannelTriggerRuntimeChannel: result?.right.channelTriggerRuntimeChannel,
             ...restComparisonMetadata(result?.restComparison),
+            ...channelComparisonMetadata(result?.channelComparison),
             ...timerComparisonMetadata(result?.timerComparison),
             diagnostics
           }

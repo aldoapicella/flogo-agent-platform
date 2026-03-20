@@ -1006,6 +1006,243 @@ describe("flogo graph", () => {
   expect(response.result?.timerComparison?.flowOutputDiff?.kind).toBe("changed");
   });
 
+  it("prefers channel boundary evidence when both artifacts provide it", () => {
+    const response = compareRuns(
+      {
+        leftArtifactId: "left-channel-trace",
+        rightArtifactId: "right-channel-replay"
+      },
+      {
+        artifactId: "left-channel-trace",
+        kind: "run_trace",
+        payload: {
+          trace: {
+            appName: "channel-app",
+            flowId: "orchestrate",
+            evidenceKind: "runtime_backed",
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "channel_trigger",
+              channelTriggerRuntime: {
+                kind: "channel",
+                settings: {
+                  channels: ["orders:1"]
+                },
+                handler: {
+                  name: "channel",
+                  channel: "orders",
+                  bufferSize: 1
+                },
+                data: {
+                  orderId: "123"
+                },
+                flowInput: {
+                  order: {
+                    id: "123"
+                  }
+                },
+                flowOutput: {
+                  status: "accepted"
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              normalizedSteps: [
+                {
+                  taskId: "prepare",
+                  status: "completed",
+                  resolvedInputs: {
+                    order: {
+                      id: "123"
+                    }
+                  },
+                  producedOutputs: {
+                    status: "accepted"
+                  },
+                  unavailableFields: [],
+                  diagnostics: []
+                }
+              ]
+            },
+            summary: {
+              flowId: "orchestrate",
+              status: "completed",
+              input: {
+                data: {
+                  orderId: "123"
+                }
+              },
+              output: {
+                status: "accepted"
+              },
+              stepCount: 1,
+              diagnostics: []
+            },
+            steps: [{ taskId: "prepare", status: "completed", diagnostics: [] }],
+            diagnostics: []
+          }
+        }
+      },
+      {
+        artifactId: "right-channel-replay",
+        kind: "replay_report",
+        payload: {
+          result: {
+            summary: {
+              flowId: "orchestrate",
+              status: "completed",
+              inputSource: "explicit_input",
+              baseInput: {
+                data: {
+                  orderId: "123"
+                }
+              },
+              effectiveInput: {
+                data: {
+                  orderId: "456"
+                }
+              },
+              overridesApplied: true,
+              diagnostics: []
+            },
+            runtimeEvidence: {
+              kind: "runtime_backed",
+              recorderBacked: true,
+              recorderKind: "flow_state_recorder",
+              recorderMode: "full",
+              runtimeMode: "channel_trigger_replay",
+              channelTriggerRuntime: {
+                kind: "channel",
+                settings: {
+                  channels: ["orders:1"]
+                },
+                handler: {
+                  name: "channel",
+                  channel: "orders",
+                  bufferSize: 1
+                },
+                data: {
+                  orderId: "456"
+                },
+                flowInput: {
+                  order: {
+                    id: "456"
+                  }
+                },
+                flowOutput: {
+                  status: "accepted"
+                },
+                unavailableFields: [],
+                diagnostics: []
+              },
+              normalizedSteps: [
+                {
+                  taskId: "prepare",
+                  status: "completed",
+                  resolvedInputs: {
+                    order: {
+                      id: "456"
+                    }
+                  },
+                  producedOutputs: {
+                    status: "accepted"
+                  },
+                  unavailableFields: [],
+                  diagnostics: []
+                }
+              ]
+            },
+            trace: {
+              appName: "channel-app",
+              flowId: "orchestrate",
+              evidenceKind: "runtime_backed",
+              runtimeEvidence: {
+                kind: "runtime_backed",
+                recorderBacked: true,
+                recorderKind: "flow_state_recorder",
+                recorderMode: "full",
+                runtimeMode: "channel_trigger_replay",
+                channelTriggerRuntime: {
+                  kind: "channel",
+                  settings: {
+                    channels: ["orders:1"]
+                  },
+                  handler: {
+                    name: "channel",
+                    channel: "orders",
+                    bufferSize: 1
+                  },
+                  data: {
+                    orderId: "456"
+                  },
+                  flowInput: {
+                    order: {
+                      id: "456"
+                    }
+                  },
+                  flowOutput: {
+                    status: "accepted"
+                  },
+                  unavailableFields: [],
+                  diagnostics: []
+                },
+                normalizedSteps: [
+                  {
+                    taskId: "prepare",
+                    status: "completed",
+                    resolvedInputs: {
+                      order: {
+                        id: "456"
+                      }
+                    },
+                    producedOutputs: {
+                      status: "accepted"
+                    },
+                    unavailableFields: [],
+                    diagnostics: []
+                  }
+                ]
+              },
+              summary: {
+                flowId: "orchestrate",
+                status: "completed",
+                input: {
+                  data: {
+                    orderId: "456"
+                  }
+                },
+                output: {
+                  status: "accepted"
+                },
+                stepCount: 1,
+                diagnostics: []
+              },
+              steps: [{ taskId: "prepare", status: "completed", diagnostics: [] }],
+              diagnostics: []
+            }
+          }
+        }
+      }
+    );
+
+    expect(response.result?.comparisonBasis).toBe("channel_runtime_boundary");
+    expect(response.result?.left.channelTriggerRuntimeEvidence).toBe(true);
+    expect(response.result?.right.channelTriggerRuntimeEvidence).toBe(true);
+    expect(response.result?.left.channelTriggerRuntimeKind).toBe("channel");
+    expect(response.result?.right.channelTriggerRuntimeKind).toBe("channel");
+    expect(response.result?.left.channelTriggerRuntimeChannel).toBe("orders");
+    expect(response.result?.right.channelTriggerRuntimeChannel).toBe("orders");
+    expect(response.result?.channelComparison?.comparisonBasis).toBe("channel_runtime_boundary");
+    expect(response.result?.channelComparison?.channelCompared).toBe(true);
+    expect(response.result?.channelComparison?.dataCompared).toBe(true);
+    expect(response.result?.channelComparison?.flowInputCompared).toBe(true);
+    expect(response.result?.channelComparison?.flowOutputCompared).toBe(true);
+    expect(response.result?.channelComparison?.dataDiff?.kind).toBe("changed");
+  });
+
   it("preserves CLI runtime evidence flags on compared artifacts", () => {
     const response = compareRuns(
       {

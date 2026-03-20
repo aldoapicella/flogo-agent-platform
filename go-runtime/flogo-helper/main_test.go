@@ -546,6 +546,69 @@ func TestTraceFlowDistinguishesRuntimeBackedAndSimulatedPaths(t *testing.T) {
 		}
 	})
 
+	t.Run("runtime-backed channel trigger trace", func(t *testing.T) {
+		app := runtimeChannelTraceTestApp()
+
+		response := traceFlow(app, runTraceRequest{
+			FlowID: "hello",
+			SampleInput: map[string]any{
+				"message": "channel-hello",
+			},
+			Capture: runTraceCaptureOptions{
+				IncludeFlowState:       true,
+				IncludeActivityOutputs: true,
+				IncludeTaskInputs:      true,
+				IncludeTaskOutputs:     true,
+			},
+		})
+
+		if response.Trace == nil {
+			t.Fatal("expected runtime-backed channel trace to produce a trace payload")
+		}
+		if response.Trace.EvidenceKind != runTraceEvidenceKindRuntimeBacked {
+			t.Fatalf("expected runtime-backed channel evidence kind, got %q diagnostics=%+v runtimeEvidence=%+v", response.Trace.EvidenceKind, response.Trace.Diagnostics, response.Trace.RuntimeEvidence)
+		}
+		if response.Trace.RuntimeEvidence == nil {
+			t.Fatal("expected runtime-backed channel trace to include runtime evidence")
+		}
+		if response.Trace.RuntimeEvidence.RuntimeMode != runtimeBackedChannelTriggerTraceMode {
+			t.Fatalf("expected channel runtime mode %q, got %+v", runtimeBackedChannelTriggerTraceMode, response.Trace.RuntimeEvidence)
+		}
+		if response.Trace.RuntimeEvidence.ChannelTriggerRuntime == nil {
+			t.Fatal("expected runtime-backed channel trace to include channel trigger evidence")
+		}
+		if response.Trace.RuntimeEvidence.ChannelTriggerRuntime.Kind != "channel" {
+			t.Fatalf("expected channel trigger evidence kind %q, got %+v", "channel", response.Trace.RuntimeEvidence.ChannelTriggerRuntime)
+		}
+		if response.Trace.RuntimeEvidence.ChannelTriggerRuntime.Settings == nil || len(response.Trace.RuntimeEvidence.ChannelTriggerRuntime.Settings.Channels) != 1 || response.Trace.RuntimeEvidence.ChannelTriggerRuntime.Settings.Channels[0] != "orders:5" {
+			t.Fatalf("expected channel settings evidence, got %+v", response.Trace.RuntimeEvidence.ChannelTriggerRuntime.Settings)
+		}
+		if response.Trace.RuntimeEvidence.ChannelTriggerRuntime.Handler == nil || response.Trace.RuntimeEvidence.ChannelTriggerRuntime.Handler.Channel != "orders" {
+			t.Fatalf("expected channel handler evidence, got %+v", response.Trace.RuntimeEvidence.ChannelTriggerRuntime.Handler)
+		}
+		if response.Trace.RuntimeEvidence.ChannelTriggerRuntime.Data != "channel-hello" {
+			t.Fatalf("expected channel data evidence, got %+v", response.Trace.RuntimeEvidence.ChannelTriggerRuntime.Data)
+		}
+		if response.Trace.RuntimeEvidence.ChannelTriggerRuntime.FlowInput["message"] != "channel-hello" {
+			t.Fatalf("expected mapped channel flow input evidence, got %+v", response.Trace.RuntimeEvidence.ChannelTriggerRuntime.FlowInput)
+		}
+		if len(response.Trace.RuntimeEvidence.ChannelTriggerRuntime.FlowOutput) != 0 {
+			t.Fatalf("expected channel flow output to remain unavailable for the narrow slice, got %+v", response.Trace.RuntimeEvidence.ChannelTriggerRuntime.FlowOutput)
+		}
+		if !containsString(response.Trace.RuntimeEvidence.ChannelTriggerRuntime.UnavailableFields, "flowOutput") {
+			t.Fatalf("expected channel trace to mark flow output unavailable, got %+v", response.Trace.RuntimeEvidence.ChannelTriggerRuntime)
+		}
+		if len(response.Trace.RuntimeEvidence.NormalizedSteps) != 1 {
+			t.Fatalf("expected normalized runtime step evidence for channel trace, got %+v", response.Trace.RuntimeEvidence)
+		}
+		if !hasDiagnosticCode(response.Trace.Diagnostics, "flogo.run_trace.channel_trigger_runtime_backed") {
+			t.Fatalf("expected channel runtime diagnostic, got %+v", response.Trace.Diagnostics)
+		}
+		if !hasDiagnosticCode(response.Trace.RuntimeEvidence.ChannelTriggerRuntime.Diagnostics, "flogo.run_trace.channel_trigger_evidence") {
+			t.Fatalf("expected nested channel evidence diagnostic, got %+v", response.Trace.RuntimeEvidence.ChannelTriggerRuntime.Diagnostics)
+		}
+	})
+
 	t.Run("timer trigger unsupported shape falls back", func(t *testing.T) {
 		app := unsupportedTimerTriggerFallbackTestApp()
 
@@ -608,6 +671,39 @@ func TestTraceFlowDistinguishesRuntimeBackedAndSimulatedPaths(t *testing.T) {
 		}
 		if !hasDiagnosticCode(response.Trace.Diagnostics, "flogo.run_trace.cli_trigger_runtime_fallback") {
 			t.Fatalf("expected CLI fallback diagnostic, got %+v", response.Trace.Diagnostics)
+		}
+	})
+
+	t.Run("channel trigger unsupported shape falls back", func(t *testing.T) {
+		app := unsupportedChannelTriggerFallbackTestApp()
+
+		response := traceFlow(app, runTraceRequest{
+			FlowID: "hello",
+			SampleInput: map[string]any{
+				"message": "channel-hello",
+			},
+			Capture: runTraceCaptureOptions{
+				IncludeFlowState:       true,
+				IncludeActivityOutputs: true,
+				IncludeTaskInputs:      true,
+				IncludeTaskOutputs:     true,
+			},
+		})
+
+		if response.Trace == nil {
+			t.Fatal("expected fallback trace to produce a trace payload")
+		}
+		if response.Trace.RuntimeEvidence == nil {
+			t.Fatal("expected fallback trace to retain runtime evidence metadata")
+		}
+		if response.Trace.RuntimeEvidence.RuntimeMode == runtimeBackedChannelTriggerTraceMode {
+			t.Fatalf("did not expect unsupported Channel slice to remain on channel runtime mode %q, got %+v", runtimeBackedChannelTriggerTraceMode, response.Trace.RuntimeEvidence)
+		}
+		if response.Trace.RuntimeEvidence.ChannelTriggerRuntime != nil {
+			t.Fatalf("did not expect channel trigger runtime evidence on unsupported slice fallback, got %+v", response.Trace.RuntimeEvidence)
+		}
+		if !hasDiagnosticCode(response.Trace.Diagnostics, "flogo.run_trace.channel_trigger_runtime_fallback") {
+			t.Fatalf("expected channel fallback diagnostic, got %+v", response.Trace.Diagnostics)
 		}
 	})
 
@@ -1003,6 +1099,56 @@ func TestReplayFlowReturnsRuntimeBackedTimerEvidenceForEligibleFlows(t *testing.
 	}
 }
 
+func TestReplayFlowReturnsRuntimeBackedChannelEvidenceForEligibleFlows(t *testing.T) {
+	app := runtimeChannelTraceTestApp()
+
+	response := replayFlow(app, replayRequest{
+		FlowID:    "hello",
+		BaseInput: map[string]any{"message": "channel-replayed"},
+		Capture: runTraceCaptureOptions{
+			IncludeFlowState:       true,
+			IncludeActivityOutputs: true,
+			IncludeTaskInputs:      true,
+			IncludeTaskOutputs:     true,
+		},
+		ValidateOnly: false,
+	})
+
+	if response.Result.Trace == nil {
+		t.Fatal("expected channel replay to produce a nested trace payload")
+	}
+	if response.Result.Trace.EvidenceKind != runTraceEvidenceKindRuntimeBacked {
+		t.Fatalf("expected runtime-backed channel replay trace, got %+v", response.Result.Trace)
+	}
+	if response.Result.RuntimeEvidence == nil {
+		t.Fatal("expected channel replay runtime evidence")
+	}
+	if response.Result.RuntimeEvidence.RuntimeMode != runtimeBackedChannelReplayMode {
+		t.Fatalf("expected channel replay runtime mode %q, got %+v", runtimeBackedChannelReplayMode, response.Result.RuntimeEvidence)
+	}
+	if response.Result.Trace.RuntimeEvidence == nil || response.Result.Trace.RuntimeEvidence.RuntimeMode != runtimeBackedChannelReplayMode {
+		t.Fatalf("expected nested channel replay runtime mode %q, got %+v", runtimeBackedChannelReplayMode, response.Result.Trace.RuntimeEvidence)
+	}
+	if response.Result.RuntimeEvidence.ChannelTriggerRuntime == nil {
+		t.Fatal("expected channel replay to preserve channel trigger runtime evidence")
+	}
+	if response.Result.RuntimeEvidence.ChannelTriggerRuntime.Handler == nil || response.Result.RuntimeEvidence.ChannelTriggerRuntime.Handler.Channel != "orders" {
+		t.Fatalf("expected channel replay handler evidence, got %+v", response.Result.RuntimeEvidence.ChannelTriggerRuntime)
+	}
+	if response.Result.RuntimeEvidence.ChannelTriggerRuntime.Data != "channel-replayed" {
+		t.Fatalf("expected channel replay data evidence, got %+v", response.Result.RuntimeEvidence.ChannelTriggerRuntime.Data)
+	}
+	if response.Result.RuntimeEvidence.ChannelTriggerRuntime.FlowInput["message"] != "channel-replayed" {
+		t.Fatalf("expected channel replay mapped flow input evidence, got %+v", response.Result.RuntimeEvidence.ChannelTriggerRuntime.FlowInput)
+	}
+	if !containsString(response.Result.RuntimeEvidence.ChannelTriggerRuntime.UnavailableFields, "flowOutput") {
+		t.Fatalf("expected channel replay to mark flow output unavailable for the narrow slice, got %+v", response.Result.RuntimeEvidence.ChannelTriggerRuntime)
+	}
+	if !hasDiagnosticCode(response.Result.Summary.Diagnostics, "flogo.replay.channel_runtime_backed") {
+		t.Fatalf("expected channel replay diagnostic, got %+v", response.Result.Summary.Diagnostics)
+	}
+}
+
 func TestReplayFlowFallsBackFromUnsupportedRESTRuntimeSlice(t *testing.T) {
 	app := runtimeRestFallbackTraceTestApp()
 
@@ -1058,6 +1204,35 @@ func TestReplayFlowFallsBackFromUnsupportedCLIRuntimeSlice(t *testing.T) {
 	}
 	if response.Result.RuntimeEvidence.CLITriggerRuntime != nil {
 		t.Fatalf("did not expect CLI trigger runtime evidence on unsupported replay slice fallback, got %+v", response.Result.RuntimeEvidence)
+	}
+}
+
+func TestReplayFlowFallsBackFromUnsupportedChannelRuntimeSlice(t *testing.T) {
+	app := unsupportedChannelTriggerFallbackTestApp()
+
+	response := replayFlow(app, replayRequest{
+		FlowID:    "hello",
+		BaseInput: map[string]any{"message": "channel-hello"},
+		Capture: runTraceCaptureOptions{
+			IncludeFlowState:       true,
+			IncludeActivityOutputs: true,
+			IncludeTaskInputs:      true,
+			IncludeTaskOutputs:     true,
+		},
+		ValidateOnly: false,
+	})
+
+	if response.Result.Trace == nil {
+		t.Fatal("expected fallback replay to produce a nested trace payload")
+	}
+	if response.Result.RuntimeEvidence == nil {
+		t.Fatal("expected fallback replay runtime evidence")
+	}
+	if response.Result.RuntimeEvidence.RuntimeMode == runtimeBackedChannelReplayMode {
+		t.Fatalf("did not expect unsupported Channel replay to remain on channel replay mode %q, got %+v", runtimeBackedChannelReplayMode, response.Result.RuntimeEvidence)
+	}
+	if response.Result.RuntimeEvidence.ChannelTriggerRuntime != nil {
+		t.Fatalf("did not expect channel trigger runtime evidence on unsupported replay slice fallback, got %+v", response.Result.RuntimeEvidence)
 	}
 }
 
@@ -1439,6 +1614,108 @@ func TestCompareRunsPrefersTimerRuntimeStartupWhenAvailable(t *testing.T) {
 	}
 }
 
+func TestCompareRunsPrefersChannelRuntimeBoundaryComparisonWhenAvailable(t *testing.T) {
+	response := compareRuns(runComparisonRequest{
+		Compare: runComparisonOptions{IncludeDiagnostics: true},
+		LeftArtifact: comparableRunArtifactInput{
+			ArtifactID: "left-channel-trace",
+			Kind:       "run_trace",
+			Payload: map[string]any{
+				"trace": map[string]any{
+					"appName":      "demo",
+					"flowId":       "hello",
+					"evidenceKind": runTraceEvidenceKindRuntimeBacked,
+					"runtimeEvidence": map[string]any{
+						"kind":           runTraceEvidenceKindRuntimeBacked,
+						"recorderBacked": true,
+						"runtimeMode":    runtimeBackedChannelTriggerTraceMode,
+						"channelTriggerRuntime": map[string]any{
+							"kind": "channel",
+							"data": map[string]any{"message": "left"},
+							"flowInput": map[string]any{
+								"message": "left",
+							},
+							"flowOutput":        map[string]any{},
+							"unavailableFields": []any{"flowOutput"},
+							"handler": map[string]any{
+								"channel": "orders",
+							},
+						},
+						"flowStart": map[string]any{
+							"flow_inputs": map[string]any{"message": "left"},
+						},
+						"flowDone": map[string]any{},
+					},
+					"summary": map[string]any{
+						"flowId":      "hello",
+						"status":      "completed",
+						"input":       map[string]any{"message": "left"},
+						"output":      map[string]any{},
+						"stepCount":   1,
+						"diagnostics": []any{},
+					},
+					"steps":       []any{},
+					"diagnostics": []any{},
+				},
+			},
+		},
+		RightArtifact: comparableRunArtifactInput{
+			ArtifactID: "right-channel-replay",
+			Kind:       "replay_report",
+			Payload: map[string]any{
+				"result": map[string]any{
+					"summary": map[string]any{
+						"flowId":           "hello",
+						"status":           "completed",
+						"inputSource":      "explicit_input",
+						"baseInput":        map[string]any{"data": map[string]any{"message": "right"}},
+						"effectiveInput":   map[string]any{"data": map[string]any{"message": "right"}},
+						"overridesApplied": false,
+						"diagnostics":      []any{},
+					},
+					"runtimeEvidence": map[string]any{
+						"kind":           runTraceEvidenceKindRuntimeBacked,
+						"recorderBacked": true,
+						"runtimeMode":    runtimeBackedChannelReplayMode,
+						"channelTriggerRuntime": map[string]any{
+							"kind": "channel",
+							"data": map[string]any{"message": "right"},
+							"flowInput": map[string]any{
+								"message": "right",
+							},
+							"flowOutput":        map[string]any{},
+							"unavailableFields": []any{"flowOutput"},
+							"handler": map[string]any{
+								"channel": "orders",
+							},
+						},
+						"flowStart": map[string]any{
+							"flow_inputs": map[string]any{"message": "right"},
+						},
+						"flowDone": map[string]any{},
+					},
+				},
+			},
+		},
+	})
+
+	if response.Result == nil {
+		t.Fatal("expected run comparison result")
+	}
+	if response.Result.ComparisonBasis != "channel_runtime_boundary" {
+		t.Fatalf("expected channel runtime boundary comparison basis, got %+v", response.Result)
+	}
+	if response.Result.ChannelComparison == nil || !response.Result.ChannelComparison.ChannelCompared {
+		t.Fatalf("expected channel comparison diff, got %+v", response.Result.ChannelComparison)
+	}
+	if response.Result.ChannelComparison.DataDiff == nil || response.Result.ChannelComparison.FlowInputDiff == nil || response.Result.ChannelComparison.FlowOutputDiff == nil {
+		t.Fatalf("expected channel comparison diffs, got %+v", response.Result.ChannelComparison)
+	}
+	if !hasDiagnosticCode(response.Result.Summary.DiagnosticDiffs, "flogo.run_comparison.channel_runtime_boundary_preferred") {
+		t.Fatalf("expected channel comparison preference diagnostic, got %+v", response.Result.Summary.DiagnosticDiffs)
+	}
+}
+
 func TestCompareRunsPrefersRecorderBackedArtifacts(t *testing.T) {
 	response := compareRuns(runComparisonRequest{
 		LeftArtifact: comparableRunArtifactInput{
@@ -1769,6 +2046,74 @@ func runtimeCLITraceTestApp() flogoApp {
 	})
 }
 
+func runtimeChannelTraceTestApp() flogoApp {
+	return normalizeApp(map[string]any{
+		"name":     "runtime-channel-trace-app",
+		"type":     "flogo:app",
+		"appModel": "1.1.0",
+		"channels": []any{
+			"orders:5",
+		},
+		"imports": []any{
+			map[string]any{
+				"alias": "log",
+				"ref":   supportedRuntimeLogActivityRef,
+			},
+			map[string]any{
+				"alias": "channel",
+				"ref":   supportedRuntimeChannelTriggerRef,
+			},
+		},
+		"triggers": []any{
+			map[string]any{
+				"id":  "channel-orders",
+				"ref": supportedRuntimeChannelTriggerRef,
+				"handlers": []any{
+					map[string]any{
+						"id": "receive_orders",
+						"settings": map[string]any{
+							"channel": "orders",
+						},
+						"action": map[string]any{
+							"ref": supportedRuntimeFlowActionRef,
+							"settings": map[string]any{
+								"flowURI": "res://flow:hello",
+							},
+						},
+						"input": map[string]any{
+							"message": "=$trigger.data",
+						},
+					},
+				},
+			},
+		},
+		"resources": map[string]any{
+			"hello": map[string]any{
+				"type": "flow",
+				"data": map[string]any{
+					"metadata": map[string]any{
+						"input": []any{
+							map[string]any{"name": "message", "type": "string", "required": true},
+						},
+					},
+					"tasks": []any{
+						map[string]any{
+							"id":   "log-request",
+							"name": "log-request",
+							"activity": map[string]any{
+								"ref": "#log",
+								"input": map[string]any{
+									"message": "=$flow.message",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}
+
 func runtimeBackedTimerTraceTestApp() flogoApp {
 	return normalizeApp(map[string]any{
 		"name":     "runtime-timer-trace-app",
@@ -1847,6 +2192,23 @@ func unsupportedCLITriggerFallbackTestApp() flogoApp {
 					handler["input"] = map[string]any{
 						"args":  "$trigger.args",
 						"flags": "$env.cliFlags",
+					}
+				}
+			}
+		}
+	}
+	return app
+}
+
+func unsupportedChannelTriggerFallbackTestApp() flogoApp {
+	app := runtimeChannelTraceTestApp()
+	app.Triggers[0].Handlers[0].Settings["channel"] = "missing"
+	if triggers, ok := app.Raw["triggers"].([]any); ok && len(triggers) > 0 {
+		if trigger, ok := triggers[0].(map[string]any); ok {
+			if handlers, ok := trigger["handlers"].([]any); ok && len(handlers) > 0 {
+				if handler, ok := handlers[0].(map[string]any); ok {
+					if settings, ok := handler["settings"].(map[string]any); ok {
+						settings["channel"] = "missing"
 					}
 				}
 			}

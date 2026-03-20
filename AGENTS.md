@@ -119,7 +119,7 @@ The repo has a completed Phase 1 foundation and has started Phase 2. Before addi
 - direct trigger-binding mutation and validate-only planning
 - direct advanced control-flow mutation and validate-only planning
 
-Treat the Phase 1 Core/mapping foundation as implemented, the main Phase 2 design-time flow-pattern surface as implemented, and Phase 3 runtime trace capture, replay, and run comparison as implemented in mixed form with the current narrow REST-backed slices, a narrow timer runtime-startup partial slice, and a narrow CLI command-entry partial slice. Channel remains explicitly deferred from the current runtime-backed slice. New Flogo-native work should generally target runtime-backed debugging and contribution authoring unless the task is explicitly about hardening an existing capability.
+Treat the Phase 1 Core/mapping foundation as implemented, the main Phase 2 design-time flow-pattern surface as implemented, and Phase 3 runtime trace capture, replay, and run comparison as implemented in mixed form with the current narrow REST-backed slices, a narrow timer runtime-startup partial slice, a narrow CLI command-entry partial slice, and a narrow Channel internal-event partial slice. New Flogo-native work should generally target runtime-backed debugging, a dedicated trigger-family-aware runtime-evidence eval suite, and contribution authoring unless the task is explicitly about hardening an existing capability.
 
 Do not accidentally regress these while implementing later phases.
 

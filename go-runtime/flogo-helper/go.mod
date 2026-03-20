@@ -15,6 +15,7 @@ require (
 	github.com/carlescere/scheduler v0.0.0-20170109141437-ee74d2f83d82 // indirect
 	github.com/julienschmidt/httprouter v1.3.0 // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
+	github.com/project-flogo/contrib/trigger/channel v0.10.0 // indirect
 	github.com/project-flogo/contrib/trigger/cli v0.10.0 // indirect
 	github.com/sony/gobreaker/v2 v2.4.0 // indirect
 	go.uber.org/atomic v1.6.0 // indirect

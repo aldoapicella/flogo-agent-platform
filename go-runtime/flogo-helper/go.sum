@@ -23,6 +23,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/project-flogo/contrib/activity/log v0.10.0 h1:TPVeO2xUQfauFIPqLBsEBlNp7aGRaWiIMVDQcr7JQ6o=
 github.com/project-flogo/contrib/activity/log v0.10.0/go.mod h1:M+qvbC3fVbONn1iYlhOsvxDUWCO7eAZT6rOj0N0Oexc=
+github.com/project-flogo/contrib/trigger/channel v0.10.0 h1:L9SwbmfaGgy/RQ6LIQQogJHT78m7k3lFgC9wZVV1v7Q=
+github.com/project-flogo/contrib/trigger/channel v0.10.0/go.mod h1:fwyvNvfrJdaQsnyAV+Ow5maugrNs/HGGDVrM0ZKfLT4=
 github.com/project-flogo/contrib/trigger/cli v0.10.0 h1:KJSMd+4n7YkrO1o6CX1g4YF8JN23tRW3d7tNr7SutIg=
 github.com/project-flogo/contrib/trigger/cli v0.10.0/go.mod h1:mrzAsGEzEkHjuX+4PVxFxcsgBOuF57z6Zr7j4HeAa0k=
 github.com/project-flogo/contrib/trigger/rest v0.10.0 h1:v6wm+A3BLCnCZT/ufiELxW08HL2Yc4bHby61/gKRhYg=

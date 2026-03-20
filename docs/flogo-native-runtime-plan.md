@@ -251,7 +251,7 @@ Focus:
 
 Current status:
 
-- implemented in mixed form: direct trace capture now has a narrow runtime-backed helper path with recorder-backed evidence on one supported same-flow scenario, REST trace/replay share one narrow live trigger-backed slice, timer startup has a narrow partial slice, CLI trace/replay share one narrow command-entry slice, and run comparison prefers richer runtime artifacts, REST envelope evidence, or timer startup evidence when both sides provide them while preserving fallback behavior elsewhere.
+- implemented in mixed form: direct trace capture now has a narrow runtime-backed helper path with recorder-backed evidence on one supported same-flow scenario, REST trace/replay share one narrow live trigger-backed slice, timer startup has a narrow partial slice, CLI trace/replay share one narrow command-entry slice, Channel trace/replay share one narrow internal-event slice, and run comparison prefers richer runtime artifacts, REST envelope evidence, timer startup evidence, or Channel boundary evidence when both sides provide them while preserving fallback behavior elsewhere.
 
 Implemented in repo:
 
@@ -270,14 +270,14 @@ Implemented in repo:
 
 Current limitations:
 
-- the runtime-backed trace slice is intentionally narrow: it currently covers the helper's supported direct-flow slice plus one narrow REST trigger-driven slice, one narrow CLI command-entry slice, and it still does not provide broad runtime parity across trigger profiles or flow shapes yet,
-- the runtime-backed replay slice is intentionally narrow: it currently covers the helper's supported direct-flow slice plus one narrow REST trigger-driven slice, one narrow CLI command-entry slice, and it still does not provide broad runtime parity across trigger profiles or flow shapes yet,
+- the runtime-backed trace slice is intentionally narrow: it currently covers the helper's supported direct-flow slice plus one narrow REST trigger-driven slice, one narrow CLI command-entry slice, and one narrow Channel internal-event slice, and it still does not provide broad runtime parity across trigger profiles or flow shapes yet,
+- the runtime-backed replay slice is intentionally narrow: it currently covers the helper's supported direct-flow slice plus one narrow REST trigger-driven slice, one narrow CLI command-entry slice, and one narrow Channel internal-event slice, and it still does not provide broad runtime parity across trigger profiles or flow shapes yet,
 - the timer runtime-backed slice is intentionally narrow: it currently covers one timer-bound same-flow startup scenario, and it still does not provide broad runtime parity across trigger profiles or flow shapes yet,
-- Channel trigger runtime coverage remains deferred,
+- the Channel runtime-backed slice is intentionally narrow: it currently covers one named internal engine channel and does not yet generalize to broader channel topologies or multi-channel workflows,
 - the current runtime-backed path uses official Flow/Core execution plus flow/task runtime events and recorder-backed flow start/done, snapshots, and steps, and the supported slice now projects that into normalized per-step evidence with resolved inputs/outputs when observable plus explicit unavailable-field markers when not,
 - unsupported trace topologies fall back to `trace.evidenceKind = "simulated_fallback"` rather than failing outright,
-- replay is runtime-backed for that same supported direct-flow slice and the supported REST and timer slices, and falls back to simulated/helper-backed replay elsewhere,
-- run comparison still works from persisted artifacts rather than a live engine tap; it now prefers normalized runtime evidence when available, can compare REST request/reply envelopes when both artifacts are REST runtime-backed, can compare timer startup evidence when both artifacts carry timer runtime evidence, falls back to recorder-backed evidence next, and still falls back to nested trace or replay-summary payloads for unsupported slices.
+- replay is runtime-backed for that same supported direct-flow slice and the supported REST, timer, CLI, and Channel slices, and falls back to simulated/helper-backed replay elsewhere,
+- run comparison still works from persisted artifacts rather than a live engine tap; it now prefers normalized runtime evidence when available, can compare REST request/reply envelopes when both artifacts are REST runtime-backed, can compare timer startup evidence when both artifacts carry timer runtime evidence, can compare Channel boundary evidence when both artifacts carry Channel runtime evidence, falls back to recorder-backed evidence next, and still falls back to nested trace or replay-summary payloads for unsupported slices.
 
 ## Phase 3.4: REST trigger startup boundary
 
@@ -376,8 +376,44 @@ Current limitations:
 
 - this slice is intentionally narrow and only covers one command-entry scenario through the helper-supported CLI trigger path,
 - CLI comparison remains on the existing normalized-runtime or recorder-backed comparison bases rather than a dedicated CLI envelope basis,
-- Channel trigger runtime coverage remains deferred,
+- the helper-supported CLI slice still does not generalize to every command parsing or reply shape,
 - unsupported CLI shapes still fall back to the existing direct-flow/runtime or simulated paths.
+
+## Phase 3.8: Channel runtime startup
+
+Focus:
+
+- Channel trigger startup,
+- channel/data evidence,
+- narrow Channel-backed replay.
+
+Current status:
+
+- partially implemented: direct trace and replay now carry one narrow Channel runtime-backed slice for internal-event startup, recording `runtimeEvidence.channelTriggerRuntime` when the helper can observe the named channel, sent data, mapped flow input, and flow output evidence.
+
+Implemented in repo:
+
+- direct `flows trace` can capture Channel boundary evidence in `runtimeEvidence.channelTriggerRuntime` for one supported named engine channel slice and persists the corresponding artifact metadata,
+- direct `flows replay` preserves the same Channel runtime evidence through nested traces for that same narrow supported slice,
+- the shared control-plane and runner metadata now record Channel runtime evidence presence, kind, channel name, sent-data presence, mapped flow input/output presence, and Channel comparison basis metadata when both sides are Channel-backed.
+
+Current limitations:
+
+- this slice is intentionally narrow and only covers one named internal engine channel through the helper-supported Channel trigger path,
+- Channel comparison remains on the helper-supported `channel_runtime_boundary` basis rather than a broader channel envelope comparison,
+- unsupported Channel shapes still fall back to the existing direct-flow/runtime or simulated paths.
+
+## Phase 3.9: Runtime-evidence eval suite
+
+Focus:
+
+- dedicated runtime-evidence eval coverage,
+- trigger-family-aware regression checks,
+- fallback and comparison-basis assertions for the current runtime slices.
+
+Current status:
+
+- implemented in repo: the eval package now carries a dedicated runtime-evidence corpus for the existing direct-flow, REST, timer, CLI, and Channel runtime slices plus representative unsupported-shape fallbacks, with machine-readable expectations for evidence kind, runtime mode, replay behavior, normalized step availability, and comparison-basis preference.
 
 ## Phase 3.2: Recorder-backed evidence foundation
 
@@ -408,7 +444,7 @@ Focus:
 
 Current status:
 
-- partially implemented: the supported runtime-backed slices now preserve normalized per-step evidence in `runtimeEvidence.normalizedSteps` and compare-runs prefers that evidence when both artifacts provide it, but the helper still does not provide broad runtime coverage
+- partially implemented: the supported runtime-backed slices now preserve normalized per-step evidence in `runtimeEvidence.normalizedSteps` and compare-runs prefers that evidence when both artifacts provide it, but the helper still does not provide broad runtime coverage across trigger families
 
 References:
 
@@ -532,7 +568,7 @@ Use this section as the working tracker for future implementation slices.
 | Runner-worker | Flow-contract, runtime trace, replay, run comparison, trigger-binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, and property-plan execution support | Partial | `apps/runner-worker/src/services/*` | Add contribution-authoring job kinds |
 | Go helper | Flow-contract, runtime trace, replay, run comparison, trigger-binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, descriptor, contribution evidence, governance, composition comparison, mapping preview, mapping test, and property planning | Partial | `go-runtime/flogo-helper/main.go` | Integrate deeper Flow runtime hooks and later runtime-backed debugging behavior |
 | Web console | Basic task UI only | Planned | `apps/web-console` | Add catalog, mapping preview, and later replay views |
-| Eval coverage | Existing create/update/debug/review baseline | Partial | `packages/evals` | Add runtime trace, replay, run-comparison, and contribution-authoring cases |
+| Eval coverage | Existing create/update/debug/review baseline plus a dedicated runtime-evidence suite for the current real runtime slices | Partial | `packages/evals` | Add broader UI-facing workflow evals and later contribution-authoring cases |
 
 ## Rules For Future Implementation Passes
 
@@ -547,13 +583,13 @@ When implementing a Flogo-native feature:
 
 ## Recommended Next Slice
 
-The next implementation slice after the current baseline should widen real trigger-runtime coverage beyond the current REST, Timer, and CLI slices without over-claiming broader engine-backed parity.
+The next implementation slice after the current baseline should expose the current runtime evidence clearly in the web console and keep improving operator-facing inspection rather than widening trigger breadth further.
 
 Recommended next items:
 
-1. Add one narrow Channel runtime-backed slice so the helper can capture a real internal event-entry trigger path alongside the existing REST, Timer, and CLI slices.
-2. Keep the current REST-backed, Timer-backed, and CLI-backed slices stable while Channel evidence is added, rather than broadening unsupported trigger profiles in the same batch.
-3. Leave broader trigger-runtime parity beyond Channel deferred until the supported trigger families share a coherent runtime evidence model.
+1. Surface the runtime evidence more clearly in the web console instead of adding another trigger family.
+2. Keep the runtime-evidence suite current as the existing slices evolve so regressions stay visible.
+3. Leave broader trigger-runtime parity beyond the current slices deferred until the supported trigger families share a coherent runtime evidence model.
 
 ## Source References
 

@@ -42,11 +42,13 @@ import {
   ReplayRequestSchema,
   ReplayResponseSchema,
   RunComparisonArtifactRefSchema,
+  ChannelRuntimeComparisonSchema,
   RunComparisonRequestSchema,
   RunComparisonResponseSchema,
   RunComparisonResultSchema,
   type ComparableRunArtifactKind,
   type RunComparisonArtifactRef,
+  type ChannelRuntimeComparison,
   type RunComparisonBasis,
   type RunComparisonRequest,
   type RunComparisonResponse,
@@ -1016,6 +1018,10 @@ function runtimeEvidenceHasRestTriggerRuntime(runtimeEvidence?: RuntimeEvidence)
   return Boolean(runtimeEvidence?.restTriggerRuntime);
 }
 
+function runtimeEvidenceHasChannelTriggerRuntime(runtimeEvidence?: RuntimeEvidence) {
+  return Boolean(runtimeEvidence?.channelTriggerRuntime);
+}
+
 function runtimeEvidenceHasTimerTriggerRuntime(runtimeEvidence?: RuntimeEvidence) {
   return Boolean(runtimeEvidence?.timerTriggerRuntime);
 }
@@ -1053,6 +1059,38 @@ function buildTimerRuntimeComparison(left: ComparableRun, right: ComparableRun):
     diagnostics: dedupeDiagnostics([
       ...cloneDiagnostics(leftTimerRuntime.diagnostics),
       ...cloneDiagnostics(rightTimerRuntime.diagnostics)
+    ])
+  });
+}
+
+function buildChannelRuntimeComparison(
+  left: ComparableRun,
+  right: ComparableRun
+): ChannelRuntimeComparison | undefined {
+  const leftChannelRuntime = left.runtimeEvidence?.channelTriggerRuntime;
+  const rightChannelRuntime = right.runtimeEvidence?.channelTriggerRuntime;
+  if (!leftChannelRuntime || !rightChannelRuntime) {
+    return undefined;
+  }
+
+  return ChannelRuntimeComparisonSchema.parse({
+    comparisonBasis: "channel_runtime_boundary",
+    runtimeMode: left.runtimeEvidence?.runtimeMode ?? right.runtimeEvidence?.runtimeMode,
+    channelCompared: true,
+    dataCompared: true,
+    flowInputCompared: true,
+    flowOutputCompared: true,
+    channelDiff: createValueDiff(leftChannelRuntime.handler?.channel, rightChannelRuntime.handler?.channel),
+    dataDiff: createValueDiff(leftChannelRuntime.data, rightChannelRuntime.data),
+    flowInputDiff: createValueDiff(leftChannelRuntime.flowInput ?? {}, rightChannelRuntime.flowInput ?? {}),
+    flowOutputDiff: createValueDiff(leftChannelRuntime.flowOutput ?? {}, rightChannelRuntime.flowOutput ?? {}),
+    unsupportedFields: dedupeStrings([
+      ...(leftChannelRuntime.unavailableFields ?? []),
+      ...(rightChannelRuntime.unavailableFields ?? [])
+    ]),
+    diagnostics: dedupeDiagnostics([
+      ...cloneDiagnostics(leftChannelRuntime.diagnostics),
+      ...cloneDiagnostics(rightChannelRuntime.diagnostics)
     ])
   });
 }
@@ -1111,6 +1149,9 @@ function comparisonBasisPreference(
   runtimeEvidence?: RuntimeEvidence,
   evidenceKind?: "runtime_backed" | "simulated_fallback"
 ): RunComparisonBasis {
+  if (runtimeEvidenceHasChannelTriggerRuntime(runtimeEvidence)) {
+    return "channel_runtime_boundary";
+  }
   if (runtimeEvidenceHasRestEnvelope(runtimeEvidence)) {
     return "rest_runtime_envelope";
   }
@@ -1334,6 +1375,12 @@ function buildRestEnvelopeComparison(left: ComparableRun, right: ComparableRun):
 
 function chooseRunComparisonBasis(left: ComparableRun, right: ComparableRun) {
   if (
+    left.comparisonBasis === "channel_runtime_boundary" &&
+    right.comparisonBasis === "channel_runtime_boundary"
+  ) {
+    return "channel_runtime_boundary" as const;
+  }
+  if (
     left.comparisonBasis === "rest_runtime_envelope" &&
     right.comparisonBasis === "rest_runtime_envelope"
   ) {
@@ -1367,6 +1414,7 @@ function usesRecorderComparisonBasis(basis: RunComparisonBasis) {
   return (
     basis === "normalized_runtime_evidence" ||
     basis === "recorder_backed" ||
+    basis === "channel_runtime_boundary" ||
     basis === "rest_runtime_envelope" ||
     basis === "timer_runtime_startup"
   );
@@ -1424,6 +1472,25 @@ function buildSummaryDiagnosticDiffs(left: ComparableRun, right: ComparableRun, 
     return diagnostics;
   }
 
+  if (
+    left.comparisonBasis === "channel_runtime_boundary" &&
+    right.comparisonBasis === "channel_runtime_boundary"
+  ) {
+    diagnostics.push(
+      createDiagnostic(
+        "flogo.run_comparison.channel_runtime_boundary_preferred",
+        "Compared Channel trigger boundary evidence, sent data, mapped flow input, and flow output using the helper-supported Channel slice.",
+        "info",
+        undefined,
+        {
+          leftChannelObserved: Boolean(left.runtimeEvidence?.channelTriggerRuntime),
+          rightChannelObserved: Boolean(right.runtimeEvidence?.channelTriggerRuntime),
+          leftDataObserved: Boolean(left.runtimeEvidence?.channelTriggerRuntime?.data),
+          rightDataObserved: Boolean(right.runtimeEvidence?.channelTriggerRuntime?.data)
+        }
+      )
+    );
+  }
   if (
     left.comparisonBasis === "rest_runtime_envelope" &&
     right.comparisonBasis === "rest_runtime_envelope"
@@ -1678,6 +1745,7 @@ export function compareRuns(
   const summaryDiagnostics = buildSummaryDiagnosticDiffs(left, right, request.compare.includeDiagnostics);
   const comparisonBasis = chooseRunComparisonBasis(left, right);
   const restComparison = buildRestEnvelopeComparison(left, right);
+  const channelComparison = buildChannelRuntimeComparison(left, right);
   const timerComparison = buildTimerRuntimeComparison(left, right);
   const result = RunComparisonResultSchema.parse({
     left: RunComparisonArtifactRefSchema.parse({
@@ -1693,6 +1761,9 @@ export function compareRuns(
       cliTriggerRuntimeKind: left.runtimeEvidence?.cliTriggerRuntime?.kind,
       timerTriggerRuntimeEvidence: runtimeEvidenceHasTimerTriggerRuntime(left.runtimeEvidence),
       timerTriggerRuntimeKind: left.runtimeEvidence?.timerTriggerRuntime?.kind,
+      channelTriggerRuntimeEvidence: runtimeEvidenceHasChannelTriggerRuntime(left.runtimeEvidence),
+      channelTriggerRuntimeKind: left.runtimeEvidence?.channelTriggerRuntime?.kind,
+      channelTriggerRuntimeChannel: left.runtimeEvidence?.channelTriggerRuntime?.handler?.channel,
       comparisonBasisPreference: left.comparisonBasis
     } satisfies RunComparisonArtifactRef),
     right: RunComparisonArtifactRefSchema.parse({
@@ -1708,10 +1779,14 @@ export function compareRuns(
       cliTriggerRuntimeKind: right.runtimeEvidence?.cliTriggerRuntime?.kind,
       timerTriggerRuntimeEvidence: runtimeEvidenceHasTimerTriggerRuntime(right.runtimeEvidence),
       timerTriggerRuntimeKind: right.runtimeEvidence?.timerTriggerRuntime?.kind,
+      channelTriggerRuntimeEvidence: runtimeEvidenceHasChannelTriggerRuntime(right.runtimeEvidence),
+      channelTriggerRuntimeKind: right.runtimeEvidence?.channelTriggerRuntime?.kind,
+      channelTriggerRuntimeChannel: right.runtimeEvidence?.channelTriggerRuntime?.handler?.channel,
       comparisonBasisPreference: right.comparisonBasis
     } satisfies RunComparisonArtifactRef),
     comparisonBasis,
     restComparison,
+    channelComparison,
     timerComparison,
     summary: {
       statusChanged: left.summaryStatus !== right.summaryStatus,

@@ -309,12 +309,13 @@ Current implementation notes:
 - for eligible REST-bound flows, trace can also start one narrow runtime-backed REST trigger slice through the official Flogo REST trigger and capture request, mapped flow input/output, and reply evidence in `runtimeEvidence.restTriggerRuntime`,
 - for timer-bound flows in the narrow timer slice, trace can also capture `runtimeEvidence.timerTriggerRuntime` with timer settings, mapped flow input/output, and observed tick evidence when the helper can see them,
 - for eligible CLI-bound flows, trace can also start one narrow runtime-backed CLI trigger slice through the official Flogo CLI trigger and capture trigger settings, command identity, args, flags, mapped flow input, and reply/stdout evidence in `runtimeEvidence.cliTriggerRuntime`,
+- for eligible Channel-bound flows, trace can also start one narrow runtime-backed Channel trigger slice through the official Flogo Channel trigger and capture channel name, sent data, mapped flow input/output, and evidence metadata in `runtimeEvidence.channelTriggerRuntime`,
 - that runtime-backed slice now attaches the Flow `flow/state.Recorder` seam and returns recorder-backed `runtimeEvidence.flowStart`, `runtimeEvidence.flowDone`, `runtimeEvidence.snapshots`, `runtimeEvidence.steps`, and task lifecycle events,
 - the supported slice now projects that recorder/task-event evidence into `runtimeEvidence.normalizedSteps`, including per-step task identity, declared mappings, resolved inputs and produced outputs when observable, flow state before/after, state deltas, and explicit unavailable-field markers when the runtime path cannot observe a requested field,
 - the REST trigger runtime slice is intentionally narrow: static paths only, supported methods limited to `POST`, `PUT`, and `PATCH`, explicit request/reply mappings, and the same helper-supported compiled activity allowlist used by the direct-flow runtime slice,
 - the CLI trigger runtime slice is intentionally narrow: one supported command-entry handler, official CLI trigger argument/flag parsing, supported flag descriptors, explicit args/flags mappings, and the same helper-supported compiled activity allowlist used by the direct-flow runtime slice,
 - unsupported trace topologies fall back to `trace.evidenceKind = "simulated_fallback"` instead of failing outright,
-- the runtime-backed trace surface remains narrow and does not widen engine coverage beyond the current supported direct-flow, REST, timer, and CLI slices,
+- the runtime-backed trace surface remains narrow and does not widen engine coverage beyond the current supported direct-flow, REST, timer, CLI, and Channel slices,
 - the helper returns structured step snapshots, summary status, and diagnostics only through JSON stdout,
 - current runtime trace is additive runtime evidence and does not replace static mapping preview or mapping tests.
 
@@ -357,10 +358,11 @@ Current implementation notes:
 - for eligible REST-bound flows, replay can now re-run the same narrow runtime-backed REST trigger slice and capture request, mapped flow input/output, reply evidence, and normalized step evidence in the nested trace,
 - for the narrow timer slice, replay preserves `runtimeEvidence.timerTriggerRuntime` and comparison metadata so timer startup evidence can flow through nested trace artifacts,
 - for the narrow CLI slice, replay can also re-run the same runtime-backed CLI trigger slice and preserve command identity, args, flags, mapped flow input, reply/stdout evidence, and normalized step evidence in the nested trace,
+- for the narrow Channel slice, replay can also re-run the same runtime-backed Channel trigger slice and preserve channel name, sent data, mapped flow input/output, and normalized step evidence in the nested trace,
 - replay from `traceArtifactId` loads the stored `run_trace` payload and uses `trace.summary.input` as the base input,
 - successful replay returns structured replay metadata plus a nested trace payload,
 - failed task execution still returns a structured replay response when the helper can serialize the failure.
-- successful narrow runtime-backed replay is labeled separately through `result.runtimeEvidence.runtimeMode` values such as `independent_action_replay`, `rest_trigger_replay`, `cli_trigger_replay`, and `timer_trigger_replay`,
+- successful narrow runtime-backed replay is labeled separately through `result.runtimeEvidence.runtimeMode` values such as `independent_action_replay`, `rest_trigger_replay`, `cli_trigger_replay`, `timer_trigger_replay`, and `channel_trigger_replay`,
 - the supported slices preserve the same `runtimeEvidence.normalizedSteps` structure in the nested trace when replay succeeds,
 - replay remains simulated/helper-backed for unsupported shapes, the REST-backed slice stays scoped to the same narrow static-path request/reply contract as REST trace, and the CLI-backed slice stays scoped to the same narrow supported command-entry contract as CLI trace.
 
@@ -401,6 +403,7 @@ Current implementation notes:
 - when normalized runtime evidence is unavailable, comparison falls back to recorder-backed inputs/outputs/step counts when possible and otherwise to the replay summary payload,
 - when both artifacts are REST runtime-backed, comparison can prefer a REST envelope basis and diff request method/path/query/headers/body/path params, mapped flow input, and reply status/body/headers/cookies,
 - when both artifacts carry timer runtime evidence, comparison can prefer `timer_runtime_startup` and surface timer settings, flow input, flow output, and tick diffs in `result.timerComparison`,
+- when both artifacts carry Channel runtime evidence, comparison can prefer `channel_runtime_boundary` and surface channel name, sent data, mapped flow input, and mapped flow output diffs in `result.channelComparison`,
 - comparison preserves REST runtime metadata from stored artifacts when present, preserves CLI runtime metadata from stored artifacts when present, but it remains artifact-backed and only performs REST envelope diffing when both sides are REST runtime-backed,
 - cross-flow comparison is allowed and returns a warning diagnostic instead of a hard failure,
 - array values are compared as whole values in this slice,
@@ -428,7 +431,7 @@ Supported trigger profiles in the current slice:
 - `rest`
 - `timer`
 - `cli`
-- `channel` remains deferred from the current runtime-backed slice
+- `channel` now has one narrow runtime-backed slice for the internal-event boundary, but broader channel topologies remain unsupported in this phase
 
 Response shape:
 
@@ -447,7 +450,7 @@ Current implementation notes:
 - `handlerName` and `triggerId` default to generated values when omitted
 - REST bindings auto-map common request and reply fields based on the flow contract
 - Timer bindings are limited to flows with zero required inputs in this slice
-- CLI bindings are supported for design-time binding and now have one narrow runtime-backed command-entry slice; Channel remains deferred from the current runtime-backed slice
+- CLI bindings are supported for design-time binding and now have one narrow runtime-backed command-entry slice; Channel bindings are supported for design-time binding and now have one narrow runtime-backed internal-event slice
 - `triggerName`, `requestMappingMode`, `replyMappingMode`, and `runMode` are deprecated compatibility fields and are ignored by the current binder
 
 ### `POST /v1/projects/:projectId/apps/:appId/flows/extract-subflow`

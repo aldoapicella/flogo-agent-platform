@@ -297,6 +297,7 @@ export class FlogoAppsService {
         ...this.restTriggerRuntimeMetadata("trace", trace?.runtimeEvidence ?? runtimeEvidence),
         ...this.cliTriggerRuntimeMetadata("trace", trace?.runtimeEvidence ?? runtimeEvidence),
         ...this.timerTriggerRuntimeMetadata("trace", trace?.runtimeEvidence ?? runtimeEvidence),
+        ...this.channelTriggerRuntimeMetadata("trace", trace?.runtimeEvidence ?? runtimeEvidence),
         sourceType: resolved.sourceType
       },
       {
@@ -405,6 +406,8 @@ export class FlogoAppsService {
         ...this.restTriggerRuntimeMetadata("replay", result.runtimeEvidence),
         ...this.cliTriggerRuntimeMetadata("replay", result.runtimeEvidence),
         ...this.timerTriggerRuntimeMetadata("replay", result.runtimeEvidence),
+        ...this.channelTriggerRuntimeMetadata("replay", result.runtimeEvidence),
+        ...(this.buildChannelReplayEvidence(result.runtimeEvidence) ?? {}),
         sourceType: resolved.sourceType
       },
       {
@@ -477,7 +480,14 @@ export class FlogoAppsService {
         rightTimerTriggerRuntimeEvidence: response.result?.right.timerTriggerRuntimeEvidence,
         leftTimerTriggerRuntimeKind: response.result?.left.timerTriggerRuntimeKind,
         rightTimerTriggerRuntimeKind: response.result?.right.timerTriggerRuntimeKind,
+        leftChannelTriggerRuntimeEvidence: response.result?.left.channelTriggerRuntimeEvidence,
+        rightChannelTriggerRuntimeEvidence: response.result?.right.channelTriggerRuntimeEvidence,
+        leftChannelTriggerRuntimeKind: response.result?.left.channelTriggerRuntimeKind,
+        rightChannelTriggerRuntimeKind: response.result?.right.channelTriggerRuntimeKind,
+        leftChannelTriggerRuntimeChannel: response.result?.left.channelTriggerRuntimeChannel,
+        rightChannelTriggerRuntimeChannel: response.result?.right.channelTriggerRuntimeChannel,
         ...this.restComparisonMetadata(response.result?.restComparison),
+        ...this.channelComparisonMetadata(response.result?.channelComparison),
         ...this.timerComparisonMetadata(response.result?.timerComparison),
         sourceType: resolved.sourceType
       },
@@ -1388,6 +1398,9 @@ export class FlogoAppsService {
     runtimeEvidence?: RuntimeEvidence,
     evidenceKind?: unknown
   ): RunComparisonBasis | undefined {
+    if (runtimeEvidence?.channelTriggerRuntime) {
+      return "channel_runtime_boundary";
+    }
     if (runtimeEvidence?.restTriggerRuntime) {
       return "rest_runtime_envelope";
     }
@@ -1461,6 +1474,22 @@ export class FlogoAppsService {
     };
   }
 
+  private channelTriggerRuntimeMetadata(prefix: "trace" | "replay", runtimeEvidence?: RuntimeEvidence) {
+    const channelTriggerRuntime = runtimeEvidence?.channelTriggerRuntime;
+    if (!channelTriggerRuntime) {
+      return {};
+    }
+
+    return {
+      [`${prefix}ChannelTriggerRuntimeEvidence`]: true,
+      [`${prefix}ChannelTriggerRuntimeKind`]: channelTriggerRuntime.kind,
+      [`${prefix}ChannelTriggerRuntimeChannel`]: channelTriggerRuntime.handler?.channel,
+      [`${prefix}ChannelTriggerRuntimeHasData`]: channelTriggerRuntime.data !== undefined,
+      [`${prefix}ChannelTriggerRuntimeHasMappedFlowInput`]: Object.keys(channelTriggerRuntime.flowInput ?? {}).length > 0,
+      [`${prefix}ChannelTriggerRuntimeHasMappedFlowOutput`]: Object.keys(channelTriggerRuntime.flowOutput ?? {}).length > 0
+    };
+  }
+
   private cliTriggerRuntimeMetadata(prefix: "trace" | "replay", runtimeEvidence?: RuntimeEvidence) {
     const cliTriggerRuntime = runtimeEvidence?.cliTriggerRuntime;
     if (!cliTriggerRuntime) {
@@ -1495,6 +1524,26 @@ export class FlogoAppsService {
       [`${prefix}TimerTriggerRuntimeTickObserved`]: Boolean(timerTriggerRuntime.tick),
       [`${prefix}TimerTriggerRuntimeHasMappedFlowInput`]: Object.keys(timerTriggerRuntime.flowInput ?? {}).length > 0,
       [`${prefix}TimerTriggerRuntimeHasMappedFlowOutput`]: Object.keys(timerTriggerRuntime.flowOutput ?? {}).length > 0
+    };
+  }
+
+  private buildChannelReplayEvidence(runtimeEvidence?: RuntimeEvidence) {
+    const channelTriggerRuntime = runtimeEvidence?.channelTriggerRuntime;
+    if (!channelTriggerRuntime) {
+      return undefined;
+    }
+
+    return {
+      channelReplay: {
+        comparisonBasis: "channel_runtime_boundary",
+        runtimeMode: runtimeEvidence?.runtimeMode,
+        channelObserved: Boolean(channelTriggerRuntime.handler?.channel),
+        dataObserved: channelTriggerRuntime.data !== undefined,
+        flowInputObserved: Boolean(channelTriggerRuntime.flowInput && Object.keys(channelTriggerRuntime.flowInput).length > 0),
+        flowOutputObserved: Boolean(channelTriggerRuntime.flowOutput && Object.keys(channelTriggerRuntime.flowOutput).length > 0),
+        unsupportedFields: Array.from(new Set(channelTriggerRuntime.unavailableFields ?? [])),
+        diagnostics: [...(channelTriggerRuntime.diagnostics ?? [])]
+      }
     };
   }
 
@@ -1607,6 +1656,41 @@ export class FlogoAppsService {
       timerTickDiff: timerComparison.tickDiff,
       timerComparisonUnsupportedFields: timerComparison.unsupportedFields,
       timerComparisonDiagnostics: timerComparison.diagnostics
+    };
+  }
+
+  private channelComparisonMetadata(channelComparison?: {
+    comparisonBasis: "channel_runtime_boundary";
+    runtimeMode?: string;
+    channelCompared: boolean;
+    dataCompared: boolean;
+    flowInputCompared: boolean;
+    flowOutputCompared: boolean;
+    channelDiff?: unknown;
+    dataDiff?: unknown;
+    flowInputDiff?: unknown;
+    flowOutputDiff?: unknown;
+    unsupportedFields: string[];
+    diagnostics: unknown[];
+  }) {
+    if (!channelComparison) {
+      return {};
+    }
+
+    return {
+      channelComparison,
+      channelComparisonBasis: channelComparison.comparisonBasis,
+      channelRuntimeMode: channelComparison.runtimeMode,
+      channelCompared: channelComparison.channelCompared,
+      channelDataCompared: channelComparison.dataCompared,
+      channelFlowInputCompared: channelComparison.flowInputCompared,
+      channelFlowOutputCompared: channelComparison.flowOutputCompared,
+      channelChannelDiff: channelComparison.channelDiff,
+      channelDataDiff: channelComparison.dataDiff,
+      channelFlowInputDiff: channelComparison.flowInputDiff,
+      channelFlowOutputDiff: channelComparison.flowOutputDiff,
+      channelComparisonUnsupportedFields: channelComparison.unsupportedFields,
+      channelComparisonDiagnostics: channelComparison.diagnostics
     };
   }
 
