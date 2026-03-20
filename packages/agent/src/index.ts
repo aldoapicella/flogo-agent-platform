@@ -68,6 +68,7 @@ function getAnalysisMode(
   | "trigger_scaffold"
   | "validate_contrib"
   | "package_contrib"
+  | "install_contrib_plan"
   | "mapping_preview"
   | "mapping_test"
   | "property_plan"
@@ -98,6 +99,7 @@ function getAnalysisMode(
     mode === "trigger_scaffold" ||
     mode === "validate_contrib" ||
     mode === "package_contrib" ||
+    mode === "install_contrib_plan" ||
     mode === "mapping_preview" ||
     mode === "mapping_test" ||
     mode === "property_plan" ||
@@ -194,6 +196,8 @@ export class TaskPlanner {
       steps.push({ id: "validate-contrib", label: "Re-run isolated validation, test, and build proof for an existing Flogo contribution bundle", tool: "runner.validateContrib" });
     } else if (analysisMode === "package_contrib") {
       steps.push({ id: "package-contrib", label: "Package an existing Flogo contribution bundle after isolated validation, test, and build proof", tool: "runner.packageContrib" });
+    } else if (analysisMode === "install_contrib_plan") {
+      steps.push({ id: "install-contrib-plan", label: "Plan a reviewable contribution install into the target Flogo app without mutating flogo.json", tool: "runner.installContribPlan" });
     } else if (analysisMode === "mapping_preview") {
       steps.push({ id: "mapping", label: "Preview mappings and suggest coercions", tool: "runner.previewMapping" });
       steps.push({ id: "properties", label: "Plan app properties and environment usage", tool: "flogo.planProperties" });

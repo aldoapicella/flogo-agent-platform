@@ -81,9 +81,9 @@ It currently supports:
 It is expected to grow into:
 
 - programmatic Core composition,
-- broader contribution install/update planning.
+- broader contribution install/update apply workflows.
 
-The runtime-evidence commands above are still mostly artifact-backed, but direct trace capture now has narrow in-process Core/Flow runtime paths for the existing direct-flow slice, one supported REST trigger-driven slice, a narrow timer startup slice, a narrow CLI command-entry slice, and a narrow Channel internal-event slice. Replay reuses those same supported slices, and run comparison prefers normalized runtime artifacts when both sides provide them, REST envelope comparison when both sides are REST-backed, timer startup comparison when both sides carry timer evidence, and Channel boundary comparison when both sides carry channel evidence. Those narrow slices expose normalized per-step task identity, I/O, and flow-state deltas where observable, the REST slice additionally carries request, mapped flow input/output, and reply evidence in `runtimeEvidence.restTriggerRuntime`, the timer slice carries timer settings plus observed tick evidence in `runtimeEvidence.timerTriggerRuntime`, the CLI slice carries command identity, args, flags, mapped flow input, and reply/stdout evidence in `runtimeEvidence.cliTriggerRuntime`, and the Channel slice carries named-channel data, mapped flow input/output, and evidence metadata in `runtimeEvidence.channelTriggerRuntime`. The helper now also has narrow Phase 4 authoring commands, `contrib scaffold-activity`, `contrib scaffold-action`, `contrib scaffold-trigger`, `contrib validate`, and `contrib package`, which generate descriptor metadata plus Go/module/test/readme files for custom Activity, Action, and Trigger bundles, re-run isolated proof for existing bundles, and emit conservative review archives as persisted artifacts.
+The runtime-evidence commands above are still mostly artifact-backed, but direct trace capture now has narrow in-process Core/Flow runtime paths for the existing direct-flow slice, one supported REST trigger-driven slice, a narrow timer startup slice, a narrow CLI command-entry slice, and a narrow Channel internal-event slice. Replay reuses those same supported slices, and run comparison prefers normalized runtime artifacts when both sides provide them, REST envelope comparison when both sides are REST-backed, timer startup comparison when both sides carry timer evidence, and Channel boundary comparison when both sides carry channel evidence. Those narrow slices expose normalized per-step task identity, I/O, and flow-state deltas where observable, the REST slice additionally carries request, mapped flow input/output, and reply evidence in `runtimeEvidence.restTriggerRuntime`, the timer slice carries timer settings plus observed tick evidence in `runtimeEvidence.timerTriggerRuntime`, the CLI slice carries command identity, args, flags, mapped flow input, and reply/stdout evidence in `runtimeEvidence.cliTriggerRuntime`, and the Channel slice carries named-channel data, mapped flow input/output, and evidence metadata in `runtimeEvidence.channelTriggerRuntime`. The helper now also has narrow Phase 4 authoring commands, `contrib scaffold-activity`, `contrib scaffold-action`, `contrib scaffold-trigger`, `contrib validate`, `contrib package`, and `contrib install-plan`, which generate descriptor metadata plus Go/module/test/readme files for custom Activity, Action, and Trigger bundles, re-run isolated proof for existing bundles, emit conservative review archives as persisted artifacts, and analyze reviewable target-app install plans without mutating `flogo.json`.
 
 ## High-level topology
 
@@ -183,6 +183,7 @@ Current workflow modes:
   - `scaffold_trigger`
   - `validate_contrib`
   - `package_contrib`
+  - `install_contrib_plan`
 
 ## Runner-worker
 
@@ -228,6 +229,7 @@ Current notable behavior:
   - `scaffold_trigger`
   - `validate_contrib`
   - `package_contrib`
+  - `install_contrib_plan`
 - Container Apps Job mode includes ARM start/poll logic and job-template routing,
 - build/smoke steps are still less Flogo-native than the catalog/preview slice and remain an ongoing implementation area.
 
@@ -433,7 +435,7 @@ The platform has completed the Phase 1 capability area and has implemented Phase
 - diagnosis confidence is now explicitly calibrated against runtime-backed, mixed, artifact-backed-only, simulated-fallback, and contract-inference-only proof quality rather than treated as a flat heuristic,
 - `packages/evals` now includes a diagnosis-focused regression corpus that exercises planner choice, confidence bands, fallback caveats, and recommendation stability across the current trigger families,
 - the web console now exposes task-detail runtime evidence, trigger-specific summaries, normalized steps, fallback reasons, comparison basis, and diagnosis summaries for the currently supported slices,
-- the same task-detail artifact surface now exposes minimal Activity/Trigger/Action authoring result summaries, validation summaries, and package summaries, including contribution type, package/module, generated files, build/test status, and package metadata from persisted `contrib_bundle`, `contrib_validation_report`, and `contrib_package` metadata,
+- the same task-detail artifact surface now exposes minimal Activity/Trigger/Action authoring result summaries, validation summaries, package summaries, and install-plan summaries, including contribution type, package/module, generated files, build/test status, package metadata, target-app install entries, warnings, conflicts, and recommended next action from persisted `contrib_bundle`, `contrib_validation_report`, `contrib_package`, and `contrib_install_plan` metadata,
 - broader runtime coverage beyond the current narrow supported slices remains planned,
 - analysis-only orchestration modes.
 
@@ -457,7 +459,7 @@ Persisted through Prisma today:
 - app-scoped inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, mapping-test, runtime-trace, replay, and run-comparison artifacts are persisted through hidden synthetic analysis tasks,
 - task-scoped `diagnosis_report` artifacts are persisted through the normal task pipeline and can reference nested trace, replay, and comparison artifacts used during diagnosis,
 - those app-analysis payloads are stored in Blob/Azurite-backed JSON objects,
-- task-scoped `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `build_log`, and `test_report` artifacts from Activity/Trigger/Action authoring are now also uploaded as Blob/Azurite-backed JSON payloads through the same storage seam while retaining Prisma metadata for task/detail rendering,
+- task-scoped `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `build_log`, and `test_report` artifacts from Activity/Trigger/Action authoring are now also uploaded as Blob/Azurite-backed JSON payloads through the same storage seam while retaining Prisma metadata for task/detail rendering,
 - broader task artifacts outside the app-analysis and contribution-authoring slices can still include logical/local URIs.
 
 ### Planned persistence growth
@@ -471,7 +473,7 @@ Persisted through Prisma today:
 - `flogo.json` is still the canonical artifact even as the Go helper path grows.
 - The Go helper is intentionally a finite execution binary, not a new always-on service.
 - The current helper uses contribution inventory plus module-aware package discovery, evidence confidence, normalized Flogo metadata, static mapping evaluation, and known-registry inference for the Phase 1 analysis path; it is not yet a full Core/Flow-native runtime.
-- Runtime trace capture, replay, and run comparison are implemented as helper-backed artifact evidence with narrow live direct-flow, REST, timer, CLI, and Channel slices plus comparison-basis preference over persisted artifacts; diagnosis remains recommendation-oriented, confidence is conservatively calibrated against evidence quality and fallback state, and the platform still does not auto-apply repository patches. Contribution authoring now has a narrow Activity/Trigger/Action scaffold foundation plus shared validate/build/test/package groundwork with blob-backed bundle/proof/package artifacts and minimal task-detail visibility, but install/update flows remain roadmap work.
+- Runtime trace capture, replay, and run comparison are implemented as helper-backed artifact evidence with narrow live direct-flow, REST, timer, CLI, and Channel slices plus comparison-basis preference over persisted artifacts; diagnosis remains recommendation-oriented, confidence is conservatively calibrated against evidence quality and fallback state, and the platform still does not auto-apply repository patches. Contribution authoring now has a narrow Activity/Trigger/Action scaffold foundation plus shared validate/build/test/package/install-plan groundwork with blob-backed bundle/proof/package/install-plan artifacts and minimal task-detail visibility, but install/update apply flows remain roadmap work.
 - In restricted shells on Windows, `next build` and Vitest can fail with `spawn EPERM` even when typecheck is clean.
 
 ## Reference documents

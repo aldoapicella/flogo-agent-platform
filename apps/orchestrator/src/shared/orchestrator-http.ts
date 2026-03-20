@@ -128,6 +128,9 @@ export function resolveWorkflowRunnerSteps(start: OrchestratorStartRequest): Run
   if (mode === "package_contrib") {
     return ["package_contrib"];
   }
+  if (mode === "install_contrib_plan") {
+    return ["install_contrib_plan"];
+  }
   if (mode === "mapping_preview") {
     return ["preview_mapping"];
   }
@@ -234,6 +237,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
       break;
     case "package_contrib":
       jobKind = "contrib_package";
+      break;
+    case "install_contrib_plan":
+      jobKind = "contrib_install_plan";
       break;
     case "preview_mapping":
       jobKind = "mapping_preview";
@@ -769,6 +775,47 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
             : undefined
       };
       break;
+    case "install_contrib_plan":
+      analysisPayload = {
+        bundleArtifactId:
+          typeof start.request.inputs["bundleArtifactId"] === "string"
+            ? (start.request.inputs["bundleArtifactId"] as string)
+            : undefined,
+        bundleArtifact:
+          start.request.inputs["bundleArtifact"] && typeof start.request.inputs["bundleArtifact"] === "object" && !Array.isArray(start.request.inputs["bundleArtifact"])
+            ? (start.request.inputs["bundleArtifact"] as Record<string, unknown>)
+            : undefined,
+        result:
+          start.request.inputs["result"] && typeof start.request.inputs["result"] === "object" && !Array.isArray(start.request.inputs["result"])
+            ? (start.request.inputs["result"] as Record<string, unknown>)
+            : undefined,
+        packageArtifactId:
+          typeof start.request.inputs["packageArtifactId"] === "string"
+            ? (start.request.inputs["packageArtifactId"] as string)
+            : undefined,
+        packageArtifact:
+          start.request.inputs["packageArtifact"] && typeof start.request.inputs["packageArtifact"] === "object" && !Array.isArray(start.request.inputs["packageArtifact"])
+            ? (start.request.inputs["packageArtifact"] as Record<string, unknown>)
+            : undefined,
+        packageResult:
+          start.request.inputs["packageResult"] && typeof start.request.inputs["packageResult"] === "object" && !Array.isArray(start.request.inputs["packageResult"])
+            ? (start.request.inputs["packageResult"] as Record<string, unknown>)
+            : undefined,
+        preferredAlias:
+          typeof start.request.inputs["preferredAlias"] === "string"
+            ? (start.request.inputs["preferredAlias"] as string)
+            : undefined,
+        replaceExisting:
+          typeof start.request.inputs["replaceExisting"] === "boolean"
+            ? (start.request.inputs["replaceExisting"] as boolean)
+            : undefined,
+        targetApp: {
+          projectId: start.request.projectId,
+          appId: start.request.appId,
+          appPath: start.request.appPath
+        }
+      };
+      break;
     default:
       analysisPayload = undefined;
       break;
@@ -827,6 +874,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
       break;
     case "package_contrib":
       analysisKind = "package_contrib";
+      break;
+    case "install_contrib_plan":
+      analysisKind = "install_contrib_plan";
       break;
     case "preview_mapping":
       analysisKind = "mapping_preview";

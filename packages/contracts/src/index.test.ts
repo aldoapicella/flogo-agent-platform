@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   ActionScaffoldRequestSchema,
   ActionScaffoldResponseSchema,
+  ContributionInstallPlanRequestSchema,
+  ContributionInstallPlanResponseSchema,
   ContributionPackageRequestSchema,
   ContributionPackageResponseSchema,
   ContributionValidateRequestSchema,
@@ -387,5 +389,144 @@ describe("ContributionPackageResponseSchema", () => {
 
     expect(parsed.result.bundle.kind).toBe("action");
     expect(parsed.result.package.format).toBe("zip");
+  });
+});
+
+describe("ContributionInstallPlanRequestSchema", () => {
+  it("accepts bundle-backed install planning input", () => {
+    const parsed = ContributionInstallPlanRequestSchema.parse({
+      bundleArtifactId: "artifact-1",
+      targetApp: {
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json"
+      },
+      preferredAlias: "echoactivity"
+    });
+
+    expect(parsed.bundleArtifactId).toBe("artifact-1");
+    expect(parsed.preferredAlias).toBe("echoactivity");
+    expect(parsed.replaceExisting).toBe(false);
+  });
+
+  it("accepts package-backed install planning input", () => {
+    const parsed = ContributionInstallPlanRequestSchema.parse({
+      packageArtifactId: "artifact-2",
+      targetApp: {
+        projectId: "demo",
+        appId: "hello-rest"
+      }
+    });
+
+    expect(parsed.packageArtifactId).toBe("artifact-2");
+  });
+
+  it("rejects missing contribution sources", () => {
+    expect(() => ContributionInstallPlanRequestSchema.parse({})).toThrow(/Provide one contribution source/);
+  });
+
+  it("rejects mixed bundle and package sources in one request", () => {
+    expect(() =>
+      ContributionInstallPlanRequestSchema.parse({
+        bundleArtifactId: "artifact-1",
+        packageArtifactId: "artifact-2"
+      })
+    ).toThrow(/Provide either one bundle source or one package source/);
+  });
+});
+
+describe("ContributionInstallPlanResponseSchema", () => {
+  it("parses a conservative install plan result", () => {
+    const parsed = ContributionInstallPlanResponseSchema.parse({
+      result: {
+        contributionKind: "trigger",
+        source: "package_artifact",
+        sourceArtifactId: "artifact-2",
+        targetApp: {
+          projectId: "demo",
+          appId: "hello-rest",
+          appPath: "examples/hello-rest/flogo.json",
+          appName: "hello-rest"
+        },
+        bundle: {
+          kind: "trigger",
+          modulePath: "example.com/acme/webhook",
+          packageName: "webhooktrigger",
+          bundleRoot: "/tmp/flogo-trigger-webhooktrigger",
+          descriptor: {
+            ref: "example.com/acme/webhook",
+            alias: "webhooktrigger",
+            type: "trigger",
+            name: "webhook-trigger",
+            version: "0.1.0",
+            title: "Webhook Trigger",
+            settings: [],
+            handlerSettings: [],
+            outputs: [],
+            reply: [],
+            examples: [],
+            compatibilityNotes: ["Generated scaffold"],
+            source: "trigger_scaffold"
+          },
+          files: []
+        },
+        package: {
+          format: "zip",
+          fileName: "trigger-webhooktrigger.zip",
+          path: "/tmp/trigger-webhooktrigger.zip",
+          bytes: 2048,
+          sha256: "abc123",
+          base64: "ZmFrZQ=="
+        },
+        modulePath: "example.com/acme/webhook",
+        packageName: "webhooktrigger",
+        packagePath: "example.com/acme/webhook",
+        descriptorRef: "example.com/acme/webhook",
+        selectedAlias: "webhooktrigger",
+        installReady: true,
+        readiness: "high",
+        proposedImports: [
+          {
+            alias: "webhooktrigger",
+            ref: "example.com/acme/webhook",
+            action: "add"
+          }
+        ],
+        proposedRefs: [
+          {
+            surface: "triggerRef",
+            value: "#webhooktrigger",
+            note: "Use this ref when creating a trigger instance."
+          }
+        ],
+        predictedChanges: {
+          importsToAdd: [
+            {
+              alias: "webhooktrigger",
+              ref: "example.com/acme/webhook",
+              action: "add"
+            }
+          ],
+          importsToUpdate: [],
+          reusableRefs: [
+            {
+              surface: "triggerRef",
+              value: "#webhooktrigger"
+            }
+          ],
+          summaryLines: ["Add import alias \"webhooktrigger\" for ref \"example.com/acme/webhook\"."],
+          noMutation: true
+        },
+        warnings: [],
+        conflicts: [],
+        diagnostics: [],
+        recommendedNextAction: "Review the import plan before adding a trigger instance that uses #webhooktrigger.",
+        limitations: ["Planning only; no flogo.json mutation was applied."]
+      }
+    });
+
+    expect(parsed.result.readiness).toBe("high");
+    expect(parsed.result.proposedRefs[0]?.surface).toBe("triggerRef");
+    expect(parsed.result.predictedChanges.noMutation).toBe(true);
   });
 });

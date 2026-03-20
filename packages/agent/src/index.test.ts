@@ -290,4 +290,31 @@ describe("TaskPlanner shared contribution lifecycle modes", () => {
       "runner.packageContrib"
     ]);
   });
+
+  it("treats explicit contribution install planning mode as analysis-only authoring work", () => {
+    const planner = new TaskPlanner();
+    const plan = planner.plan({
+      type: "review",
+      projectId: "demo",
+      appId: "hello-rest",
+      requestedBy: "operator",
+      summary: "Plan how to install a packaged Flogo contribution into the target app",
+      inputs: {
+        mode: "install_contrib_plan",
+        packageArtifactId: "artifact-1"
+      },
+      constraints: {
+        allowDependencyChanges: false,
+        allowCustomCode: false,
+        targetEnv: "dev",
+        requireApproval: true
+      }
+    });
+
+    expect(plan.steps.map((step) => step.tool)).toEqual([
+      "flogo.parseApp",
+      "flogo.validateApp",
+      "runner.installContribPlan"
+    ]);
+  });
 });

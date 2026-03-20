@@ -129,7 +129,7 @@ class FakeAppAnalysisStorageService {
     projectId: string;
     taskId: string;
     artifactId: string;
-    kind: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "build_log" | "test_report";
+    kind: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "contrib_install_plan" | "build_log" | "test_report";
     payload: Record<string, unknown>;
   }) {
     this.uploads.push(args);
@@ -346,6 +346,141 @@ describe("OrchestrationService", () => {
     });
   });
 
+  it("resolves contrib_package artifact ids for install planning tasks and fills the target app path from appId", async () => {
+    const storage = new FakeAppAnalysisStorageService();
+    const taskStore = new FakeTaskStoreService();
+    const service = new OrchestrationService(
+      new ToolsetService(),
+      new OrchestratorClientService(),
+      new TaskEventsService(),
+      taskStore as any,
+      {
+        prepareRunComparisonTaskInputs: async (_projectId: string, _appId: string, inputs: Record<string, unknown>) => inputs,
+        resolveTaskAppPath: async () => "examples/hello-rest/flogo.json"
+      } as any,
+      storage as AppAnalysisStorageService
+    );
+
+    const sourceTask = await service.submitTask({
+      type: "create",
+      projectId: "demo",
+      summary: "Package a trigger bundle",
+      appPath: "examples/hello-rest/flogo.json"
+    });
+
+    await service.syncTaskState(sourceTask.id, {
+      artifact: {
+        id: "package-artifact-1",
+        type: "contrib_package",
+        name: "trigger-package-webhooktrigger",
+        uri: "memory://task/trigger-package-webhooktrigger.json",
+        metadata: {
+          result: {
+            bundle: {
+              kind: "trigger",
+              packageName: "webhooktrigger",
+              modulePath: "example.com/acme/webhook",
+              bundleRoot: "/tmp/flogo-trigger-webhooktrigger",
+              descriptor: {
+                ref: "example.com/acme/webhook",
+                alias: "webhooktrigger",
+                type: "trigger",
+                name: "webhook-trigger",
+                version: "0.1.0",
+                title: "Webhook Trigger",
+                settings: [],
+                handlerSettings: [],
+                outputs: [],
+                reply: [],
+                examples: [],
+                compatibilityNotes: ["Generated scaffold"],
+                source: "trigger_scaffold"
+              },
+              files: []
+            },
+            validation: { ok: true, stages: [], summary: "ok", artifacts: [] },
+            build: { kind: "build", ok: true, command: ["go", "build", "./..."], exitCode: 0, summary: "ok", output: "" },
+            test: { kind: "test", ok: true, command: ["go", "test", "./..."], exitCode: 0, summary: "ok", output: "" },
+            package: {
+              format: "zip",
+              fileName: "trigger-webhooktrigger.zip",
+              path: "/tmp/trigger-webhooktrigger.zip",
+              bytes: 2048,
+              sha256: "abc123",
+              base64: "ZmFrZQ=="
+            }
+          }
+        }
+      }
+    });
+
+    const planTask = await service.submitTask({
+      type: "review",
+      projectId: "demo",
+      appId: "hello-rest",
+      summary: "Plan how to install the packaged trigger contribution",
+      inputs: {
+        mode: "install_contrib_plan",
+        packageArtifactId: "package-artifact-1"
+      }
+    });
+
+    expect(planTask.request.appPath).toBe("examples/hello-rest/flogo.json");
+    expect(planTask.request.inputs["packageArtifactId"]).toBe("package-artifact-1");
+    expect(planTask.request.inputs["packageArtifact"]).toMatchObject({
+      id: "package-artifact-1",
+      type: "contrib_package"
+    });
+  });
+
+  it("persists install-plan artifacts through blob-backed task artifact storage", async () => {
+    const storage = new FakeAppAnalysisStorageService();
+    const service = new OrchestrationService(
+      new ToolsetService(),
+      new OrchestratorClientService(),
+      new TaskEventsService(),
+      new FakeTaskStoreService() as any,
+      {
+        prepareRunComparisonTaskInputs: async (_projectId: string, _appId: string, inputs: Record<string, unknown>) => inputs,
+        resolveTaskAppPath: async () => "examples/hello-rest/flogo.json"
+      } as any,
+      storage as AppAnalysisStorageService
+    );
+
+    const task = await service.submitTask({
+      type: "review",
+      projectId: "demo",
+      appId: "hello-rest",
+      summary: "Plan how to install a contribution into hello-rest"
+    });
+
+    await service.syncTaskState(task.id, {
+      artifact: {
+        id: "artifact-install-plan-1",
+        type: "contrib_install_plan",
+        name: "trigger-install-plan-webhooktrigger",
+        uri: "memory://task-1/trigger-install-plan-webhooktrigger.json",
+        metadata: {
+          result: {
+            contributionKind: "trigger",
+            targetApp: { appId: "hello-rest", appPath: "examples/hello-rest/flogo.json" },
+            selectedAlias: "webhooktrigger",
+            installReady: true,
+            readiness: "high"
+          }
+        }
+      }
+    });
+
+    expect(storage.uploads).toHaveLength(1);
+    expect(storage.uploads[0]).toMatchObject({
+      projectId: "demo",
+      taskId: task.id,
+      artifactId: "artifact-install-plan-1",
+      kind: "contrib_install_plan"
+    });
+  });
+
   it("fails loudly when contribution artifact storage is not configured", async () => {
     const service = new OrchestrationService(
       new ToolsetService(),
@@ -380,6 +515,6 @@ describe("OrchestrationService", () => {
           }
         }
       })
-    ).rejects.toThrow(/contribution scaffold, validate, or package tasks/i);
+    ).rejects.toThrow(/contribution scaffold, validate, package, or install-plan tasks/i);
   });
 });

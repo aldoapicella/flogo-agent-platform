@@ -222,4 +222,75 @@ describe("ArtifactList", () => {
     expect(html).toContain("package bytes: 2048");
     expect(html).toContain("blob path: task-artifacts/demo/task-5/contrib_package/artifact-5.json");
   });
+
+  it("renders install-plan summaries with readiness, target app, and proposed entries", () => {
+    const html = renderToStaticMarkup(
+      <ArtifactList
+        artifacts={[
+          {
+            id: "artifact-6",
+            type: "contrib_install_plan",
+            name: "trigger-install-plan-webhooktrigger",
+            uri: "memory://task-6/trigger-install-plan-webhooktrigger",
+            metadata: {
+              storage: {
+                kind: "blob",
+                blobPath: "task-artifacts/demo/task-6/contrib_install_plan/artifact-6.json",
+                durablePayload: true
+              },
+              result: {
+                contributionKind: "trigger",
+                bundle: {
+                  kind: "trigger",
+                  packageName: "webhooktrigger",
+                  modulePath: "example.com/acme/webhook",
+                  files: [{ kind: "descriptor" }, { kind: "implementation" }, { kind: "test" }]
+                },
+                targetApp: {
+                  appId: "hello-rest"
+                },
+                selectedAlias: "webhooktrigger",
+                installReady: false,
+                readiness: "medium",
+                proposedImports: [
+                  {
+                    alias: "webhooktrigger",
+                    ref: "example.com/acme/webhook",
+                    action: "reuse_existing"
+                  }
+                ],
+                proposedRefs: [
+                  {
+                    surface: "triggerRef",
+                    value: "#webhooktrigger"
+                  }
+                ],
+                warnings: ["Target app already imports this ref under a different alias."],
+                conflicts: [
+                  {
+                    kind: "ref_already_imported",
+                    severity: "warning",
+                    message: "Target app already imports this ref under alias webhook."
+                  }
+                ],
+                recommendedNextAction: "Reuse the existing alias before applying later app changes."
+              }
+            }
+          }
+        ]}
+      />
+    );
+
+    expect(html).toContain("contribution type: trigger");
+    expect(html).toContain("target app: hello-rest");
+    expect(html).toContain("selected alias: webhooktrigger");
+    expect(html).toContain("proposed imports: webhooktrigger -&gt; example.com/acme/webhook (reuse_existing)");
+    expect(html).toContain("proposed refs: triggerRef: #webhooktrigger");
+    expect(html).toContain("install ready: no");
+    expect(html).toContain("readiness: medium");
+    expect(html).toContain("warnings: 1");
+    expect(html).toContain("conflicts: 1");
+    expect(html).toContain("next action: Reuse the existing alias before applying later app changes.");
+    expect(html).toContain("blob path: task-artifacts/demo/task-6/contrib_install_plan/artifact-6.json");
+  });
 });

@@ -42,7 +42,7 @@ pnpm compose:down
 - `control-plane` points at `orchestrator` through `ORCHESTRATOR_BASE_URL`
 - `orchestrator` points at `runner-worker` and back at the control-plane internal API
 - `runner-worker` uses `local-process` execution mode by default
-- Azurite is available for future blob integration work
+- Azurite is available for the current app-analysis and contribution-authoring Blob payload seam
 
 ## Azure deployment
 
@@ -204,7 +204,7 @@ Intended future behavior:
 ## Deployment caveats
 
 - The control-plane runtime now uses Prisma-backed task, event, artifact, build-run, and test-run persistence in the live request path.
-- Blob/Azurite storage is integrated for app-analysis payloads and for contribution-authoring `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `build_log`, and `test_report` artifacts; broader runtime/task artifact payloads are still mixed, and contribution scaffold/validate/package tasks now require that storage seam to be configured.
+- Blob/Azurite storage is integrated for app-analysis payloads and for contribution-authoring `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `build_log`, and `test_report` artifacts; broader runtime/task artifact payloads are still mixed, and contribution scaffold/validate/package/install-plan tasks now require that storage seam to be configured.
 - The runner-worker does not yet invoke Azure management APIs to launch real ACA Job executions.
 - The orchestrator app contains Durable Functions definitions, but the repo’s default local path uses the Fastify host.
 

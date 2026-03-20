@@ -68,6 +68,7 @@ Important analysis-only modes:
 - `inputs.mode = "trigger_scaffold"`
 - `inputs.mode = "validate_contrib"`
 - `inputs.mode = "package_contrib"`
+- `inputs.mode = "install_contrib_plan"`
 - `inputs.mode = "mapping_preview"`
 - `inputs.mode = "mapping_test"`
 - `inputs.mode = "property_plan"`
@@ -174,7 +175,7 @@ Important behavior:
 - the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path, and those artifact payloads are uploaded through the control-plane Blob/Azurite storage seam while remaining visible in task detail metadata,
 - if the shared Blob/Azurite storage seam is not configured, the scaffold task now fails instead of silently degrading those authoring artifacts to `memory://` URIs,
 - supported field types are currently limited to `string`, `integer`, `number`, `boolean`, `object`, `array`, and `any`,
-- this slice covers Activity authoring only; shared validation/package is now implemented separately, and install/update workflows remain later work.
+- this slice covers Activity authoring only; shared validation/package/install-planning now exist separately, and install/update apply workflows remain later work.
 
 ### Action scaffold task mode
 
@@ -201,7 +202,7 @@ Important behavior:
 - the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path, and those artifact payloads are uploaded through the control-plane Blob/Azurite storage seam while remaining visible in task detail metadata,
 - if the shared Blob/Azurite storage seam is not configured, the scaffold task now fails instead of silently degrading those authoring artifacts to `memory://` URIs,
 - supported field types are currently limited to `string`, `integer`, `number`, `boolean`, `object`, `array`, and `any`,
-- this slice is narrower than the Activity and Trigger authoring slices because it is based on the repo's current core action model rather than a fuller public authoring workflow; shared validation/package is now implemented separately, and install/update workflows remain later work.
+- this slice is narrower than the Activity and Trigger authoring slices because it is based on the repo's current core action model rather than a fuller public authoring workflow; shared validation/package/install-planning now exist separately, and install/update apply workflows remain later work.
 
 ### Trigger scaffold task mode
 
@@ -229,7 +230,7 @@ Important behavior:
 - the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path, and those artifact payloads are uploaded through the control-plane Blob/Azurite storage seam while remaining visible in task detail metadata,
 - if the shared Blob/Azurite storage seam is not configured, the scaffold task now fails instead of silently degrading those authoring artifacts to `memory://` URIs,
 - supported field types are currently limited to `string`, `integer`, `number`, `boolean`, `object`, `array`, and `any`,
-- this slice covers Trigger authoring only; install/update workflows remain later work.
+- this slice covers Trigger authoring only; shared validation/package/install-planning now exist separately, and install/update apply workflows remain later work.
 
 ### Contribution validate task mode
 
@@ -269,6 +270,34 @@ Important behavior:
 - the task persists a `contrib_package` artifact plus `build_log` and `test_report` artifacts for the shared proof path, and those artifact payloads are uploaded through the control-plane Blob/Azurite storage seam while remaining visible in task detail metadata,
 - if the shared Blob/Azurite storage seam is not configured, the packaging task now fails instead of silently degrading those authoring artifacts to `memory://` URIs,
 - package semantics are intentionally conservative and review-oriented; this slice does not imply marketplace or publish behavior.
+
+### Contribution install-plan task mode
+
+Uses the existing task endpoint with `inputs.mode = "install_contrib_plan"` to analyze how one existing Activity, Action, or Trigger contribution bundle/package would be installed into one target Flogo app without mutating `flogo.json`.
+
+Important input fields:
+
+- `packageArtifactId?`
+- `packageArtifact?`
+- `packageResult?`
+- `bundleArtifactId?`
+- `bundleArtifact?`
+- `result?`
+- `preferredAlias?`
+- `replaceExisting?` planning only
+- `targetApp.projectId`
+- `targetApp.appId`
+- `targetApp.appPath?`
+
+Important behavior:
+
+- install planning is analysis-oriented and does not install or mutate an app in this slice,
+- the planner routes the task to a single runner `install_contrib_plan` step,
+- the task accepts exactly one existing Activity, Action, or Trigger contribution source through a persisted `contrib_bundle` or `contrib_package` artifact id, inline artifact metadata, or inline result payload,
+- the task persists a `contrib_install_plan` artifact through the same Blob/Azurite storage seam used for contribution scaffolding, validation, and packaging,
+- if the shared Blob/Azurite storage seam is not configured, the install-planning task fails instead of silently degrading to `memory://` URIs,
+- the resulting plan is review-oriented and includes predicted imports, refs, alias proposals, conflicts, warnings, readiness, recommended next action, and limitations,
+- malformed bundle/package input, weak metadata, or conflicting target-app state fail honestly or lower readiness rather than pretending the install is safe.
 
 ### `GET /v1/tasks`
 
@@ -1140,7 +1169,7 @@ Request shape:
 Workflow behavior:
 
 - mutating workflows use build/run/smoke-oriented runner steps,
-- analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, `preview_mapping`, `infer_flow_contracts`, `extract_subflow`, `inline_subflow`, `add_iterator`, `add_retry_policy`, `add_dowhile`, `add_error_path`, `diagnose_app`, `scaffold_activity`, `scaffold_action`, `scaffold_trigger`, `validate_contrib`, or `package_contrib`.
+- analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, `preview_mapping`, `infer_flow_contracts`, `extract_subflow`, `inline_subflow`, `add_iterator`, `add_retry_policy`, `add_dowhile`, `add_error_path`, `diagnose_app`, `scaffold_activity`, `scaffold_action`, `scaffold_trigger`, `validate_contrib`, `package_contrib`, or `install_contrib_plan`.
 - analysis-only workflows also support `test_mapping` and `plan_properties`.
 
 ## Runner-worker API

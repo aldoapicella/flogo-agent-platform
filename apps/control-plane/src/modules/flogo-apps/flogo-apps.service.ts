@@ -1365,6 +1365,11 @@ export class FlogoAppsService {
     };
   }
 
+  async resolveTaskAppPath(projectId: string, appId: string): Promise<string | undefined> {
+    const resolved = await this.resolveApp(projectId, appId);
+    return resolved?.appPath;
+  }
+
   private isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
   }

@@ -517,6 +517,85 @@ type contributionPackageResponse struct {
 	Result contributionPackageResult `json:"result"`
 }
 
+type contributionInstallTarget struct {
+	ProjectID string `json:"projectId,omitempty"`
+	AppID     string `json:"appId,omitempty"`
+	AppPath   string `json:"appPath,omitempty"`
+	AppName   string `json:"appName,omitempty"`
+}
+
+type contributionInstallPlanRequest struct {
+	Result          contributionScaffoldResult  `json:"result"`
+	Package         *contributionPackageArchive `json:"package,omitempty"`
+	Source          string                      `json:"source,omitempty"`
+	SourceArtifact  string                      `json:"sourceArtifactId,omitempty"`
+	TargetApp       contributionInstallTarget   `json:"targetApp,omitempty"`
+	PreferredAlias  string                      `json:"preferredAlias,omitempty"`
+	ReplaceExisting bool                        `json:"replaceExisting,omitempty"`
+}
+
+type contributionInstallImportEntry struct {
+	Alias         string `json:"alias"`
+	Ref           string `json:"ref"`
+	Version       string `json:"version,omitempty"`
+	Action        string `json:"action"`
+	ExistingAlias string `json:"existingAlias,omitempty"`
+	ExistingRef   string `json:"existingRef,omitempty"`
+	Note          string `json:"note,omitempty"`
+}
+
+type contributionInstallRefEntry struct {
+	Surface string `json:"surface"`
+	Value   string `json:"value"`
+	Note    string `json:"note,omitempty"`
+}
+
+type contributionInstallConflict struct {
+	Kind          string `json:"kind"`
+	Severity      string `json:"severity"`
+	Message       string `json:"message"`
+	ExistingAlias string `json:"existingAlias,omitempty"`
+	ExistingRef   string `json:"existingRef,omitempty"`
+	ProposedAlias string `json:"proposedAlias,omitempty"`
+	ProposedRef   string `json:"proposedRef,omitempty"`
+}
+
+type contributionInstallPredictedChanges struct {
+	ImportsToAdd    []contributionInstallImportEntry `json:"importsToAdd"`
+	ImportsToUpdate []contributionInstallImportEntry `json:"importsToUpdate"`
+	ReusableRefs    []contributionInstallRefEntry    `json:"reusableRefs"`
+	SummaryLines    []string                         `json:"summaryLines"`
+	NoMutation      bool                             `json:"noMutation"`
+}
+
+type contributionInstallPlanResult struct {
+	ContributionKind      string                              `json:"contributionKind"`
+	Source                string                              `json:"source"`
+	SourceArtifact        string                              `json:"sourceArtifactId,omitempty"`
+	TargetApp             contributionInstallTarget           `json:"targetApp"`
+	Bundle                contributionScaffoldBundle          `json:"bundle"`
+	Package               *contributionPackageArchive         `json:"package,omitempty"`
+	ModulePath            string                              `json:"modulePath"`
+	PackageName           string                              `json:"packageName,omitempty"`
+	PackagePath           string                              `json:"packagePath,omitempty"`
+	DescriptorRef         string                              `json:"descriptorRef,omitempty"`
+	SelectedAlias         string                              `json:"selectedAlias"`
+	InstallReady          bool                                `json:"installReady"`
+	Readiness             string                              `json:"readiness"`
+	ProposedImports       []contributionInstallImportEntry    `json:"proposedImports"`
+	ProposedRefs          []contributionInstallRefEntry       `json:"proposedRefs"`
+	PredictedChanges      contributionInstallPredictedChanges `json:"predictedChanges"`
+	Warnings              []string                            `json:"warnings"`
+	Conflicts             []contributionInstallConflict       `json:"conflicts"`
+	Diagnostics           []diagnostic                        `json:"diagnostics"`
+	RecommendedNextAction string                              `json:"recommendedNextAction"`
+	Limitations           []string                            `json:"limitations"`
+}
+
+type contributionInstallPlanResponse struct {
+	Result contributionInstallPlanResult `json:"result"`
+}
+
 type runTraceCaptureOptions struct {
 	IncludeFlowState       bool `json:"includeFlowState"`
 	IncludeActivityOutputs bool `json:"includeActivityOutputs"`
@@ -2840,7 +2919,7 @@ var supportedRuntimeActivityRefs = map[string]bool{
 
 func main() {
 	if len(os.Args) < 3 {
-		fail("expected a command such as 'catalog contribs', 'inspect descriptor', 'preview mapping', 'contrib scaffold-activity', 'contrib scaffold-action', 'contrib scaffold-trigger', 'contrib validate', or 'contrib package'")
+		fail("expected a command such as 'catalog contribs', 'inspect descriptor', 'preview mapping', 'contrib scaffold-activity', 'contrib scaffold-action', 'contrib scaffold-trigger', 'contrib validate', 'contrib package', or 'contrib install-plan'")
 	}
 
 	command := strings.Join(os.Args[1:3], " ")
@@ -2882,6 +2961,18 @@ func main() {
 			fail("missing required --request flag")
 		}
 		encode(packageContribution(loadContributionPackageRequest(requestPath)))
+		return
+	}
+	if command == "contrib install-plan" {
+		appPath := lookupFlag("--app")
+		if appPath == "" {
+			fail("missing required --app flag")
+		}
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(planContributionInstall(loadApp(appPath), appPath, loadContributionInstallPlanRequest(requestPath)))
 		return
 	}
 
@@ -3242,6 +3333,20 @@ func loadContributionPackageRequest(inputPath string) contributionPackageRequest
 	return request
 }
 
+func loadContributionInstallPlanRequest(inputPath string) contributionInstallPlanRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var request contributionInstallPlanRequest
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+
+	return request
+}
+
 const scaffoldedContributionCoreVersion = "v1.6.17"
 const scaffoldedContributionGoVersion = "1.24.0"
 
@@ -3533,6 +3638,352 @@ func packageContribution(request contributionPackageRequest) contributionPackage
 			Source:         normalizeContributionEvidenceSource(request.Source, request.SourceArtifact),
 			SourceArtifact: strings.TrimSpace(request.SourceArtifact),
 			Package:        archive,
+		},
+	}
+}
+
+func validateContributionInstallPlanRequest(request contributionInstallPlanRequest) error {
+	if err := validateContributionScaffoldResult(request.Result); err != nil {
+		return err
+	}
+	if request.Package != nil && strings.TrimSpace(request.Package.Format) != "" && strings.TrimSpace(request.Package.Format) != "zip" {
+		return fmt.Errorf("unsupported contribution package format %q", request.Package.Format)
+	}
+	return nil
+}
+
+func normalizeContributionInstallSource(source string, sourceArtifact string, hasPackage bool) string {
+	normalized := strings.TrimSpace(source)
+	switch normalized {
+	case "inline_result", "bundle_artifact", "inline_package", "package_artifact":
+		return normalized
+	}
+	if hasPackage {
+		if strings.TrimSpace(sourceArtifact) != "" {
+			return "package_artifact"
+		}
+		return "inline_package"
+	}
+	if strings.TrimSpace(sourceArtifact) != "" {
+		return "bundle_artifact"
+	}
+	return "inline_result"
+}
+
+func contributionDescriptorRef(bundle contributionScaffoldBundle) string {
+	if strings.TrimSpace(bundle.Descriptor.Ref) != "" {
+		return strings.TrimSpace(bundle.Descriptor.Ref)
+	}
+	return strings.TrimSpace(bundle.ModulePath)
+}
+
+func contributionDescriptorVersion(bundle contributionScaffoldBundle) string {
+	return strings.TrimSpace(bundle.Descriptor.Version)
+}
+
+func contributionInstallSurface(kind string) (string, string) {
+	switch strings.TrimSpace(kind) {
+	case "activity":
+		return "activityRef", "Use this ref in task activityRef fields."
+	case "action":
+		return "actionRef", "Use this ref in trigger handler action refs."
+	case "trigger":
+		return "triggerRef", "Use this ref when creating a trigger instance."
+	default:
+		return "activityRef", "Use this ref where the target app can reference the contribution."
+	}
+}
+
+func contributionInstallAlias(bundle contributionScaffoldBundle, preferredAlias string) string {
+	switch {
+	case strings.TrimSpace(preferredAlias) != "":
+		return sanitizePackageName(preferredAlias)
+	case strings.TrimSpace(bundle.Descriptor.Alias) != "":
+		return sanitizePackageName(bundle.Descriptor.Alias)
+	case strings.TrimSpace(bundle.PackageName) != "":
+		return sanitizePackageName(bundle.PackageName)
+	default:
+		return sanitizePackageName(inferAlias(contributionDescriptorRef(bundle)))
+	}
+}
+
+func installReadinessRank(readiness string) int {
+	switch readiness {
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	default:
+		return 1
+	}
+}
+
+func lowerInstallReadiness(current string, next string) string {
+	if installReadinessRank(next) < installReadinessRank(current) {
+		return next
+	}
+	return current
+}
+
+func findImportByAlias(app flogoApp, alias string) (flogoImport, bool) {
+	normalized := normalizeAlias(alias)
+	for _, entry := range app.Imports {
+		if normalizeAlias(entry.Alias) == normalized {
+			return entry, true
+		}
+	}
+	return flogoImport{}, false
+}
+
+func findImportsByRef(app flogoApp, ref string) []flogoImport {
+	matches := []flogoImport{}
+	for _, entry := range app.Imports {
+		if strings.TrimSpace(entry.Ref) == strings.TrimSpace(ref) {
+			matches = append(matches, entry)
+		}
+	}
+	return matches
+}
+
+func containsInstallConflict(conflicts []contributionInstallConflict, kind string) bool {
+	for _, conflict := range conflicts {
+		if conflict.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func planContributionInstall(app flogoApp, appPath string, request contributionInstallPlanRequest) contributionInstallPlanResponse {
+	if err := validateContributionInstallPlanRequest(request); err != nil {
+		fail(err.Error())
+	}
+
+	bundle := request.Result.Bundle
+	descriptorRef := contributionDescriptorRef(bundle)
+	if descriptorRef == "" {
+		fail("contribution install planning requires bundle.descriptor.ref or bundle.modulePath")
+	}
+
+	selectedAlias := contributionInstallAlias(bundle, request.PreferredAlias)
+	version := contributionDescriptorVersion(bundle)
+	readiness := "high"
+	installReady := true
+	warnings := []string{}
+	conflicts := []contributionInstallConflict{}
+	diagnostics := []diagnostic{}
+
+	proposedImport := contributionInstallImportEntry{
+		Alias:  selectedAlias,
+		Ref:    descriptorRef,
+		Action: "add",
+	}
+	if version != "" {
+		proposedImport.Version = version
+	}
+
+	inventory := buildContributionInventory(app, appPath)
+	if existingEntry, ok := findInventoryEntry(inventory, app, descriptorRef); ok {
+		if existingType := strings.TrimSpace(existingEntry.Type); existingType != "" && existingType != bundle.Kind {
+			conflicts = append(conflicts, contributionInstallConflict{
+				Kind:          "type_conflict",
+				Severity:      "error",
+				Message:       fmt.Sprintf("Target app already resolves %q as a %s, not a %s.", descriptorRef, existingType, bundle.Kind),
+				ProposedAlias: selectedAlias,
+				ProposedRef:   descriptorRef,
+			})
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.contrib.install_plan.type_conflict",
+				Message:  fmt.Sprintf("Resolved ref %q already maps to %s metadata in the target app.", descriptorRef, existingType),
+				Severity: "error",
+				Path:     "imports." + selectedAlias,
+			})
+			installReady = false
+			readiness = lowerInstallReadiness(readiness, "low")
+		}
+	}
+
+	if existingAlias, ok := findImportByAlias(app, selectedAlias); ok {
+		proposedImport.ExistingAlias = existingAlias.Alias
+		proposedImport.ExistingRef = existingAlias.Ref
+		if strings.TrimSpace(existingAlias.Ref) == descriptorRef {
+			if version != "" && existingAlias.Version != "" && existingAlias.Version != version {
+				conflicts = append(conflicts, contributionInstallConflict{
+					Kind:          "version_conflict",
+					Severity:      "warning",
+					Message:       fmt.Sprintf("Alias %q already imports %q at version %q while the contribution metadata reports %q.", selectedAlias, descriptorRef, existingAlias.Version, version),
+					ExistingAlias: existingAlias.Alias,
+					ExistingRef:   existingAlias.Ref,
+					ProposedAlias: selectedAlias,
+					ProposedRef:   descriptorRef,
+				})
+				warnings = append(warnings, fmt.Sprintf("Existing alias %q already imports the same ref with version %q.", selectedAlias, existingAlias.Version))
+				proposedImport.Action = "reuse_existing"
+				proposedImport.Note = "Target app already imports the same ref under the proposed alias."
+				readiness = lowerInstallReadiness(readiness, "medium")
+			} else {
+				proposedImport.Action = "reuse_existing"
+				proposedImport.Note = "Target app already imports the same ref under the proposed alias."
+			}
+		} else {
+			conflicts = append(conflicts, contributionInstallConflict{
+				Kind:          "alias_conflict",
+				Severity:      "error",
+				Message:       fmt.Sprintf("Alias %q already points to %q in the target app.", selectedAlias, existingAlias.Ref),
+				ExistingAlias: existingAlias.Alias,
+				ExistingRef:   existingAlias.Ref,
+				ProposedAlias: selectedAlias,
+				ProposedRef:   descriptorRef,
+			})
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.contrib.install_plan.alias_conflict",
+				Message:  fmt.Sprintf("Alias %q already points to %q.", selectedAlias, existingAlias.Ref),
+				Severity: "error",
+				Path:     "imports." + selectedAlias,
+			})
+			proposedImport.Action = "conflict"
+			proposedImport.Note = "The proposed alias is already bound to a different ref in the target app."
+			installReady = false
+			readiness = lowerInstallReadiness(readiness, "low")
+		}
+	} else if existingRefs := findImportsByRef(app, descriptorRef); len(existingRefs) > 0 {
+		existing := existingRefs[0]
+		proposedImport.Action = "reuse_existing"
+		proposedImport.ExistingAlias = existing.Alias
+		proposedImport.ExistingRef = existing.Ref
+		proposedImport.Note = "Target app already imports the same ref under a different alias."
+		if strings.TrimSpace(request.PreferredAlias) != "" && normalizeAlias(request.PreferredAlias) != normalizeAlias(existing.Alias) {
+			warnings = append(warnings, fmt.Sprintf("Preferred alias %q was not selected because the target app already imports %q as %q.", request.PreferredAlias, descriptorRef, existing.Alias))
+		}
+		conflicts = append(conflicts, contributionInstallConflict{
+			Kind:          "ref_already_imported",
+			Severity:      "warning",
+			Message:       fmt.Sprintf("Target app already imports %q as alias %q.", descriptorRef, existing.Alias),
+			ExistingAlias: existing.Alias,
+			ExistingRef:   existing.Ref,
+			ProposedAlias: selectedAlias,
+			ProposedRef:   descriptorRef,
+		})
+		selectedAlias = existing.Alias
+		proposedImport.Alias = existing.Alias
+		readiness = lowerInstallReadiness(readiness, "medium")
+	}
+
+	if !request.Result.Validation.Ok || !request.Result.Build.Ok || !request.Result.Test.Ok {
+		warnings = append(warnings, "The provided contribution proof does not currently show a clean validation/test/build pass.")
+		conflicts = append(conflicts, contributionInstallConflict{
+			Kind:          "insufficient_metadata",
+			Severity:      "error",
+			Message:       "Contribution proof is incomplete or failing; install planning cannot claim high readiness.",
+			ProposedAlias: selectedAlias,
+			ProposedRef:   descriptorRef,
+		})
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.contrib.install_plan.proof_incomplete",
+			Message:  "Contribution validation, build, or test proof is not fully passing.",
+			Severity: "error",
+			Path:     "proof",
+		})
+		installReady = false
+		readiness = lowerInstallReadiness(readiness, "low")
+	}
+
+	if request.Package == nil {
+		warnings = append(warnings, "No packaged archive was supplied, so install planning is based on scaffold and proof metadata only.")
+		readiness = lowerInstallReadiness(readiness, "medium")
+	}
+
+	if strings.TrimSpace(bundle.Descriptor.Alias) == "" {
+		warnings = append(warnings, "The contribution descriptor does not declare an alias, so the install alias is inferred from the bundle metadata.")
+		readiness = lowerInstallReadiness(readiness, "medium")
+	}
+
+	if request.ReplaceExisting {
+		warnings = append(warnings, "replaceExisting is planning-only in this slice; no imports or refs were updated automatically.")
+	}
+
+	surface, surfaceNote := contributionInstallSurface(bundle.Kind)
+	reusableRef := contributionInstallRefEntry{
+		Surface: surface,
+		Value:   "#" + normalizeAlias(selectedAlias),
+		Note:    surfaceNote,
+	}
+
+	predictedChanges := contributionInstallPredictedChanges{
+		ImportsToAdd:    []contributionInstallImportEntry{},
+		ImportsToUpdate: []contributionInstallImportEntry{},
+		ReusableRefs:    []contributionInstallRefEntry{reusableRef},
+		SummaryLines:    []string{},
+		NoMutation:      true,
+	}
+
+	switch proposedImport.Action {
+	case "add":
+		predictedChanges.ImportsToAdd = append(predictedChanges.ImportsToAdd, proposedImport)
+		predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, fmt.Sprintf("Add import alias %q for ref %q.", proposedImport.Alias, proposedImport.Ref))
+	case "reuse_existing":
+		if proposedImport.ExistingAlias != "" {
+			predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, fmt.Sprintf("Reuse existing import alias %q for ref %q.", proposedImport.ExistingAlias, descriptorRef))
+		}
+	case "update_existing":
+		predictedChanges.ImportsToUpdate = append(predictedChanges.ImportsToUpdate, proposedImport)
+		predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, fmt.Sprintf("Review an import update for alias %q to point at %q.", proposedImport.Alias, proposedImport.Ref))
+	default:
+		predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, fmt.Sprintf("Do not install automatically because alias %q conflicts with an existing import.", proposedImport.Alias))
+	}
+	predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, fmt.Sprintf("If approved later, the contribution would become available as %q for %s usage.", reusableRef.Value, surface))
+
+	recommendedNextAction := fmt.Sprintf("Review adding import alias %q for ref %q before applying any app mutation.", selectedAlias, descriptorRef)
+	if containsInstallConflict(conflicts, "alias_conflict") {
+		recommendedNextAction = fmt.Sprintf("Choose a different alias than %q or plan a later replace/update workflow before installation.", selectedAlias)
+	} else if containsInstallConflict(conflicts, "ref_already_imported") {
+		recommendedNextAction = fmt.Sprintf("Reuse the existing alias %q when planning later app mutations that reference %q.", selectedAlias, descriptorRef)
+	} else if containsInstallConflict(conflicts, "version_conflict") {
+		recommendedNextAction = fmt.Sprintf("Review version compatibility for alias %q before treating this contribution as install-ready.", selectedAlias)
+	} else if containsInstallConflict(conflicts, "insufficient_metadata") {
+		recommendedNextAction = "Re-run contribution validation/package proof before attempting an install or update workflow."
+	}
+
+	limitations := []string{
+		"Planning only; this slice does not mutate flogo.json or install the contribution into the target app.",
+		"Trigger, action, and activity usage wiring remains a separate later workflow after import planning is reviewed.",
+	}
+	if request.Package == nil {
+		limitations = append(limitations, "Install readiness is inferred without a packaged archive and may be reduced when package metadata is unavailable.")
+	}
+	if request.ReplaceExisting {
+		limitations = append(limitations, "replaceExisting is advisory only in this slice and does not apply updates.")
+	}
+
+	targetApp := request.TargetApp
+	if targetApp.AppPath == "" {
+		targetApp.AppPath = appPath
+	}
+	targetApp.AppName = app.Name
+
+	return contributionInstallPlanResponse{
+		Result: contributionInstallPlanResult{
+			ContributionKind:      bundle.Kind,
+			Source:                normalizeContributionInstallSource(request.Source, request.SourceArtifact, request.Package != nil),
+			SourceArtifact:        strings.TrimSpace(request.SourceArtifact),
+			TargetApp:             targetApp,
+			Bundle:                bundle,
+			Package:               request.Package,
+			ModulePath:            bundle.ModulePath,
+			PackageName:           strings.TrimSpace(bundle.PackageName),
+			PackagePath:           strings.TrimSpace(bundle.ModulePath),
+			DescriptorRef:         strings.TrimSpace(descriptorRef),
+			SelectedAlias:         selectedAlias,
+			InstallReady:          installReady,
+			Readiness:             readiness,
+			ProposedImports:       []contributionInstallImportEntry{proposedImport},
+			ProposedRefs:          []contributionInstallRefEntry{reusableRef},
+			PredictedChanges:      predictedChanges,
+			Warnings:              warnings,
+			Conflicts:             conflicts,
+			Diagnostics:           dedupeDiagnostics(diagnostics),
+			RecommendedNextAction: recommendedNextAction,
+			Limitations:           limitations,
 		},
 	}
 }

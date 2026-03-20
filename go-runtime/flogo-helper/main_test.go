@@ -542,6 +542,160 @@ func TestPackageContributionGeneratesReviewableArchive(t *testing.T) {
 	}
 }
 
+func TestPlanContributionInstallBuildsReviewableInstallPlan(t *testing.T) {
+	app := bindableTestApp()
+	response := scaffoldTrigger(triggerScaffoldRequest{
+		TriggerName: "Webhook Trigger",
+		ModulePath:  "example.com/acme/webhook",
+		Title:       "Webhook Trigger",
+		Description: "Dispatches an internal webhook event.",
+		Version:     "0.1.0",
+		Outputs: []contribField{
+			{Name: "payload", Type: "object"},
+		},
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	packaged := packageContribution(contributionPackageRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundleFromTrigger(result.Bundle),
+			Validation: result.Validation,
+			Build:      result.Build,
+			Test:       result.Test,
+		},
+		Source: "inline_result",
+		Format: "zip",
+	})
+
+	plan := planContributionInstall(app, "examples/hello-rest/flogo.json", contributionInstallPlanRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     packaged.Result.Bundle,
+			Validation: packaged.Result.Validation,
+			Build:      packaged.Result.Build,
+			Test:       packaged.Result.Test,
+		},
+		Package: &packaged.Result.Package,
+		Source:  "inline_package",
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   "examples/hello-rest/flogo.json",
+		},
+	})
+
+	if !plan.Result.InstallReady {
+		t.Fatalf("expected install plan to be ready, got %+v", plan.Result)
+	}
+	if plan.Result.Readiness != "high" {
+		t.Fatalf("expected high readiness, got %+v", plan.Result)
+	}
+	if plan.Result.SelectedAlias != "webhook_trigger" {
+		t.Fatalf("expected selected alias to use scaffolded package name, got %+v", plan.Result)
+	}
+	if len(plan.Result.PredictedChanges.ImportsToAdd) != 1 {
+		t.Fatalf("expected one import to add, got %+v", plan.Result.PredictedChanges)
+	}
+	if plan.Result.PredictedChanges.ImportsToAdd[0].Ref != "example.com/acme/webhook" {
+		t.Fatalf("expected install plan to add webhook ref, got %+v", plan.Result.PredictedChanges.ImportsToAdd)
+	}
+	if len(plan.Result.ProposedRefs) != 1 || plan.Result.ProposedRefs[0].Surface != "triggerRef" {
+		t.Fatalf("expected trigger ref guidance, got %+v", plan.Result.ProposedRefs)
+	}
+	if !containsString(plan.Result.PredictedChanges.SummaryLines, "Add import alias \"webhook_trigger\" for ref \"example.com/acme/webhook\".") {
+		t.Fatalf("expected install summary line, got %+v", plan.Result.PredictedChanges.SummaryLines)
+	}
+}
+
+func TestPlanContributionInstallDetectsAliasConflicts(t *testing.T) {
+	app := flogoApp{
+		Name:     "conflict-app",
+		Type:     "flogo:app",
+		AppModel: "1.1.0",
+		Imports: []flogoImport{
+			{
+				Alias: "webhooktrigger",
+				Ref:   "github.com/project-flogo/contrib/trigger/rest",
+			},
+		},
+		Triggers:  []flogoTrigger{},
+		Resources: []flogoFlow{},
+		Raw:       map[string]any{},
+	}
+	response := scaffoldTrigger(triggerScaffoldRequest{
+		TriggerName: "Webhook Trigger",
+		ModulePath:  "example.com/acme/webhook",
+		PackageName: "webhooktrigger",
+		Title:       "Webhook Trigger",
+		Description: "Dispatches an internal webhook event.",
+		Version:     "0.1.0",
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	plan := planContributionInstall(app, "", contributionInstallPlanRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundleFromTrigger(result.Bundle),
+			Validation: result.Validation,
+			Build:      result.Build,
+			Test:       result.Test,
+		},
+		Source:         "inline_result",
+		PreferredAlias: "webhooktrigger",
+	})
+
+	if plan.Result.InstallReady {
+		t.Fatalf("expected alias conflict to lower install readiness, got %+v", plan.Result)
+	}
+	if plan.Result.Readiness != "low" {
+		t.Fatalf("expected low readiness on alias conflict, got %+v", plan.Result)
+	}
+	if len(plan.Result.Conflicts) == 0 || plan.Result.Conflicts[0].Kind != "alias_conflict" {
+		t.Fatalf("expected alias conflict metadata, got %+v", plan.Result.Conflicts)
+	}
+	if plan.Result.ProposedImports[0].Action != "conflict" {
+		t.Fatalf("expected conflict action, got %+v", plan.Result.ProposedImports)
+	}
+}
+
+func TestValidateContributionInstallPlanRequestRejectsUnsupportedFormats(t *testing.T) {
+	err := validateContributionInstallPlanRequest(contributionInstallPlanRequest{
+		Result: contributionScaffoldResult{
+			Bundle: contributionScaffoldBundle{
+				Kind:        "activity",
+				ModulePath:  "example.com/acme/echo",
+				PackageName: "echoactivity",
+				BundleRoot:  t.TempDir(),
+				Descriptor: contribDescriptor{
+					Ref:  "example.com/acme/echo",
+					Type: "activity",
+				},
+				Files: []generatedContribFile{{Path: "descriptor.json", Kind: "descriptor", Bytes: 2}},
+			},
+			Validation: validationReport{Ok: true, Stages: []validationStageResult{}, Summary: "ok", Artifacts: []map[string]any{}},
+			Build:      contribProofStep{Kind: "build", Ok: true, ExitCode: 0, Summary: "ok", Command: []string{"go", "build", "./..."}},
+			Test:       contribProofStep{Kind: "test", Ok: true, ExitCode: 0, Summary: "ok", Command: []string{"go", "test", "./..."}},
+		},
+		Package: &contributionPackageArchive{Format: "tar"},
+	})
+	if err == nil {
+		t.Fatal("expected unsupported install plan package format to fail")
+	}
+	if !strings.Contains(err.Error(), "unsupported contribution package format") {
+		t.Fatalf("expected unsupported package format error, got %v", err)
+	}
+}
+
 func TestTraceFlowDistinguishesRuntimeBackedAndSimulatedPaths(t *testing.T) {
 	t.Run("runtime-backed direct trace", func(t *testing.T) {
 		app := runtimeBackedTraceTestApp()

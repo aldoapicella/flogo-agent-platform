@@ -164,10 +164,10 @@ Current behavior:
 
 - artifact metadata is persisted,
 - app-analysis payload URIs are Blob-backed,
-- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `build_log`, and `test_report` artifact payload URIs are also Blob-backed,
+- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `build_log`, and `test_report` artifact payload URIs are also Blob-backed,
 - some broader runtime/task artifact URIs are still logical/local.
 
-If a contribution scaffold, validate, or package task fails immediately with a storage-configuration error, verify the same Blob/Azurite connection settings used for app-analysis artifacts.
+If a contribution scaffold, validate, package, or install-plan task fails immediately with a storage-configuration error, verify the same Blob/Azurite connection settings used for app-analysis artifacts.
 
 ### Container Apps Job execution does not complete in production mode
 
@@ -187,7 +187,7 @@ Check:
 - contribution catalog and mapping preview are implemented,
 - deeper Core-native composition is not yet implemented,
 - flow contracts, runtime trace capture, replay, and run comparison are now implemented,
-- narrow Activity, Action, and Trigger contribution scaffolding are implemented with isolated build/test proof; broader package/install workflows remain later work.
+- narrow Activity, Action, and Trigger contribution scaffolding are implemented with isolated build/test proof, shared validation/package is implemented, and reviewable install planning is implemented; install/update apply workflows remain later work.
 
 ### Storage
 
@@ -208,5 +208,5 @@ Check:
 1. Add OpenTelemetry trace propagation across control-plane, orchestrator, and runner-worker.
 2. Move more artifact payloads to Blob/Azurite-backed storage.
 3. Add replay-driven debugging on top of persisted trace/replay/run-comparison artifacts.
-4. Add UI views for app catalog, mapping preview, runtime trace, and later replay/comparison/contrib workflows.
+4. Add richer UI views for app catalog, mapping preview, runtime trace, replay/comparison, and later install/update apply workflows.
 5. Expand eval coverage for catalog/mapping-specific workflows.

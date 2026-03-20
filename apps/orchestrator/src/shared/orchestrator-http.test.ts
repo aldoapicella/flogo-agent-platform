@@ -347,4 +347,50 @@ describe("orchestrator-http", () => {
       format: "zip"
     });
   });
+
+  it("routes install_contrib_plan mode to the shared contribution install-planning runner step", () => {
+    const start: OrchestratorStartRequest = {
+      taskId: "task-install-contrib-plan",
+      request: {
+        type: "review",
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json",
+        requestedBy: "operator",
+        summary: "Plan how to install a packaged contribution into the target app",
+        inputs: {
+          mode: "install_contrib_plan",
+          packageArtifactId: "artifact-3",
+          preferredAlias: "webhooktrigger",
+          replaceExisting: false
+        },
+        constraints: {
+          allowDependencyChanges: false,
+          allowCustomCode: false,
+          targetEnv: "dev",
+          requireApproval: true
+        }
+      },
+      requiredApprovals: [],
+      planSummary: "Plan contribution install",
+      steps: []
+    };
+
+    expect(resolveWorkflowRunnerSteps(start)).toEqual(["install_contrib_plan"]);
+
+    const spec = buildRunnerJobSpec(start, "install_contrib_plan");
+
+    expect(spec.jobKind).toBe("contrib_install_plan");
+    expect(spec.analysisKind).toBe("install_contrib_plan");
+    expect(spec.analysisPayload).toMatchObject({
+      packageArtifactId: "artifact-3",
+      preferredAlias: "webhooktrigger",
+      replaceExisting: false,
+      targetApp: {
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json"
+      }
+    });
+  });
 });

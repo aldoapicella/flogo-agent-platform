@@ -69,7 +69,8 @@ export const ArtifactTypeSchema = z.enum([
   "diagnosis_report",
   "contrib_bundle",
   "contrib_validation_report",
-  "contrib_package"
+  "contrib_package",
+  "contrib_install_plan"
 ]);
 export type ArtifactType = z.infer<typeof ArtifactTypeSchema>;
 
@@ -685,6 +686,12 @@ export const ContributionBundleArtifactSchema = ArtifactRefSchema.extend({
 });
 export type ContributionBundleArtifact = z.infer<typeof ContributionBundleArtifactSchema>;
 
+export const ContributionPackageArtifactSchema = ArtifactRefSchema.extend({
+  type: z.literal("contrib_package"),
+  metadata: z.record(z.string(), z.unknown())
+});
+export type ContributionPackageArtifact = z.infer<typeof ContributionPackageArtifactSchema>;
+
 const contributionBundleInputShape = {
   bundleArtifactId: z.string().min(1).optional(),
   bundleArtifact: ContributionBundleArtifactSchema.optional(),
@@ -757,6 +764,164 @@ export const ContributionPackageResponseSchema = z.object({
   result: ContributionPackageResultSchema
 });
 export type ContributionPackageResponse = z.infer<typeof ContributionPackageResponseSchema>;
+
+export const ContributionInstallSourceSchema = z.enum([
+  "inline_result",
+  "bundle_artifact",
+  "inline_package",
+  "package_artifact"
+]);
+export type ContributionInstallSource = z.infer<typeof ContributionInstallSourceSchema>;
+
+export const ContributionInstallReadinessSchema = z.enum(["high", "medium", "low"]);
+export type ContributionInstallReadiness = z.infer<typeof ContributionInstallReadinessSchema>;
+
+export const ContributionInstallSurfaceSchema = z.enum(["activityRef", "actionRef", "triggerRef"]);
+export type ContributionInstallSurface = z.infer<typeof ContributionInstallSurfaceSchema>;
+
+export const ContributionInstallImportActionSchema = z.enum([
+  "add",
+  "reuse_existing",
+  "update_existing",
+  "conflict"
+]);
+export type ContributionInstallImportAction = z.infer<typeof ContributionInstallImportActionSchema>;
+
+export const ContributionInstallRefEntrySchema = z.object({
+  surface: ContributionInstallSurfaceSchema,
+  value: z.string(),
+  note: z.string().optional()
+});
+export type ContributionInstallRefEntry = z.infer<typeof ContributionInstallRefEntrySchema>;
+
+export const ContributionInstallImportEntrySchema = z.object({
+  alias: z.string(),
+  ref: z.string(),
+  version: z.string().optional(),
+  action: ContributionInstallImportActionSchema,
+  existingAlias: z.string().optional(),
+  existingRef: z.string().optional(),
+  note: z.string().optional()
+});
+export type ContributionInstallImportEntry = z.infer<typeof ContributionInstallImportEntrySchema>;
+
+export const ContributionInstallConflictKindSchema = z.enum([
+  "alias_conflict",
+  "ref_already_imported",
+  "version_conflict",
+  "type_conflict",
+  "insufficient_metadata",
+  "unsupported_source"
+]);
+export type ContributionInstallConflictKind = z.infer<typeof ContributionInstallConflictKindSchema>;
+
+export const ContributionInstallConflictSchema = z.object({
+  kind: ContributionInstallConflictKindSchema,
+  severity: DiagnosticSeveritySchema.default("warning"),
+  message: z.string(),
+  existingAlias: z.string().optional(),
+  existingRef: z.string().optional(),
+  proposedAlias: z.string().optional(),
+  proposedRef: z.string().optional()
+});
+export type ContributionInstallConflict = z.infer<typeof ContributionInstallConflictSchema>;
+
+export const ContributionInstallTargetSchema = z.object({
+  projectId: z.string().optional(),
+  appId: z.string().optional(),
+  appPath: z.string().optional(),
+  appName: z.string().optional()
+});
+export type ContributionInstallTarget = z.infer<typeof ContributionInstallTargetSchema>;
+
+export const ContributionInstallPredictedChangesSchema = z.object({
+  importsToAdd: z.array(ContributionInstallImportEntrySchema).default([]),
+  importsToUpdate: z.array(ContributionInstallImportEntrySchema).default([]),
+  reusableRefs: z.array(ContributionInstallRefEntrySchema).default([]),
+  summaryLines: z.array(z.string()).default([]),
+  noMutation: z.literal(true).default(true)
+});
+export type ContributionInstallPredictedChanges = z.infer<typeof ContributionInstallPredictedChangesSchema>;
+
+const contributionInstallInputShape = {
+  bundleArtifactId: z.string().min(1).optional(),
+  bundleArtifact: ContributionBundleArtifactSchema.optional(),
+  packageArtifactId: z.string().min(1).optional(),
+  packageArtifact: ContributionPackageArtifactSchema.optional(),
+  result: ContributionScaffoldResultSchema.optional(),
+  packageResult: ContributionPackageResultSchema.optional(),
+  targetApp: ContributionInstallTargetSchema.default({}),
+  preferredAlias: z.string().min(1).optional(),
+  replaceExisting: z.boolean().default(false)
+} as const;
+
+function validateContributionInstallInput(
+  value: {
+    bundleArtifactId?: string;
+    bundleArtifact?: ContributionBundleArtifact;
+    packageArtifactId?: string;
+    packageArtifact?: ContributionPackageArtifact;
+    result?: ContributionScaffoldResult;
+    packageResult?: ContributionPackageResult;
+  },
+  ctx: z.RefinementCtx
+) {
+  const bundleSupplied = Boolean(value.bundleArtifactId || value.bundleArtifact || value.result);
+  const packageSupplied = Boolean(value.packageArtifactId || value.packageArtifact || value.packageResult);
+  if (!bundleSupplied && !packageSupplied) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide one contribution source via bundleArtifactId, bundleArtifact, result, packageArtifactId, packageArtifact, or packageResult.",
+      path: ["bundleArtifactId"]
+    });
+  }
+  if (bundleSupplied && packageSupplied) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide either one bundle source or one package source, not both.",
+      path: ["bundleArtifactId"]
+    });
+  }
+}
+
+export const ContributionInstallPlanRequestSchema = z.object(contributionInstallInputShape).superRefine(validateContributionInstallInput);
+export type ContributionInstallPlanRequest = z.infer<typeof ContributionInstallPlanRequestSchema>;
+
+export const ContributionInstallPlanResultSchema = z.object({
+  contributionKind: ContributionKindSchema,
+  source: ContributionInstallSourceSchema,
+  sourceArtifactId: z.string().optional(),
+  targetApp: ContributionInstallTargetSchema,
+  bundle: ContributionScaffoldBundleSchema,
+  package: ContributionPackageArchiveSchema.optional(),
+  modulePath: z.string(),
+  packageName: z.string().optional(),
+  packagePath: z.string().optional(),
+  descriptorRef: z.string().optional(),
+  selectedAlias: z.string(),
+  installReady: z.boolean(),
+  readiness: ContributionInstallReadinessSchema,
+  proposedImports: z.array(ContributionInstallImportEntrySchema).default([]),
+  proposedRefs: z.array(ContributionInstallRefEntrySchema).default([]),
+  predictedChanges: ContributionInstallPredictedChangesSchema.default({
+    importsToAdd: [],
+    importsToUpdate: [],
+    reusableRefs: [],
+    summaryLines: [],
+    noMutation: true
+  }),
+  warnings: z.array(z.string()).default([]),
+  conflicts: z.array(ContributionInstallConflictSchema).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([]),
+  recommendedNextAction: z.string(),
+  limitations: z.array(z.string()).default([])
+});
+export type ContributionInstallPlanResult = z.infer<typeof ContributionInstallPlanResultSchema>;
+
+export const ContributionInstallPlanResponseSchema = z.object({
+  result: ContributionInstallPlanResultSchema
+});
+export type ContributionInstallPlanResponse = z.infer<typeof ContributionInstallPlanResponseSchema>;
 
 export const MappingKindSchema = z.enum(["literal", "expression", "object", "array"]);
 export type MappingKind = z.infer<typeof MappingKindSchema>;
@@ -2113,6 +2278,7 @@ export const RunnerStepTypeSchema = z.enum([
   "scaffold_trigger",
   "validate_contrib",
   "package_contrib",
+  "install_contrib_plan",
   "diagnose_app"
 ]);
 export type RunnerStepType = z.infer<typeof RunnerStepTypeSchema>;
@@ -2146,6 +2312,7 @@ export const RunnerJobKindSchema = z.enum([
   "trigger_scaffold",
   "contrib_validation",
   "contrib_package",
+  "contrib_install_plan",
   "diagnosis"
 ]);
 export type RunnerJobKind = z.infer<typeof RunnerJobKindSchema>;
@@ -2178,6 +2345,7 @@ export const AnalysisKindSchema = z.enum([
   "trigger_scaffold",
   "validate_contrib",
   "package_contrib",
+  "install_contrib_plan",
   "diagnosis"
 ]);
 export type AnalysisKind = z.infer<typeof AnalysisKindSchema>;

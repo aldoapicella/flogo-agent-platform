@@ -284,6 +284,7 @@ export class OrchestrationService {
   private async prepareTaskRequest(parsedRequest: TaskRequest) {
     let inputs = parsedRequest.inputs;
     const mode = parsedRequest.inputs["mode"];
+    let appPath = parsedRequest.appPath;
 
     if ((mode === "run_comparison" || mode === "run_comparison_plan") && parsedRequest.appId) {
       inputs = await this.flogoAppsService.prepareRunComparisonTaskInputs(
@@ -293,7 +294,12 @@ export class OrchestrationService {
       );
     }
 
-    if ((mode === "validate_contrib" || mode === "package_contrib") && typeof inputs["bundleArtifactId"] === "string" && !inputs["bundleArtifact"] && !inputs["result"]) {
+    if (
+      (mode === "validate_contrib" || mode === "package_contrib" || mode === "install_contrib_plan") &&
+      typeof inputs["bundleArtifactId"] === "string" &&
+      !inputs["bundleArtifact"] &&
+      !inputs["result"]
+    ) {
       const artifact = await this.taskStore.getArtifact(inputs["bundleArtifactId"] as string);
       if (!artifact) {
         throw new Error(`Contribution bundle artifact ${String(inputs["bundleArtifactId"])} was not found`);
@@ -307,8 +313,37 @@ export class OrchestrationService {
       };
     }
 
+    if (
+      mode === "install_contrib_plan" &&
+      typeof inputs["packageArtifactId"] === "string" &&
+      !inputs["packageArtifact"] &&
+      !inputs["packageResult"]
+    ) {
+      const artifact = await this.taskStore.getArtifact(inputs["packageArtifactId"] as string);
+      if (!artifact) {
+        throw new Error(`Contribution package artifact ${String(inputs["packageArtifactId"])} was not found`);
+      }
+      if (artifact.type !== "contrib_package") {
+        throw new Error(`Artifact ${artifact.id} is ${artifact.type}, expected contrib_package`);
+      }
+      inputs = {
+        ...inputs,
+        packageArtifact: artifact
+      };
+    }
+
+    if (mode === "install_contrib_plan") {
+      if (!appPath && parsedRequest.appId) {
+        appPath = await this.flogoAppsService.resolveTaskAppPath(parsedRequest.projectId, parsedRequest.appId);
+      }
+      if (!appPath) {
+        throw new Error("Contribution install planning requires a target appPath or a resolvable appId.");
+      }
+    }
+
     return {
       ...parsedRequest,
+      appPath,
       inputs
     };
   }
@@ -323,7 +358,7 @@ export class OrchestrationService {
 
     if (!this.storage.isConfigured()) {
       throw new Error(
-        "Contribution artifact storage is not configured. Set APP_ANALYSIS_STORAGE_CONNECTION_STRING, AZURITE_CONNECTION_STRING, or DURABLE_STORAGE_CONNECTION_STRING before running contribution scaffold, validate, or package tasks."
+        "Contribution artifact storage is not configured. Set APP_ANALYSIS_STORAGE_CONNECTION_STRING, AZURITE_CONNECTION_STRING, or DURABLE_STORAGE_CONNECTION_STRING before running contribution scaffold, validate, package, or install-plan tasks."
       );
     }
 
@@ -358,7 +393,7 @@ export class OrchestrationService {
   private shouldPersistTaskArtifact(
     artifact: ArtifactRef
   ): artifact is ArtifactRef & {
-    type: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "build_log" | "test_report";
+    type: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "contrib_install_plan" | "build_log" | "test_report";
     metadata: Record<string, unknown>;
   } {
     return (
@@ -366,6 +401,7 @@ export class OrchestrationService {
         artifact.type === "contrib_bundle" ||
         artifact.type === "contrib_validation_report" ||
         artifact.type === "contrib_package" ||
+        artifact.type === "contrib_install_plan" ||
         artifact.type === "build_log" ||
         artifact.type === "test_report"
       ) &&

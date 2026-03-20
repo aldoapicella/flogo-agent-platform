@@ -74,6 +74,7 @@ Important current `inputs` conventions:
 - `mode = "trigger_scaffold"` for analysis-only Flogo Trigger bundle scaffolding
 - `mode = "validate_contrib"` for analysis-only shared contribution validation/build/test proof
 - `mode = "package_contrib"` for analysis-only shared contribution packaging after proof
+- `mode = "install_contrib_plan"` for analysis-only reviewable install planning against one target app
 - `mode = "governance"` for analysis-only alias/orphan/version validation
 - `mode = "composition_compare"` for analysis-only JSON vs programmatic comparison
 
@@ -193,8 +194,27 @@ Current artifact kinds:
 - `contrib_bundle`
 - `contrib_validation_report`
 - `contrib_package`
+- `contrib_install_plan`
 
 ## Flogo-native contracts
+
+### Contribution install-planning contracts
+
+Important schemas:
+
+- `ContributionInstallPlanRequest`
+- `ContributionInstallPlanResult`
+- `ContributionInstallPlanResponse`
+
+These describe:
+
+- one contribution source selected from a persisted or inline `contrib_bundle` or `contrib_package`,
+- one target app identity and resolved app path,
+- conservative install options such as preferred alias and replace-existing planning,
+- predicted imports and refs to add, reuse, or flag,
+- target-app conflicts, warnings, and readiness,
+- recommended next action and explicit limitations,
+- review-oriented install planning without any `flogo.json` mutation.
 
 ### Contribution catalog contracts
 
@@ -755,7 +775,7 @@ Current runtime behavior is mixed:
 
 - persisted metadata is stored in PostgreSQL,
 - inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test payloads are stored as Blob/Azurite-backed JSON objects,
-- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `build_log`, and `test_report` task artifacts are also stored as Blob/Azurite-backed JSON objects while retaining Prisma metadata for task detail rendering,
+- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `build_log`, and `test_report` task artifacts are also stored as Blob/Azurite-backed JSON objects while retaining Prisma metadata for task detail rendering,
 - many broader task artifacts still use logical or local URIs.
 
 This matters for operators:
@@ -763,7 +783,7 @@ This matters for operators:
 - task and analysis history survive restart,
 - artifact metadata survives restart,
 - app-analysis payloads are object-storage-backed,
-- contribution-authoring bundle, validation, package, and proof payloads are object-storage-backed,
+- contribution-authoring bundle, validation, package, install-plan, and proof payloads are object-storage-backed,
 - broader runtime artifact payload locations may still be logical rather than object-storage-backed.
 
 ## App resolution model
@@ -793,6 +813,7 @@ Examples:
 - `contrib_bundle` is now produced by the narrow Phase 4 Activity, Action, and Trigger scaffold slices, carries descriptor metadata, generated file summaries, and isolated build/test proof results for reviewable contribution bundles, and is uploaded through the same Blob/Azurite storage seam used for app-analysis payloads.
 - `contrib_validation_report` is now produced by the shared contribution validation slice, carries shared proof results plus bundle/source metadata for Activity, Action, and Trigger bundles, and is uploaded through the same Blob/Azurite storage seam.
 - `contrib_package` is now produced by the shared contribution packaging slice, carries conservative package metadata plus shared proof results for Activity, Action, and Trigger bundles, and is uploaded through the same Blob/Azurite storage seam.
+- `contrib_install_plan` is now produced by the shared contribution install-planning slice, carries target-app identity, predicted imports/refs, warnings, conflicts, readiness, recommended next action, and limitations for Activity, Action, and Trigger bundles/packages, and is uploaded through the same Blob/Azurite storage seam.
 - graph projections in Prisma exist, but the current runtime does not fully maintain them.
 - task persistence is live, app-analysis payload storage is live, and contribution-authoring bundle/validation/package/proof payload storage is live, but workspace snapshots and broader blob-backed runtime artifact content are still planned work.
 

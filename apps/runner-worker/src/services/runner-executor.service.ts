@@ -11,6 +11,10 @@ import {
   ActionScaffoldRequestSchema,
   ActionScaffoldResponseSchema,
   type ActionScaffoldResponse,
+  ContributionPackageArchiveSchema,
+  ContributionInstallPlanRequestSchema,
+  ContributionInstallPlanResponseSchema,
+  type ContributionInstallPlanResponse,
   ContributionPackageRequestSchema,
   ContributionPackageResponseSchema,
   type ContributionPackageResponse,
@@ -174,6 +178,8 @@ function createCommand(spec: RunnerJobSpec): string[] {
       return createHelperCommand("contrib", "validate");
     case "package_contrib":
       return createHelperCommand("contrib", "package");
+    case "install_contrib_plan":
+      return createHelperCommand("contrib", "install-plan", "--app", spec.appPath);
     default:
       return ["echo", `runner:${spec.stepType}`];
   }
@@ -236,6 +242,7 @@ function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
     stepType === "scaffold_trigger" ||
     stepType === "validate_contrib" ||
     stepType === "package_contrib" ||
+    stepType === "install_contrib_plan" ||
     stepType === "diagnose_app"
   );
 }
@@ -311,6 +318,75 @@ type ContributionPackageResultLike = ContributionValidateResultLike & {
   };
 };
 
+type ContributionInstallPlanResultLike = {
+  contributionKind: "activity" | "action" | "trigger";
+  source: "inline_result" | "bundle_artifact" | "inline_package" | "package_artifact";
+  sourceArtifactId?: string;
+  targetApp: {
+    projectId?: string;
+    appId?: string;
+    appPath?: string;
+    appName?: string;
+  };
+  bundle: ContributionScaffoldResultLike["bundle"];
+  package?: ContributionPackageResultLike["package"];
+  modulePath: string;
+  packageName?: string;
+  packagePath?: string;
+  descriptorRef?: string;
+  selectedAlias: string;
+  installReady: boolean;
+  readiness: "high" | "medium" | "low";
+  proposedImports: Array<{
+    alias: string;
+    ref: string;
+    version?: string;
+    action: "add" | "reuse_existing" | "update_existing" | "conflict";
+    existingAlias?: string;
+    existingRef?: string;
+    note?: string;
+  }>;
+  proposedRefs: Array<{
+    surface: "activityRef" | "actionRef" | "triggerRef";
+    value: string;
+    note?: string;
+  }>;
+  predictedChanges: {
+    importsToAdd: Array<{
+      alias: string;
+      ref: string;
+      version?: string;
+      action: "add" | "reuse_existing" | "update_existing" | "conflict";
+    }>;
+    importsToUpdate: Array<{
+      alias: string;
+      ref: string;
+      version?: string;
+      action: "add" | "reuse_existing" | "update_existing" | "conflict";
+    }>;
+    reusableRefs: Array<{
+      surface: "activityRef" | "actionRef" | "triggerRef";
+      value: string;
+      note?: string;
+    }>;
+    summaryLines: string[];
+    noMutation: true;
+  };
+  warnings: string[];
+  conflicts: Array<{
+    kind: string;
+    severity: "info" | "warning" | "error";
+    message: string;
+    existingAlias?: string;
+    existingRef?: string;
+    proposedAlias?: string;
+    proposedRef?: string;
+  }>;
+  diagnostics: Diagnostic[];
+  recommendedNextAction: string;
+  limitations: string[];
+};
+
 function resolveContributionScaffoldResultFromPayload(
   analysisPayload: Record<string, unknown> | undefined
 ): { result: ContributionScaffoldResultLike; source: "inline_result" | "bundle_artifact"; sourceArtifactId?: string } {
@@ -336,6 +412,78 @@ function resolveContributionScaffoldResultFromPayload(
   }
 
   throw new Error("Contribution validation/package requires a scaffold result or contrib_bundle artifact metadata.result payload");
+}
+
+function resolveContributionInstallSourceFromPayload(
+  analysisPayload: Record<string, unknown> | undefined
+): {
+  result: ContributionScaffoldResultLike;
+  package?: ContributionPackageResultLike["package"];
+  source: "inline_result" | "bundle_artifact" | "inline_package" | "package_artifact";
+  sourceArtifactId?: string;
+} {
+  const parsedPackageResult = ContributionPackageResponseSchema.shape.result.safeParse(analysisPayload?.packageResult);
+  if (parsedPackageResult.success) {
+    return {
+      result: {
+        bundle: parsedPackageResult.data.bundle as ContributionScaffoldResultLike["bundle"],
+        validation: parsedPackageResult.data.validation,
+        build: parsedPackageResult.data.build,
+        test: parsedPackageResult.data.test
+      },
+      package: parsedPackageResult.data.package as ContributionPackageResultLike["package"],
+      source: "inline_package"
+    };
+  }
+
+  const inlinePackagePayload = isRecord(analysisPayload?.packageResult) ? analysisPayload.packageResult : undefined;
+  const inlineBundleResult = ContributionScaffoldResultSchema.safeParse(inlinePackagePayload);
+  const inlinePackageArchive = ContributionPackageArchiveSchema.safeParse(inlinePackagePayload?.package);
+  if (inlineBundleResult.success && inlinePackageArchive.success) {
+    return {
+      result: inlineBundleResult.data as ContributionScaffoldResultLike,
+      package: inlinePackageArchive.data as ContributionPackageResultLike["package"],
+      source: "inline_package"
+    };
+  }
+
+  const packageArtifact = isRecord(analysisPayload?.packageArtifact) ? analysisPayload.packageArtifact : undefined;
+  if (packageArtifact) {
+    const metadata = isRecord(packageArtifact.metadata) ? packageArtifact.metadata : undefined;
+    const artifactPackageResult = ContributionPackageResponseSchema.shape.result.safeParse(metadata?.result);
+    if (artifactPackageResult.success) {
+      return {
+        result: {
+          bundle: artifactPackageResult.data.bundle as ContributionScaffoldResultLike["bundle"],
+          validation: artifactPackageResult.data.validation,
+          build: artifactPackageResult.data.build,
+          test: artifactPackageResult.data.test
+        },
+        package: artifactPackageResult.data.package as ContributionPackageResultLike["package"],
+        source: "package_artifact",
+        sourceArtifactId: typeof packageArtifact.id === "string" ? packageArtifact.id : undefined
+      };
+    }
+
+    const artifactPackagePayload = isRecord(metadata?.result) ? metadata?.result : undefined;
+    const artifactBundleResult = ContributionScaffoldResultSchema.safeParse(artifactPackagePayload);
+    const artifactPackageArchive = ContributionPackageArchiveSchema.safeParse(artifactPackagePayload?.package);
+    if (artifactBundleResult.success && artifactPackageArchive.success) {
+      return {
+        result: artifactBundleResult.data as ContributionScaffoldResultLike,
+        package: artifactPackageArchive.data as ContributionPackageResultLike["package"],
+        source: "package_artifact",
+        sourceArtifactId: typeof packageArtifact.id === "string" ? packageArtifact.id : undefined
+      };
+    }
+  }
+
+  const resolved = resolveContributionScaffoldResultFromPayload(analysisPayload);
+  return {
+    result: resolved.result,
+    source: resolved.source,
+    sourceArtifactId: resolved.sourceArtifactId
+  };
 }
 
 function createContributionScaffoldArtifacts(
@@ -460,6 +608,36 @@ function createContributionPackageArtifacts(
       output: result.test.output,
       summary: result.test.summary,
       contributionKind
+    })
+  ];
+}
+
+function createContributionInstallPlanArtifacts(
+  spec: RunnerJobSpec,
+  result: ContributionInstallPlanResultLike,
+  diagnostics: Diagnostic[]
+): ArtifactRef[] {
+  return [
+    createAnalysisArtifact(spec, "contrib_install_plan", `${result.contributionKind}-install-plan-${result.bundle.packageName}`, {
+      result,
+      bundle: result.bundle,
+      package: result.package,
+      contributionKind: result.contributionKind,
+      targetApp: result.targetApp,
+      modulePath: result.modulePath,
+      packageName: result.packageName,
+      packagePath: result.packagePath,
+      selectedAlias: result.selectedAlias,
+      installReady: result.installReady,
+      readiness: result.readiness,
+      proposedImports: result.proposedImports,
+      proposedRefs: result.proposedRefs,
+      predictedChanges: result.predictedChanges,
+      warnings: result.warnings,
+      conflicts: result.conflicts,
+      recommendedNextAction: result.recommendedNextAction,
+      limitations: result.limitations,
+      diagnostics
     })
   ];
 }
@@ -855,6 +1033,7 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     && spec.stepType !== "scaffold_trigger"
     && spec.stepType !== "validate_contrib"
     && spec.stepType !== "package_contrib"
+    && spec.stepType !== "install_contrib_plan"
   ) {
     return {
       command: createCommand(spec)
@@ -1082,6 +1261,27 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     }, null, 2), "utf8");
     return {
       command: createHelperCommand("contrib", "package", "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "install_contrib_plan") {
+    const request = ContributionInstallPlanRequestSchema.parse(spec.analysisPayload ?? {});
+    const resolved = resolveContributionInstallSourceFromPayload(spec.analysisPayload);
+    const requestPath = path.join(tempDir, "contrib-install-plan-request.json");
+    await fs.writeFile(requestPath, JSON.stringify({
+      result: resolved.result,
+      package: resolved.package,
+      source: resolved.source,
+      sourceArtifactId: resolved.sourceArtifactId,
+      preferredAlias: request.preferredAlias,
+      replaceExisting: request.replaceExisting,
+      targetApp: request.targetApp
+    }, null, 2), "utf8");
+    return {
+      command: createHelperCommand("contrib", "install-plan", "--app", spec.appPath, "--request", requestPath),
       cleanup: async () => {
         await fs.rm(tempDir, { recursive: true, force: true });
       }
@@ -1500,6 +1700,11 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
     if (spec.stepType === "package_contrib") {
       const response = ContributionPackageResponseSchema.parse(JSON.parse(stdout) as ContributionPackageResponse);
       return createContributionPackageArtifacts(spec, response.result as ContributionPackageResultLike, diagnostics);
+    }
+
+    if (spec.stepType === "install_contrib_plan") {
+      const response = ContributionInstallPlanResponseSchema.parse(JSON.parse(stdout) as ContributionInstallPlanResponse);
+      return createContributionInstallPlanArtifacts(spec, response.result as ContributionInstallPlanResultLike, diagnostics);
     }
   } catch (error) {
     diagnostics.push({

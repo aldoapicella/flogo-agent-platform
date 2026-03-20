@@ -823,6 +823,174 @@ describe("RunnerExecutorService", () => {
     expect((packageArtifact?.metadata as { result?: { bundle?: { kind?: string } } } | undefined)?.result?.bundle?.kind).toBe("trigger");
   });
 
+  it("executes helper-backed contribution install planning and publishes a reviewable install-plan artifact", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          contributionKind: "trigger",
+          source: "package_artifact",
+          sourceArtifactId: "package-artifact-1",
+          targetApp: {
+            projectId: "demo",
+            appId: "hello-rest",
+            appPath: "examples/hello-rest/flogo.json",
+            appName: "hello-rest"
+          },
+          bundle: {
+            kind: "trigger",
+            modulePath: "example.com/acme/webhook",
+            packageName: "webhooktrigger",
+            bundleRoot: "/tmp/flogo-trigger-webhooktrigger",
+            descriptor: {
+              ref: "example.com/acme/webhook",
+              alias: "webhooktrigger",
+              type: "trigger",
+              name: "webhook-trigger",
+              version: "0.1.0",
+              title: "Webhook Trigger",
+              settings: [],
+              handlerSettings: [],
+              outputs: [],
+              reply: [],
+              examples: [],
+              compatibilityNotes: ["Generated scaffold"],
+              source: "trigger_scaffold"
+            },
+            files: []
+          },
+          package: {
+            format: "zip",
+            fileName: "trigger-webhooktrigger.zip",
+            path: "/tmp/trigger-webhooktrigger.zip",
+            bytes: 2048,
+            sha256: "abc123",
+            base64: "ZmFrZQ=="
+          },
+          modulePath: "example.com/acme/webhook",
+          packageName: "webhooktrigger",
+          packagePath: "example.com/acme/webhook",
+          descriptorRef: "example.com/acme/webhook",
+          selectedAlias: "webhooktrigger",
+          installReady: true,
+          readiness: "high",
+          proposedImports: [
+            {
+              alias: "webhooktrigger",
+              ref: "example.com/acme/webhook",
+              action: "add"
+            }
+          ],
+          proposedRefs: [
+            {
+              surface: "triggerRef",
+              value: "#webhooktrigger",
+              note: "Use this ref when creating a trigger instance."
+            }
+          ],
+          predictedChanges: {
+            importsToAdd: [
+              {
+                alias: "webhooktrigger",
+                ref: "example.com/acme/webhook",
+                action: "add"
+              }
+            ],
+            importsToUpdate: [],
+            reusableRefs: [
+              {
+                surface: "triggerRef",
+                value: "#webhooktrigger"
+              }
+            ],
+            summaryLines: ["Add import alias \"webhooktrigger\" for ref \"example.com/acme/webhook\"."],
+            noMutation: true
+          },
+          warnings: [],
+          conflicts: [],
+          diagnostics: [],
+          recommendedNextAction: "Review the import plan before adding a trigger instance that uses #webhooktrigger.",
+          limitations: ["Planning only; no flogo.json mutation was applied."]
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-install-contrib-plan",
+      jobKind: "contrib_install_plan",
+      stepType: "install_contrib_plan",
+      analysisKind: "install_contrib_plan",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://install-contrib-plan",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        packageArtifactId: "package-artifact-1",
+        packageArtifact: {
+          id: "package-artifact-1",
+          type: "contrib_package",
+          name: "trigger-package-webhooktrigger",
+          uri: "memory://task/trigger-package-webhooktrigger.json",
+          metadata: {
+            result: {
+              bundle: {
+                kind: "trigger",
+                modulePath: "example.com/acme/webhook",
+                packageName: "webhooktrigger",
+                bundleRoot: "/tmp/flogo-trigger-webhooktrigger",
+                descriptor: {
+                  ref: "example.com/acme/webhook",
+                  alias: "webhooktrigger",
+                  type: "trigger",
+                  name: "webhook-trigger",
+                  version: "0.1.0",
+                  title: "Webhook Trigger",
+                  settings: [],
+                  handlerSettings: [],
+                  outputs: [],
+                  reply: [],
+                  examples: [],
+                  compatibilityNotes: ["Generated scaffold"],
+                  source: "trigger_scaffold"
+                },
+                files: []
+              },
+              validation: { ok: true, stages: [], summary: "ok", artifacts: [] },
+              build: { kind: "build", ok: true, command: ["go", "build", "./..."], exitCode: 0, summary: "ok", output: "" },
+              test: { kind: "test", ok: true, command: ["go", "test", "./..."], exitCode: 0, summary: "ok", output: "" },
+              package: {
+                format: "zip",
+                fileName: "trigger-webhooktrigger.zip",
+                path: "/tmp/trigger-webhooktrigger.zip",
+                bytes: 2048,
+                sha256: "abc123",
+                base64: "ZmFrZQ=="
+              }
+            }
+          }
+        },
+        targetApp: {
+          projectId: "demo",
+          appId: "hello-rest",
+          appPath: "examples/hello-rest/flogo.json"
+        },
+        preferredAlias: "webhooktrigger"
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    const installPlanArtifact = result.artifacts.find((artifact) => artifact.type === "contrib_install_plan");
+    expect(result.ok).toBe(true);
+    expect(installPlanArtifact).toBeDefined();
+    expect((installPlanArtifact?.metadata as { result?: { installReady?: boolean; readiness?: string; selectedAlias?: string } } | undefined)?.result?.installReady).toBe(true);
+    expect((installPlanArtifact?.metadata as { result?: { readiness?: string } } | undefined)?.result?.readiness).toBe("high");
+    expect((installPlanArtifact?.metadata as { result?: { selectedAlias?: string } } | undefined)?.result?.selectedAlias).toBe("webhooktrigger");
+  });
+
   it("rejects malformed shared contribution validation input before dispatching the helper", async () => {
     const service = new RunnerExecutorService();
 
@@ -844,6 +1012,29 @@ describe("RunnerExecutorService", () => {
         containerArgs: []
       })
     ).rejects.toThrow(/Provide bundleArtifactId, bundleArtifact, or result/);
+  });
+
+  it("rejects malformed contribution install-planning input before dispatching the helper", async () => {
+    const service = new RunnerExecutorService();
+
+    await expect(
+      service.execute({
+        taskId: "task-invalid-install-contrib-plan",
+        jobKind: "contrib_install_plan",
+        stepType: "install_contrib_plan",
+        analysisKind: "install_contrib_plan",
+        snapshotUri: ".",
+        appPath: "examples/hello-rest/flogo.json",
+        env: {},
+        envSecretRefs: {},
+        timeoutSeconds: 60,
+        artifactOutputUri: "memory://invalid-install-contrib-plan",
+        jobTemplateName: "flogo-runner",
+        analysisPayload: {},
+        command: [],
+        containerArgs: []
+      })
+    ).rejects.toThrow(/Provide one contribution source/);
   });
 
   it("executes helper-backed timer trace capture and persists timer runtime metadata", async () => {
