@@ -381,6 +381,10 @@ const knownDescriptorRegistry = new Map<string, Omit<ContribDescriptor, "ref" | 
       name: "rest",
       title: "REST Trigger",
       settings: [{ name: "port", type: "integer", required: true }],
+      handlerSettings: [
+        { name: "method", type: "string", required: true },
+        { name: "path", type: "string", required: true }
+      ],
       inputs: [
         { name: "pathParams", type: "object", required: false },
         { name: "queryParams", type: "object", required: false },
@@ -388,6 +392,12 @@ const knownDescriptorRegistry = new Map<string, Omit<ContribDescriptor, "ref" | 
         { name: "content", type: "object", required: false }
       ],
       outputs: [
+        { name: "code", type: "integer", required: false },
+        { name: "data", type: "object", required: false },
+        { name: "headers", type: "object", required: false },
+        { name: "cookies", type: "object", required: false }
+      ],
+      reply: [
         { name: "code", type: "integer", required: false },
         { name: "data", type: "object", required: false },
         { name: "headers", type: "object", required: false },
@@ -405,8 +415,10 @@ const knownDescriptorRegistry = new Map<string, Omit<ContribDescriptor, "ref" | 
       name: "log",
       title: "Log Activity",
       settings: [],
+      handlerSettings: [],
       inputs: [{ name: "message", type: "string", required: true }],
       outputs: [],
+      reply: [],
       examples: ["Log trigger input before calling downstream activity"],
       compatibilityNotes: ["Useful for trace and debugging instrumentation"],
       source: "registry"
@@ -419,8 +431,10 @@ const knownDescriptorRegistry = new Map<string, Omit<ContribDescriptor, "ref" | 
       name: "timer",
       title: "Timer Trigger",
       settings: [{ name: "interval", type: "string", required: true }],
+      handlerSettings: [],
       inputs: [],
       outputs: [{ name: "tick", type: "string", required: false }],
+      reply: [],
       examples: ["Run a flow on a fixed interval"],
       compatibilityNotes: ["Use for batch and scheduled flows"],
       source: "registry"
@@ -433,8 +447,10 @@ const knownDescriptorRegistry = new Map<string, Omit<ContribDescriptor, "ref" | 
       name: "cli",
       title: "CLI Trigger",
       settings: [],
+      handlerSettings: [],
       inputs: [{ name: "args", type: "array", required: false }],
       outputs: [{ name: "stdout", type: "string", required: false }],
+      reply: [{ name: "data", type: "any", required: false }],
       examples: ["Run a flow as a one-shot CLI command"],
       compatibilityNotes: ["Useful for command and batch profiles"],
       source: "registry"
@@ -447,8 +463,10 @@ const knownDescriptorRegistry = new Map<string, Omit<ContribDescriptor, "ref" | 
       name: "channel",
       title: "Channel Trigger",
       settings: [{ name: "name", type: "string", required: true }],
+      handlerSettings: [{ name: "channel", type: "string", required: true }],
       inputs: [{ name: "message", type: "object", required: false }],
       outputs: [{ name: "reply", type: "object", required: false }],
+      reply: [],
       examples: ["Run a flow from an internal engine channel"],
       compatibilityNotes: ["Useful for internal worker topologies"],
       source: "registry"

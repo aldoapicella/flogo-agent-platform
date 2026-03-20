@@ -8,6 +8,9 @@ import {
   ActivityScaffoldRequestSchema,
   ActivityScaffoldResponseSchema,
   type ActivityScaffoldResponse,
+  TriggerScaffoldRequestSchema,
+  TriggerScaffoldResponseSchema,
+  type TriggerScaffoldResponse,
   type CompositionCompareResult,
   type ArtifactRef,
   DiagnosisRequestSchema,
@@ -153,6 +156,8 @@ function createCommand(spec: RunnerJobSpec): string[] {
       );
     case "scaffold_activity":
       return createHelperCommand("contrib", "scaffold-activity");
+    case "scaffold_trigger":
+      return createHelperCommand("contrib", "scaffold-trigger");
     default:
       return ["echo", `runner:${spec.stepType}`];
   }
@@ -211,6 +216,7 @@ function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
     stepType === "validate_governance" ||
     stepType === "compare_composition" ||
     stepType === "scaffold_activity" ||
+    stepType === "scaffold_trigger" ||
     stepType === "diagnose_app"
   );
 }
@@ -632,6 +638,7 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     spec.stepType !== "replay_flow" &&
     spec.stepType !== "compare_runs"
     && spec.stepType !== "scaffold_activity"
+    && spec.stepType !== "scaffold_trigger"
   ) {
     return {
       command: createCommand(spec)
@@ -798,6 +805,18 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     await fs.writeFile(requestPath, JSON.stringify(request, null, 2), "utf8");
     return {
       command: createHelperCommand("contrib", "scaffold-activity", "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "scaffold_trigger") {
+    const request = TriggerScaffoldRequestSchema.parse(spec.analysisPayload ?? {});
+    const requestPath = path.join(tempDir, "trigger-scaffold-request.json");
+    await fs.writeFile(requestPath, JSON.stringify(request, null, 2), "utf8");
+    return {
+      command: createHelperCommand("contrib", "scaffold-trigger", "--request", requestPath),
       cleanup: async () => {
         await fs.rm(tempDir, { recursive: true, force: true });
       }
@@ -1216,6 +1235,37 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
           summary: result.build.summary
         }),
         createNamedArtifact(spec.taskId, "test_report", `${spec.taskId}-activity-test.json`, {
+          command: result.test.command,
+          ok: result.test.ok,
+          output: result.test.output,
+          summary: result.test.summary
+        })
+      ];
+    }
+
+    if (spec.stepType === "scaffold_trigger") {
+      const response = TriggerScaffoldResponseSchema.parse(JSON.parse(stdout) as TriggerScaffoldResponse);
+      const result = response.result;
+      return [
+        createAnalysisArtifact(spec, "contrib_bundle", `trigger-bundle-${result.bundle.packageName}`, {
+          result,
+          descriptor: result.bundle.descriptor,
+          files: result.bundle.files,
+          bundleRoot: result.bundle.bundleRoot,
+          modulePath: result.bundle.modulePath,
+          packageName: result.bundle.packageName,
+          validation: result.validation,
+          build: result.build,
+          test: result.test,
+          diagnostics
+        }),
+        createNamedArtifact(spec.taskId, "build_log", `${spec.taskId}-trigger-build.log`, {
+          command: result.build.command,
+          ok: result.build.ok,
+          output: result.build.output,
+          summary: result.build.summary
+        }),
+        createNamedArtifact(spec.taskId, "test_report", `${spec.taskId}-trigger-test.json`, {
           command: result.test.command,
           ok: result.test.ok,
           output: result.test.output,

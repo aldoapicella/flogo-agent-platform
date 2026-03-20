@@ -104,9 +104,6 @@ export function resolveWorkflowRunnerSteps(start: OrchestratorStartRequest): Run
   if (mode === "run_comparison_plan" || mode === "run_comparison") {
     return ["compare_runs"];
   }
-  if (mode === "run_comparison_plan" || mode === "run_comparison") {
-    return ["compare_runs"];
-  }
   if (mode === "inventory") {
     return ["inventory_contribs"];
   }
@@ -118,6 +115,9 @@ export function resolveWorkflowRunnerSteps(start: OrchestratorStartRequest): Run
   }
   if (mode === "activity_scaffold") {
     return ["scaffold_activity"];
+  }
+  if (mode === "trigger_scaffold") {
+    return ["scaffold_trigger"];
   }
   if (mode === "mapping_preview") {
     return ["preview_mapping"];
@@ -212,6 +212,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
       jobKind = "contrib_evidence";
       break;
     case "scaffold_activity":
+      jobKind = "custom_contrib";
+      break;
+    case "scaffold_trigger":
       jobKind = "custom_contrib";
       break;
     case "preview_mapping":
@@ -633,6 +636,46 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
         outputs: Array.isArray(start.request.inputs["outputs"]) ? start.request.inputs["outputs"] : []
       };
       break;
+    case "scaffold_trigger":
+      analysisPayload = {
+        triggerName:
+          typeof start.request.inputs["triggerName"] === "string"
+            ? (start.request.inputs["triggerName"] as string)
+            : undefined,
+        modulePath:
+          typeof start.request.inputs["modulePath"] === "string"
+            ? (start.request.inputs["modulePath"] as string)
+            : undefined,
+        packageName:
+          typeof start.request.inputs["packageName"] === "string"
+            ? (start.request.inputs["packageName"] as string)
+            : undefined,
+        title:
+          typeof start.request.inputs["title"] === "string"
+            ? (start.request.inputs["title"] as string)
+            : undefined,
+        description:
+          typeof start.request.inputs["description"] === "string"
+            ? (start.request.inputs["description"] as string)
+            : undefined,
+        version:
+          typeof start.request.inputs["version"] === "string"
+            ? (start.request.inputs["version"] as string)
+            : undefined,
+        homepage:
+          typeof start.request.inputs["homepage"] === "string"
+            ? (start.request.inputs["homepage"] as string)
+            : undefined,
+        usage:
+          typeof start.request.inputs["usage"] === "string"
+            ? (start.request.inputs["usage"] as string)
+            : undefined,
+        settings: Array.isArray(start.request.inputs["settings"]) ? start.request.inputs["settings"] : [],
+        handlerSettings: Array.isArray(start.request.inputs["handlerSettings"]) ? start.request.inputs["handlerSettings"] : [],
+        outputs: Array.isArray(start.request.inputs["outputs"]) ? start.request.inputs["outputs"] : [],
+        replies: Array.isArray(start.request.inputs["replies"]) ? start.request.inputs["replies"] : []
+      };
+      break;
     default:
       analysisPayload = undefined;
       break;
@@ -679,6 +722,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
       break;
     case "scaffold_activity":
       analysisKind = "activity_scaffold";
+      break;
+    case "scaffold_trigger":
+      analysisKind = "trigger_scaffold";
       break;
     case "preview_mapping":
       analysisKind = "mapping_preview";

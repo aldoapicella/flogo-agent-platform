@@ -64,8 +64,10 @@ type contribDescriptor struct {
 	Version            string           `json:"version,omitempty"`
 	Title              string           `json:"title,omitempty"`
 	Settings           []contribField   `json:"settings"`
+	HandlerSettings    []contribField   `json:"handlerSettings,omitempty"`
 	Inputs             []contribField   `json:"inputs"`
 	Outputs            []contribField   `json:"outputs"`
+	Reply              []contribField   `json:"reply,omitempty"`
 	Examples           []string         `json:"examples"`
 	CompatibilityNotes []string         `json:"compatibilityNotes"`
 	Source             string           `json:"source,omitempty"`
@@ -339,6 +341,21 @@ type activityScaffoldRequest struct {
 	Usage        string         `json:"usage,omitempty"`
 }
 
+type triggerScaffoldRequest struct {
+	TriggerName     string         `json:"triggerName"`
+	ModulePath      string         `json:"modulePath"`
+	PackageName     string         `json:"packageName,omitempty"`
+	Title           string         `json:"title"`
+	Description     string         `json:"description"`
+	Version         string         `json:"version"`
+	Homepage        string         `json:"homepage,omitempty"`
+	Settings        []contribField `json:"settings"`
+	HandlerSettings []contribField `json:"handlerSettings"`
+	Outputs         []contribField `json:"outputs"`
+	Replies         []contribField `json:"replies"`
+	Usage           string         `json:"usage,omitempty"`
+}
+
 type generatedContribFile struct {
 	Path    string `json:"path"`
 	Kind    string `json:"kind"`
@@ -374,6 +391,27 @@ type activityScaffoldResult struct {
 
 type activityScaffoldResponse struct {
 	Result activityScaffoldResult `json:"result"`
+}
+
+type triggerScaffoldBundle struct {
+	Kind        string                 `json:"kind"`
+	ModulePath  string                 `json:"modulePath"`
+	PackageName string                 `json:"packageName"`
+	BundleRoot  string                 `json:"bundleRoot"`
+	Descriptor  contribDescriptor      `json:"descriptor"`
+	Files       []generatedContribFile `json:"files"`
+	ReadmePath  string                 `json:"readmePath,omitempty"`
+}
+
+type triggerScaffoldResult struct {
+	Bundle     triggerScaffoldBundle `json:"bundle"`
+	Validation validationReport      `json:"validation"`
+	Build      contribProofStep      `json:"build"`
+	Test       contribProofStep      `json:"test"`
+}
+
+type triggerScaffoldResponse struct {
+	Result triggerScaffoldResult `json:"result"`
 }
 
 type runTraceCaptureOptions struct {
@@ -2699,7 +2737,7 @@ var supportedRuntimeActivityRefs = map[string]bool{
 
 func main() {
 	if len(os.Args) < 3 {
-		fail("expected a command such as 'catalog contribs', 'inspect descriptor', 'preview mapping', or 'contrib scaffold-activity'")
+		fail("expected a command such as 'catalog contribs', 'inspect descriptor', 'preview mapping', 'contrib scaffold-activity', or 'contrib scaffold-trigger'")
 	}
 
 	command := strings.Join(os.Args[1:3], " ")
@@ -2709,6 +2747,14 @@ func main() {
 			fail("missing required --request flag")
 		}
 		encode(scaffoldActivity(loadActivityScaffoldRequest(requestPath)))
+		return
+	}
+	if command == "contrib scaffold-trigger" {
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(scaffoldTrigger(loadTriggerScaffoldRequest(requestPath)))
 		return
 	}
 
@@ -2983,8 +3029,37 @@ func loadActivityScaffoldRequest(inputPath string) activityScaffoldRequest {
 	return request
 }
 
-const scaffoldedActivityCoreVersion = "v1.6.17"
-const scaffoldedActivityGoVersion = "1.24.0"
+func loadTriggerScaffoldRequest(inputPath string) triggerScaffoldRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var request triggerScaffoldRequest
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+	if request.Version == "" {
+		request.Version = "0.0.1"
+	}
+	if request.Settings == nil {
+		request.Settings = []contribField{}
+	}
+	if request.HandlerSettings == nil {
+		request.HandlerSettings = []contribField{}
+	}
+	if request.Outputs == nil {
+		request.Outputs = []contribField{}
+	}
+	if request.Replies == nil {
+		request.Replies = []contribField{}
+	}
+
+	return request
+}
+
+const scaffoldedContributionCoreVersion = "v1.6.17"
+const scaffoldedContributionGoVersion = "1.24.0"
 
 func scaffoldActivity(request activityScaffoldRequest) activityScaffoldResponse {
 	if err := validateActivityScaffoldRequest(request); err != nil {
@@ -3012,6 +3087,46 @@ func scaffoldActivity(request activityScaffoldRequest) activityScaffoldResponse 
 		Result: activityScaffoldResult{
 			Bundle: activityScaffoldBundle{
 				Kind:        "activity",
+				ModulePath:  strings.TrimSpace(request.ModulePath),
+				PackageName: packageName,
+				BundleRoot:  bundleRoot,
+				Descriptor:  descriptor,
+				Files:       files,
+				ReadmePath:  filepath.ToSlash(filepath.Join(bundleRoot, "README.md")),
+			},
+			Validation: validation,
+			Build:      buildProof,
+			Test:       testProof,
+		},
+	}
+}
+
+func scaffoldTrigger(request triggerScaffoldRequest) triggerScaffoldResponse {
+	if err := validateTriggerScaffoldRequest(request); err != nil {
+		fail(err.Error())
+	}
+
+	packageName := sanitizePackageName(valueOrFallback(request.PackageName, request.TriggerName))
+	descriptor := buildScaffoldedTriggerDescriptor(request, packageName)
+	bundleRoot, err := os.MkdirTemp("", fmt.Sprintf("flogo-trigger-%s-", packageName))
+	if err != nil {
+		fail(err.Error())
+	}
+
+	files, err := writeScaffoldedTriggerFiles(bundleRoot, request, descriptor, packageName)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	prepareProof := runGoContributionCommand(bundleRoot, "mod", "tidy")
+	testProof := runGoContributionCommand(bundleRoot, "test", "./...")
+	buildProof := runGoContributionCommand(bundleRoot, "build", "./...")
+	validation := buildTriggerScaffoldValidation(prepareProof, testProof, buildProof)
+
+	return triggerScaffoldResponse{
+		Result: triggerScaffoldResult{
+			Bundle: triggerScaffoldBundle{
+				Kind:        "trigger",
 				ModulePath:  strings.TrimSpace(request.ModulePath),
 				PackageName: packageName,
 				BundleRoot:  bundleRoot,
@@ -3068,6 +3183,49 @@ func validateActivityScaffoldRequest(request activityScaffoldRequest) error {
 	return nil
 }
 
+func validateTriggerScaffoldRequest(request triggerScaffoldRequest) error {
+	problems := []string{}
+	if strings.TrimSpace(request.TriggerName) == "" {
+		problems = append(problems, "triggerName is required")
+	}
+	if strings.TrimSpace(request.ModulePath) == "" {
+		problems = append(problems, "modulePath is required")
+	}
+	if strings.TrimSpace(request.Title) == "" {
+		problems = append(problems, "title is required")
+	}
+	if strings.TrimSpace(request.Description) == "" {
+		problems = append(problems, "description is required")
+	}
+
+	for _, group := range []struct {
+		name   string
+		fields []contribField
+	}{
+		{name: "settings", fields: request.Settings},
+		{name: "handlerSettings", fields: request.HandlerSettings},
+		{name: "outputs", fields: request.Outputs},
+		{name: "replies", fields: request.Replies},
+	} {
+		for _, field := range group.fields {
+			if strings.TrimSpace(field.Name) == "" {
+				problems = append(problems, fmt.Sprintf("%s field names must be non-empty", group.name))
+			}
+			switch normalizeScaffoldFieldType(field.Type) {
+			case "string", "integer", "number", "boolean", "object", "array", "any":
+			default:
+				problems = append(problems, fmt.Sprintf("unsupported trigger scaffold field type %q in %s", field.Type, group.name))
+			}
+		}
+	}
+
+	if len(problems) > 0 {
+		return fmt.Errorf("%s", strings.Join(problems, "; "))
+	}
+
+	return nil
+}
+
 func buildScaffoldedActivityDescriptor(request activityScaffoldRequest, packageName string) contribDescriptor {
 	descriptorName := slugify(valueOrFallback(request.ActivityName, packageName))
 	return contribDescriptor{
@@ -3085,6 +3243,30 @@ func buildScaffoldedActivityDescriptor(request activityScaffoldRequest, packageN
 		CompatibilityNotes: []string{
 			"Generated by the Phase 4.1 activity scaffold foundation.",
 			"Review the generated Eval logic before installing the activity into an application.",
+		},
+	}
+}
+
+func buildScaffoldedTriggerDescriptor(request triggerScaffoldRequest, packageName string) contribDescriptor {
+	descriptorName := slugify(valueOrFallback(request.TriggerName, packageName))
+	return contribDescriptor{
+		Ref:             strings.TrimSpace(request.ModulePath),
+		Alias:           packageName,
+		Type:            "trigger",
+		Name:            descriptorName,
+		Version:         valueOrFallback(strings.TrimSpace(request.Version), "0.0.1"),
+		Title:           strings.TrimSpace(request.Title),
+		Settings:        request.Settings,
+		HandlerSettings: request.HandlerSettings,
+		Outputs:         request.Outputs,
+		Reply:           request.Replies,
+		Examples: []string{
+			fmt.Sprintf("Import %q and bind %q to a flow handler before publishing the trigger.", strings.TrimSpace(request.ModulePath), descriptorName),
+		},
+		Source: "trigger_scaffold",
+		CompatibilityNotes: []string{
+			"Generated by the Phase 4.2 trigger scaffold foundation.",
+			"Review Start, handler dispatch, and reply wiring before installing the trigger into an application.",
 		},
 	}
 }
@@ -3134,6 +3316,51 @@ func writeScaffoldedActivityFiles(bundleRoot string, request activityScaffoldReq
 	return files, nil
 }
 
+func writeScaffoldedTriggerFiles(bundleRoot string, request triggerScaffoldRequest, descriptor contribDescriptor, packageName string) ([]generatedContribFile, error) {
+	if err := os.MkdirAll(bundleRoot, 0o755); err != nil {
+		return nil, err
+	}
+
+	files := []generatedContribFile{}
+	write := func(relPath string, kind string, content string) error {
+		fullPath := filepath.Join(bundleRoot, relPath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+			return err
+		}
+		files = append(files, generatedContribFile{
+			Path:    filepath.ToSlash(fullPath),
+			Kind:    kind,
+			Bytes:   len(content),
+			Content: content,
+		})
+		return nil
+	}
+
+	if err := write("descriptor.json", "descriptor", renderTriggerDescriptorJSON(request, descriptor)); err != nil {
+		return nil, err
+	}
+	if err := write("go.mod", "module", renderContributionGoMod(strings.TrimSpace(request.ModulePath))); err != nil {
+		return nil, err
+	}
+	if err := write("metadata.go", "metadata", renderTriggerMetadata(request, packageName)); err != nil {
+		return nil, err
+	}
+	if err := write("trigger.go", "implementation", renderTriggerImplementation(request, packageName)); err != nil {
+		return nil, err
+	}
+	if err := write("trigger_test.go", "test", renderTriggerTest(request, packageName)); err != nil {
+		return nil, err
+	}
+	if err := write("README.md", "readme", renderTriggerReadme(request, descriptor, packageName)); err != nil {
+		return nil, err
+	}
+
+	return files, nil
+}
+
 func renderActivityDescriptorJSON(request activityScaffoldRequest, descriptor contribDescriptor) string {
 	payload := map[string]any{
 		"name":        descriptor.Name,
@@ -3156,16 +3383,45 @@ func renderActivityDescriptorJSON(request activityScaffoldRequest, descriptor co
 	return string(bytes) + "\n"
 }
 
-func renderActivityGoMod(request activityScaffoldRequest) string {
+func renderTriggerDescriptorJSON(request triggerScaffoldRequest, descriptor contribDescriptor) string {
+	payload := map[string]any{
+		"name":        descriptor.Name,
+		"type":        "flogo:trigger",
+		"version":     descriptor.Version,
+		"title":       descriptor.Title,
+		"description": strings.TrimSpace(request.Description),
+		"settings":    descriptor.Settings,
+		"output":      descriptor.Outputs,
+		"reply":       descriptor.Reply,
+		"handler": map[string]any{
+			"settings": descriptor.HandlerSettings,
+		},
+	}
+	if request.Homepage != "" {
+		payload["homepage"] = strings.TrimSpace(request.Homepage)
+	}
+
+	bytes, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		fail(err.Error())
+	}
+	return string(bytes) + "\n"
+}
+
+func renderContributionGoMod(modulePath string) string {
 	return fmt.Sprintf("module %s\n\ngo %s\n\nrequire github.com/project-flogo/core %s\n",
-		strings.TrimSpace(request.ModulePath),
-		scaffoldedActivityGoVersion,
-		scaffoldedActivityCoreVersion,
+		strings.TrimSpace(modulePath),
+		scaffoldedContributionGoVersion,
+		scaffoldedContributionCoreVersion,
 	)
 }
 
+func renderActivityGoMod(request activityScaffoldRequest) string {
+	return renderContributionGoMod(request.ModulePath)
+}
+
 func renderActivityMetadata(request activityScaffoldRequest, packageName string) string {
-	useCoerce := len(request.Inputs) > 0 || len(request.Outputs) > 0
+	useCoerce := scaffoldFieldsRequireCoerce(request.Inputs, request.Outputs)
 	var builder strings.Builder
 	builder.WriteString("package " + packageName + "\n\n")
 	if useCoerce {
@@ -3185,6 +3441,33 @@ func renderActivityMetadata(request activityScaffoldRequest, packageName string)
 	builder.WriteString(renderFromMapMethod("Output", "o", request.Outputs))
 	builder.WriteString("\n")
 	builder.WriteString(renderToMapMethod("Output", "o", request.Outputs))
+
+	return builder.String()
+}
+
+func renderTriggerMetadata(request triggerScaffoldRequest, packageName string) string {
+	useCoerce := scaffoldFieldsRequireCoerce(request.Outputs, request.Replies)
+	var builder strings.Builder
+	builder.WriteString("package " + packageName + "\n\n")
+	if useCoerce {
+		builder.WriteString("import \"github.com/project-flogo/core/data/coerce\"\n\n")
+	}
+
+	builder.WriteString(renderMetadataStruct("Settings", request.Settings))
+	builder.WriteString("\n")
+	builder.WriteString(renderMetadataStruct("HandlerSettings", request.HandlerSettings))
+	builder.WriteString("\n")
+	builder.WriteString(renderMetadataStruct("Output", request.Outputs))
+	builder.WriteString("\n")
+	builder.WriteString(renderFromMapMethod("Output", "o", request.Outputs))
+	builder.WriteString("\n")
+	builder.WriteString(renderToMapMethod("Output", "o", request.Outputs))
+	builder.WriteString("\n")
+	builder.WriteString(renderMetadataStruct("Reply", request.Replies))
+	builder.WriteString("\n")
+	builder.WriteString(renderFromMapMethod("Reply", "r", request.Replies))
+	builder.WriteString("\n")
+	builder.WriteString(renderToMapMethod("Reply", "r", request.Replies))
 
 	return builder.String()
 }
@@ -3271,6 +3554,55 @@ func renderActivityImplementation(request activityScaffoldRequest, packageName s
 	return builder.String()
 }
 
+func renderTriggerImplementation(request triggerScaffoldRequest, packageName string) string {
+	var builder strings.Builder
+	builder.WriteString("package " + packageName + "\n\n")
+	builder.WriteString("import (\n")
+	builder.WriteString("\t\"github.com/project-flogo/core/data/metadata\"\n")
+	builder.WriteString("\t\"github.com/project-flogo/core/trigger\"\n")
+	builder.WriteString(")\n\n")
+	builder.WriteString("func init() {\n")
+	builder.WriteString("\t_ = trigger.Register(&Trigger{}, &Factory{})\n")
+	builder.WriteString("}\n\n")
+	builder.WriteString("var triggerMd = trigger.NewMetadata(&Settings{}, &HandlerSettings{}, &Output{}, &Reply{})\n\n")
+	builder.WriteString("// Factory creates configured trigger instances for the generated scaffold.\n")
+	builder.WriteString("type Factory struct{}\n\n")
+	builder.WriteString("func (f *Factory) Metadata() *trigger.Metadata {\n")
+	builder.WriteString("\treturn triggerMd\n")
+	builder.WriteString("}\n\n")
+	builder.WriteString("func (f *Factory) New(config *trigger.Config) (trigger.Trigger, error) {\n")
+	builder.WriteString("\tsettings := &Settings{}\n")
+	builder.WriteString("\tif err := metadata.MapToStruct(config.Settings, settings, true); err != nil {\n")
+	builder.WriteString("\t\treturn nil, err\n\t}\n")
+	builder.WriteString("\treturn &Trigger{settings: settings}, nil\n")
+	builder.WriteString("}\n\n")
+	builder.WriteString("// Trigger is a scaffolded Flogo trigger. Review handler dispatch before production use.\n")
+	builder.WriteString("type Trigger struct {\n")
+	builder.WriteString("\tsettings *Settings\n")
+	builder.WriteString("\thandlers []trigger.Handler\n")
+	builder.WriteString("}\n\n")
+	builder.WriteString("func (t *Trigger) Metadata() *trigger.Metadata {\n")
+	builder.WriteString("\treturn triggerMd\n")
+	builder.WriteString("}\n\n")
+	builder.WriteString("func (t *Trigger) Initialize(ctx trigger.InitContext) error {\n")
+	builder.WriteString("\tt.handlers = ctx.GetHandlers()\n")
+	builder.WriteString("\tfor _, handler := range t.handlers {\n")
+	builder.WriteString("\t\thandlerSettings := &HandlerSettings{}\n")
+	builder.WriteString("\t\tif err := metadata.MapToStruct(handler.Settings(), handlerSettings, true); err != nil {\n")
+	builder.WriteString("\t\t\treturn err\n\t\t}\n")
+	builder.WriteString("\t}\n")
+	builder.WriteString("\treturn nil\n")
+	builder.WriteString("}\n\n")
+	builder.WriteString("// Start is where the scaffold should connect its event source to configured handlers.\n")
+	builder.WriteString("func (t *Trigger) Start() error {\n")
+	builder.WriteString("\treturn nil\n")
+	builder.WriteString("}\n\n")
+	builder.WriteString("func (t *Trigger) Stop() error {\n")
+	builder.WriteString("\treturn nil\n")
+	builder.WriteString("}\n")
+	return builder.String()
+}
+
 func renderActivityTest(request activityScaffoldRequest, packageName string) string {
 	var builder strings.Builder
 	builder.WriteString("package " + packageName + "\n\n")
@@ -3306,6 +3638,43 @@ func renderActivityTest(request activityScaffoldRequest, packageName string) str
 	return builder.String()
 }
 
+func renderTriggerTest(request triggerScaffoldRequest, packageName string) string {
+	var builder strings.Builder
+	builder.WriteString("package " + packageName + "\n\n")
+	builder.WriteString("import (\n")
+	builder.WriteString("\t\"testing\"\n\n")
+	builder.WriteString("\t\"github.com/project-flogo/core/support\"\n")
+	builder.WriteString("\t\"github.com/project-flogo/core/trigger\"\n")
+	builder.WriteString(")\n\n")
+	builder.WriteString("func TestRegister(t *testing.T) {\n")
+	builder.WriteString("\tref := support.GetRef(&Trigger{})\n")
+	builder.WriteString("\tif trigger.GetFactory(ref) == nil {\n")
+	builder.WriteString("\t\tt.Fatalf(\"expected trigger factory %s to be registered\", ref)\n\t}\n")
+	builder.WriteString("}\n\n")
+	builder.WriteString("func TestFactoryNew(t *testing.T) {\n")
+	builder.WriteString("\tfactory := &Factory{}\n")
+	builder.WriteString("\tinstance, err := factory.New(&trigger.Config{\n")
+	builder.WriteString("\t\tId: \"sample-trigger\",\n")
+	builder.WriteString("\t\tSettings: map[string]interface{}{\n")
+	for _, field := range request.Settings {
+		builder.WriteString(fmt.Sprintf("\t\t\t%q: %s,\n", field.Name, goLiteralForField(field)))
+	}
+	builder.WriteString("\t\t},\n")
+	builder.WriteString("\t})\n")
+	builder.WriteString("\tif err != nil {\n")
+	builder.WriteString("\t\tt.Fatalf(\"new trigger: %v\", err)\n\t}\n")
+	builder.WriteString("\tif instance == nil {\n")
+	builder.WriteString("\t\tt.Fatal(\"expected trigger instance\")\n\t}\n")
+	builder.WriteString("\tif factory.Metadata() == nil {\n")
+	builder.WriteString("\t\tt.Fatal(\"expected metadata to be initialized\")\n\t}\n")
+	builder.WriteString("\tif err := instance.Start(); err != nil {\n")
+	builder.WriteString("\t\tt.Fatalf(\"start trigger: %v\", err)\n\t}\n")
+	builder.WriteString("\tif err := instance.Stop(); err != nil {\n")
+	builder.WriteString("\t\tt.Fatalf(\"stop trigger: %v\", err)\n\t}\n")
+	builder.WriteString("}\n")
+	return builder.String()
+}
+
 func renderActivityReadme(request activityScaffoldRequest, descriptor contribDescriptor, packageName string) string {
 	var builder strings.Builder
 	builder.WriteString("# " + valueOrFallback(strings.TrimSpace(request.Title), request.ActivityName) + "\n\n")
@@ -3323,6 +3692,30 @@ func renderActivityReadme(request activityScaffoldRequest, descriptor contribDes
 	builder.WriteString("- `activity_test.go`\n\n")
 	builder.WriteString("## Review note\n\n")
 	builder.WriteString("This is a scaffold foundation bundle. Review `Eval` and metadata before publishing or wiring it into an app.\n")
+	return builder.String()
+}
+
+func renderTriggerReadme(request triggerScaffoldRequest, descriptor contribDescriptor, packageName string) string {
+	var builder strings.Builder
+	builder.WriteString("# " + valueOrFallback(strings.TrimSpace(request.Title), request.TriggerName) + "\n\n")
+	builder.WriteString(strings.TrimSpace(request.Description) + "\n\n")
+	builder.WriteString("## Generated bundle\n\n")
+	builder.WriteString("- module path: `" + strings.TrimSpace(request.ModulePath) + "`\n")
+	builder.WriteString("- package name: `" + packageName + "`\n")
+	builder.WriteString("- trigger ref: `" + descriptor.Ref + "`\n")
+	builder.WriteString("- version: `" + descriptor.Version + "`\n\n")
+	builder.WriteString("## Files\n\n")
+	builder.WriteString("- `descriptor.json`\n")
+	builder.WriteString("- `go.mod`\n")
+	builder.WriteString("- `metadata.go`\n")
+	builder.WriteString("- `trigger.go`\n")
+	builder.WriteString("- `trigger_test.go`\n\n")
+	builder.WriteString("## Review note\n\n")
+	builder.WriteString("This is a scaffold foundation bundle. Review handler dispatch, reply wiring, and Start/Stop behavior before publishing or wiring the trigger into an app.\n")
+	if strings.TrimSpace(request.Usage) != "" {
+		builder.WriteString("\n## Usage note\n\n")
+		builder.WriteString(strings.TrimSpace(request.Usage) + "\n")
+	}
 	return builder.String()
 }
 
@@ -3386,6 +3779,25 @@ func buildActivityScaffoldValidation(prepareProof contribProofStep, testProof co
 	}
 }
 
+func buildTriggerScaffoldValidation(prepareProof contribProofStep, testProof contribProofStep, buildProof contribProofStep) validationReport {
+	stages := []validationStageResult{
+		{Stage: "structural", Ok: prepareProof.Ok, Diagnostics: diagnosticsForProof(prepareProof, "flogo.contrib.trigger.module_prepare_failed")},
+		{Stage: "regression", Ok: testProof.Ok, Diagnostics: diagnosticsForProof(testProof, "flogo.contrib.trigger.test_failed")},
+		{Stage: "build", Ok: buildProof.Ok, Diagnostics: diagnosticsForProof(buildProof, "flogo.contrib.trigger.build_failed")},
+	}
+	ok := prepareProof.Ok && buildProof.Ok && testProof.Ok
+	summary := "Trigger scaffold generated and passed isolated go test/build proof."
+	if !ok {
+		summary = "Trigger scaffold generated but isolated go test/build proof failed."
+	}
+	return validationReport{
+		Ok:        ok,
+		Stages:    stages,
+		Summary:   summary,
+		Artifacts: []map[string]any{},
+	}
+}
+
 func diagnosticsForProof(step contribProofStep, code string) []diagnostic {
 	if step.Ok {
 		return []diagnostic{}
@@ -3406,6 +3818,17 @@ func metadataTag(field contribField) string {
 		return fmt.Sprintf("md:\"%s,required\"", field.Name)
 	}
 	return fmt.Sprintf("md:\"%s\"", field.Name)
+}
+
+func scaffoldFieldsRequireCoerce(groups ...[]contribField) bool {
+	for _, fields := range groups {
+		for _, field := range fields {
+			if normalizeScaffoldFieldType(field.Type) != "any" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func normalizeScaffoldFieldType(value string) string {

@@ -284,6 +284,150 @@ describe("RunnerExecutorService", () => {
     ).rejects.toThrow(/Unsupported activity scaffold field type/);
   });
 
+  it("executes helper-backed trigger scaffolding and publishes bundle plus build/test proof artifacts", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          bundle: {
+            kind: "trigger",
+            modulePath: "example.com/acme/webhook",
+            packageName: "webhooktrigger",
+            bundleRoot: "/tmp/flogo-trigger-webhooktrigger",
+            descriptor: {
+              ref: "example.com/acme/webhook",
+              alias: "webhooktrigger",
+              type: "trigger",
+              name: "webhook-trigger",
+              version: "0.1.0",
+              title: "Webhook Trigger",
+              settings: [{ name: "basePath", type: "string", required: true }],
+              handlerSettings: [{ name: "route", type: "string", required: true }],
+              outputs: [{ name: "payload", type: "object" }],
+              reply: [{ name: "status", type: "integer" }],
+              examples: ["Import the module and bind it to a handler."],
+              compatibilityNotes: ["Generated scaffold"],
+              source: "trigger_scaffold"
+            },
+            files: [
+              { path: "/tmp/flogo-trigger-webhooktrigger/descriptor.json", kind: "descriptor", bytes: 180, content: "{}" },
+              { path: "/tmp/flogo-trigger-webhooktrigger/trigger.go", kind: "implementation", bytes: 420, content: "package webhooktrigger" }
+            ],
+            readmePath: "/tmp/flogo-trigger-webhooktrigger/README.md"
+          },
+          validation: {
+            ok: true,
+            summary: "Trigger scaffold generated and passed isolated go test/build proof.",
+            stages: [
+              { stage: "structural", ok: true, diagnostics: [] },
+              { stage: "regression", ok: true, diagnostics: [] },
+              { stage: "build", ok: true, diagnostics: [] }
+            ],
+            artifacts: []
+          },
+          build: {
+            kind: "build",
+            ok: true,
+            command: ["go", "build", "./..."],
+            exitCode: 0,
+            summary: "go build ./... succeeded",
+            output: ""
+          },
+          test: {
+            kind: "test",
+            ok: true,
+            command: ["go", "test", "./..."],
+            exitCode: 0,
+            summary: "go test ./... succeeded",
+            output: ""
+          }
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-trigger-scaffold",
+      jobKind: "custom_contrib",
+      stepType: "scaffold_trigger",
+      analysisKind: "trigger_scaffold",
+      snapshotUri: ".",
+      appPath: "flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://trigger-scaffold",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        triggerName: "Webhook Trigger",
+        modulePath: "example.com/acme/webhook",
+        title: "Webhook Trigger",
+        description: "Dispatches a webhook event",
+        version: "0.1.0",
+        settings: [{ name: "basePath", type: "string", required: true }],
+        handlerSettings: [{ name: "route", type: "string", required: true }],
+        outputs: [{ name: "payload", type: "object" }],
+        replies: [{ name: "status", type: "integer" }]
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    const bundleArtifact = result.artifacts.find((artifact) => artifact.type === "contrib_bundle");
+    const buildArtifact = result.artifacts.find((artifact) => artifact.type === "build_log");
+    const testArtifact = result.artifacts.find((artifact) => artifact.type === "test_report");
+    const bundleMetadata = bundleArtifact?.metadata as
+      | {
+          result?: {
+            bundle?: { kind?: string; packageName?: string; modulePath?: string; files?: Array<{ kind?: string }> };
+            validation?: { ok?: boolean };
+            build?: { ok?: boolean };
+            test?: { ok?: boolean };
+          };
+        }
+      | undefined;
+
+    expect(result.ok).toBe(true);
+    expect(bundleArtifact).toBeDefined();
+    expect(buildArtifact).toBeDefined();
+    expect(testArtifact).toBeDefined();
+    expect(bundleMetadata?.result?.bundle?.kind).toBe("trigger");
+    expect(bundleMetadata?.result?.bundle?.packageName).toBe("webhooktrigger");
+    expect(bundleMetadata?.result?.bundle?.modulePath).toBe("example.com/acme/webhook");
+    expect(bundleMetadata?.result?.bundle?.files?.some((file) => file.kind === "descriptor")).toBe(true);
+    expect(bundleMetadata?.result?.validation?.ok).toBe(true);
+    expect(bundleMetadata?.result?.build?.ok).toBe(true);
+    expect(bundleMetadata?.result?.test?.ok).toBe(true);
+  });
+
+  it("rejects invalid trigger scaffold input before dispatching the helper", async () => {
+    const service = new RunnerExecutorService();
+
+    await expect(
+      service.execute({
+        taskId: "task-invalid-trigger-scaffold",
+        jobKind: "custom_contrib",
+        stepType: "scaffold_trigger",
+        analysisKind: "trigger_scaffold",
+        snapshotUri: ".",
+        appPath: "flogo.json",
+        env: {},
+        envSecretRefs: {},
+        timeoutSeconds: 60,
+        artifactOutputUri: "memory://invalid-trigger-scaffold",
+        jobTemplateName: "flogo-runner",
+        analysisPayload: {
+          triggerName: "Broken Trigger",
+          modulePath: "example.com/acme/broken-trigger",
+          title: "Broken Trigger",
+          description: "Has an unsupported field type",
+          outputs: [{ name: "payload", type: "xml" }]
+        },
+        command: [],
+        containerArgs: []
+      })
+    ).rejects.toThrow(/Unsupported trigger scaffold field type/);
+  });
+
   it("executes helper-backed timer trace capture and persists timer runtime metadata", async () => {
     process.env.FLOGO_HELPER_BIN = await createHelperScript(
       JSON.stringify({

@@ -145,4 +145,61 @@ describe("orchestrator-http", () => {
     expect(spec.analysisPayload?.inputs).toEqual([{ name: "message", type: "string", required: true }]);
     expect(spec.analysisPayload?.outputs).toEqual([{ name: "message", type: "string" }]);
   });
+
+  it("routes trigger scaffold mode to the custom contribution runner step", () => {
+    const start: OrchestratorStartRequest = {
+      taskId: "task-trigger-scaffold",
+      request: {
+        type: "create",
+        projectId: "demo",
+        requestedBy: "operator",
+        summary: "Scaffold a trigger bundle",
+        inputs: {
+          mode: "trigger_scaffold",
+          triggerName: "Webhook Trigger",
+          modulePath: "example.com/acme/webhook",
+          packageName: "webhooktrigger",
+          title: "Webhook Trigger",
+          description: "Dispatches an internal webhook event",
+          version: "0.1.0",
+          homepage: "https://example.com/webhook",
+          usage: "Bind this trigger to one flow handler.",
+          settings: [{ name: "basePath", type: "string", required: true }],
+          handlerSettings: [{ name: "route", type: "string", required: true }],
+          outputs: [{ name: "payload", type: "object" }],
+          replies: [{ name: "status", type: "integer" }]
+        },
+        constraints: {
+          allowDependencyChanges: false,
+          allowCustomCode: false,
+          targetEnv: "dev",
+          requireApproval: true
+        }
+      },
+      requiredApprovals: [],
+      planSummary: "Scaffold trigger bundle",
+      steps: []
+    };
+
+    expect(resolveWorkflowRunnerSteps(start)).toEqual(["scaffold_trigger"]);
+
+    const spec = buildRunnerJobSpec(start, "scaffold_trigger");
+
+    expect(spec.jobKind).toBe("custom_contrib");
+    expect(spec.analysisKind).toBe("trigger_scaffold");
+    expect(spec.analysisPayload).toMatchObject({
+      triggerName: "Webhook Trigger",
+      modulePath: "example.com/acme/webhook",
+      packageName: "webhooktrigger",
+      title: "Webhook Trigger",
+      description: "Dispatches an internal webhook event",
+      version: "0.1.0",
+      homepage: "https://example.com/webhook",
+      usage: "Bind this trigger to one flow handler."
+    });
+    expect(spec.analysisPayload?.settings).toEqual([{ name: "basePath", type: "string", required: true }]);
+    expect(spec.analysisPayload?.handlerSettings).toEqual([{ name: "route", type: "string", required: true }]);
+    expect(spec.analysisPayload?.outputs).toEqual([{ name: "payload", type: "object" }]);
+    expect(spec.analysisPayload?.replies).toEqual([{ name: "status", type: "integer" }]);
+  });
 });

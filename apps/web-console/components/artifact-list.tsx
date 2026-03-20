@@ -14,20 +14,39 @@ function artifactSummary(artifact: ArtifactRef) {
   const validation = result && isRecord(result.validation) ? result.validation : undefined;
   const build = result && isRecord(result.build) ? result.build : undefined;
   const test = result && isRecord(result.test) ? result.test : undefined;
+  const kind = typeof bundle?.kind === "string" ? bundle.kind : undefined;
   const packageName = typeof bundle?.packageName === "string" ? bundle.packageName : undefined;
   const modulePath = typeof bundle?.modulePath === "string" ? bundle.modulePath : undefined;
+  const files = Array.isArray(bundle?.files) ? bundle.files.filter(isRecord) : [];
+  const generatedFileSummary =
+    files.length > 0
+      ? files
+          .map((file) => (typeof file.kind === "string" ? file.kind : null))
+          .filter((value): value is string => value !== null)
+          .join(", ")
+      : undefined;
   const validationOk = typeof validation?.ok === "boolean" ? validation.ok : undefined;
   const buildOk = typeof build?.ok === "boolean" ? build.ok : undefined;
   const testOk = typeof test?.ok === "boolean" ? test.ok : undefined;
 
-  if (!packageName && !modulePath && validationOk === undefined && buildOk === undefined && testOk === undefined) {
+  if (
+    !kind &&
+    !packageName &&
+    !modulePath &&
+    !generatedFileSummary &&
+    validationOk === undefined &&
+    buildOk === undefined &&
+    testOk === undefined
+  ) {
     return null;
   }
 
   return (
     <div className="meta">
+      {kind ? <div>contribution type: {kind}</div> : null}
       {packageName ? <div>package: {packageName}</div> : null}
       {modulePath ? <div>module: {modulePath}</div> : null}
+      {generatedFileSummary ? <div>generated files: {generatedFileSummary}</div> : null}
       {validationOk !== undefined ? <div>validation: {validationOk ? "passed" : "failed"}</div> : null}
       {testOk !== undefined ? <div>test proof: {testOk ? "passed" : "failed"}</div> : null}
       {buildOk !== undefined ? <div>build proof: {buildOk ? "passed" : "failed"}</div> : null}

@@ -70,6 +70,7 @@ Important current `inputs` conventions:
 - `mode = "run_comparison"` for helper-backed run comparison execution
 - `mode = "diagnosis"` for analysis-only diagnosis planning and recommendation
 - `mode = "activity_scaffold"` for analysis-only Flogo Activity bundle scaffolding
+- `mode = "trigger_scaffold"` for analysis-only Flogo Trigger bundle scaffolding
 - `mode = "governance"` for analysis-only alias/orphan/version validation
 - `mode = "composition_compare"` for analysis-only JSON vs programmatic comparison
 
@@ -721,7 +722,7 @@ Examples:
 - `replay_plan` and `replay_report` are now produced by the direct/helper-backed replay path; replay is runtime-backed on the same narrow supported direct-flow slice plus the narrow REST, timer, CLI, and Channel runtime slices, and otherwise remains simulated fallback, with `result.runtimeEvidence` making that distinction explicit.
 - `run_comparison_plan` and `run_comparison` are now produced from stored `run_trace` and `replay_report` artifacts, preferring recorder-backed runtime evidence and normalized step evidence when available, preferring REST envelope comparison or timer startup comparison when the matching artifacts carry those runtime slices, and falling back to nested-trace or summary-only replay payloads otherwise.
 - `diagnosis_report` is now produced by the analysis-only diagnosis loop; it summarizes problem category, subtype, supporting evidence references, recommended next action, recommended patch, confidence, and evidence quality while linking back to any nested trace, replay, or comparison artifacts used during the proof path, and its confidence payload is now explicitly calibrated against runtime-backed vs mixed vs artifact-backed vs simulated fallback evidence plus contract-inference-only cases.
-- `contrib_bundle` remains a defined artifact kind whose producing feature is not implemented yet.
+- `contrib_bundle` is now produced by the narrow Phase 4 Activity and Trigger scaffold slices and carries descriptor metadata, generated file summaries, and isolated build/test proof results for reviewable contribution bundles.
 - graph projections in Prisma exist, but the current runtime does not fully maintain them.
 - task persistence is live, but workspace snapshots and blob-backed artifact content are still planned work.
 - task persistence is live, app-analysis payload storage is live, but workspace snapshots and broader blob-backed artifact content are still planned work.

@@ -64,6 +64,7 @@ function getAnalysisMode(
   | "catalog"
   | "contrib_evidence"
   | "activity_scaffold"
+  | "trigger_scaffold"
   | "mapping_preview"
   | "mapping_test"
   | "property_plan"
@@ -90,6 +91,7 @@ function getAnalysisMode(
     mode === "catalog" ||
     mode === "contrib_evidence" ||
     mode === "activity_scaffold" ||
+    mode === "trigger_scaffold" ||
     mode === "mapping_preview" ||
     mode === "mapping_test" ||
     mode === "property_plan" ||
@@ -178,6 +180,8 @@ export class TaskPlanner {
       steps.push({ id: "evidence", label: "Inspect contribution evidence quality", tool: "runner.inspectContribEvidence" });
     } else if (analysisMode === "activity_scaffold") {
       steps.push({ id: "activity-scaffold", label: "Scaffold a custom Flogo activity bundle with isolated build/test proof", tool: "runner.scaffoldActivity" });
+    } else if (analysisMode === "trigger_scaffold") {
+      steps.push({ id: "trigger-scaffold", label: "Scaffold a custom Flogo trigger bundle with isolated build/test proof", tool: "runner.scaffoldTrigger" });
     } else if (analysisMode === "mapping_preview") {
       steps.push({ id: "mapping", label: "Preview mappings and suggest coercions", tool: "runner.previewMapping" });
       steps.push({ id: "properties", label: "Plan app properties and environment usage", tool: "flogo.planProperties" });
@@ -263,6 +267,15 @@ export class TaskPlanner {
           id: "activity-scaffold",
           label: "Scaffold a custom Flogo activity bundle with isolated build/test proof",
           tool: "runner.scaffoldActivity"
+        });
+        skipMutationTail = true;
+      }
+
+      if (/(scaffold trigger|custom trigger|author trigger|new flogo trigger|generate trigger bundle)/i.test(summary)) {
+        steps.push({
+          id: "trigger-scaffold",
+          label: "Scaffold a custom Flogo trigger bundle with isolated build/test proof",
+          tool: "runner.scaffoldTrigger"
         });
         skipMutationTail = true;
       }

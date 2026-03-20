@@ -183,7 +183,8 @@ Check:
 
 - contribution catalog and mapping preview are implemented,
 - deeper Core-native composition is not yet implemented,
-- flow contracts, runtime trace capture, replay, and run comparison are now implemented; contribution scaffolding is still a roadmap item.
+- flow contracts, runtime trace capture, replay, and run comparison are now implemented,
+- narrow Activity and Trigger contribution scaffolding are implemented with isolated build/test proof; broader package/install workflows remain later work.
 
 ### Storage
 

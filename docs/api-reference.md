@@ -64,6 +64,7 @@ Important analysis-only modes:
 - `inputs.mode = "run_comparison"`
 - `inputs.mode = "diagnosis"`
 - `inputs.mode = "activity_scaffold"`
+- `inputs.mode = "trigger_scaffold"`
 - `inputs.mode = "mapping_preview"`
 - `inputs.mode = "mapping_test"`
 - `inputs.mode = "property_plan"`
@@ -169,7 +170,34 @@ Important behavior:
 - the planner routes the task to a single runner `scaffold_activity` step,
 - the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path,
 - supported field types are currently limited to `string`, `integer`, `number`, `boolean`, `object`, `array`, and `any`,
-- this slice covers Activity authoring only; trigger/action scaffolding and packaging/install workflows remain later work.
+- this slice covers Activity authoring only; action scaffolding plus broader package/install workflows remain later work.
+
+### Trigger scaffold task mode
+
+Uses the existing task endpoint with `inputs.mode = "trigger_scaffold"` to scaffold one reviewable Flogo Trigger bundle and run isolated Go build/test proof against that generated bundle.
+
+Important input fields:
+
+- `triggerName`
+- `modulePath`
+- `packageName?`
+- `title`
+- `description`
+- `version?`
+- `homepage?`
+- `settings[]`
+- `handlerSettings[]`
+- `outputs[]`
+- `replies[]`
+- `usage?`
+
+Important behavior:
+
+- trigger scaffolding is analysis-oriented and does not install the generated bundle into an app in this slice,
+- the planner routes the task to a single runner `scaffold_trigger` step,
+- the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path,
+- supported field types are currently limited to `string`, `integer`, `number`, `boolean`, `object`, `array`, and `any`,
+- this slice covers Trigger authoring only; action scaffolding plus broader package/install workflows remain later work.
 
 ### `GET /v1/tasks`
 

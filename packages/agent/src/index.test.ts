@@ -137,3 +137,53 @@ describe("TaskPlanner activity scaffold mode", () => {
     expect(plan.steps.some((step) => step.tool === "runner.buildApp")).toBe(false);
   });
 });
+
+describe("TaskPlanner trigger scaffold mode", () => {
+  it("treats explicit trigger scaffold mode as analysis-only authoring work", () => {
+    const planner = new TaskPlanner();
+    const plan = planner.plan({
+      type: "create",
+      projectId: "demo",
+      requestedBy: "operator",
+      summary: "Scaffold a custom Flogo trigger bundle",
+      inputs: {
+        mode: "trigger_scaffold",
+        triggerName: "Webhook Trigger",
+        modulePath: "example.com/acme/webhook"
+      },
+      constraints: {
+        allowDependencyChanges: false,
+        allowCustomCode: false,
+        targetEnv: "dev",
+        requireApproval: true
+      }
+    });
+
+    expect(plan.steps.map((step) => step.tool)).toEqual([
+      "flogo.parseApp",
+      "flogo.validateApp",
+      "runner.scaffoldTrigger"
+    ]);
+  });
+
+  it("routes plain-English trigger authoring prompts to the scaffold path without a mutation tail", () => {
+    const planner = new TaskPlanner();
+    const plan = planner.plan({
+      type: "create",
+      projectId: "demo",
+      requestedBy: "operator",
+      summary: "Generate a new custom trigger bundle for an internal webhook source",
+      inputs: {},
+      constraints: {
+        allowDependencyChanges: false,
+        allowCustomCode: false,
+        targetEnv: "dev",
+        requireApproval: true
+      }
+    });
+
+    expect(plan.steps.map((step) => step.tool)).toContain("runner.scaffoldTrigger");
+    expect(plan.steps.some((step) => step.tool === "flogo.patchApp")).toBe(false);
+    expect(plan.steps.some((step) => step.tool === "runner.buildApp")).toBe(false);
+  });
+});

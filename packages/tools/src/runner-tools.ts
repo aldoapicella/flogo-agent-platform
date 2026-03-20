@@ -388,6 +388,24 @@ export class RunnerTools {
     });
   }
 
+  async scaffoldTrigger(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "scaffold_trigger",
+      jobKind: "custom_contrib",
+      analysisKind: "trigger_scaffold"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued trigger scaffold job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
   async validateGovernance(spec: unknown): Promise<ToolResponse> {
     const parsed = RunnerJobSpecSchema.parse(spec);
     const result = await this.dispatcher.dispatch({
