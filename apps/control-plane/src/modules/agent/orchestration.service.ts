@@ -389,7 +389,26 @@ export class OrchestrationService {
       };
     }
 
-    if (mode === "install_contrib_plan" || mode === "update_contrib_plan" || mode === "update_contrib_diff_plan" || mode === "install_contrib_diff_plan" || mode === "install_contrib_apply") {
+    if (
+      mode === "update_contrib_apply" &&
+      typeof inputs["updateDiffPlanArtifactId"] === "string" &&
+      !inputs["updateDiffPlanArtifact"] &&
+      !inputs["updateDiffPlanResult"]
+    ) {
+      const artifact = await this.taskStore.getArtifact(inputs["updateDiffPlanArtifactId"] as string);
+      if (!artifact) {
+        throw new Error(`Contribution update-diff artifact ${String(inputs["updateDiffPlanArtifactId"])} was not found`);
+      }
+      if (artifact.type !== "contrib_update_diff_plan") {
+        throw new Error(`Artifact ${artifact.id} is ${artifact.type}, expected contrib_update_diff_plan`);
+      }
+      inputs = {
+        ...inputs,
+        updateDiffPlanArtifact: artifact
+      };
+    }
+
+    if (mode === "install_contrib_plan" || mode === "update_contrib_plan" || mode === "update_contrib_diff_plan" || mode === "install_contrib_diff_plan" || mode === "install_contrib_apply" || mode === "update_contrib_apply") {
       const targetApp =
         inputs["targetApp"] && typeof inputs["targetApp"] === "object" && !Array.isArray(inputs["targetApp"])
           ? (inputs["targetApp"] as Record<string, unknown>)
@@ -448,6 +467,24 @@ export class OrchestrationService {
           : artifactDiffResult?.targetApp && typeof artifactDiffResult.targetApp === "object" && !Array.isArray(artifactDiffResult.targetApp)
             ? (artifactDiffResult.targetApp as Record<string, unknown>)
             : undefined;
+      const inlineUpdateDiffResult =
+        inputs["updateDiffPlanResult"] && typeof inputs["updateDiffPlanResult"] === "object" && !Array.isArray(inputs["updateDiffPlanResult"])
+          ? (inputs["updateDiffPlanResult"] as Record<string, unknown>)
+          : undefined;
+      const artifactUpdateDiffResult =
+        inputs["updateDiffPlanArtifact"] &&
+        typeof inputs["updateDiffPlanArtifact"] === "object" &&
+        !Array.isArray(inputs["updateDiffPlanArtifact"]) &&
+        typeof (inputs["updateDiffPlanArtifact"] as Record<string, unknown>).metadata === "object" &&
+        !Array.isArray((inputs["updateDiffPlanArtifact"] as Record<string, unknown>).metadata)
+          ? ((((inputs["updateDiffPlanArtifact"] as Record<string, unknown>).metadata as Record<string, unknown>).result as Record<string, unknown> | undefined))
+          : undefined;
+      const updateDiffTargetApp =
+        inlineUpdateDiffResult?.targetApp && typeof inlineUpdateDiffResult.targetApp === "object" && !Array.isArray(inlineUpdateDiffResult.targetApp)
+          ? (inlineUpdateDiffResult.targetApp as Record<string, unknown>)
+          : artifactUpdateDiffResult?.targetApp && typeof artifactUpdateDiffResult.targetApp === "object" && !Array.isArray(artifactUpdateDiffResult.targetApp)
+            ? (artifactUpdateDiffResult.targetApp as Record<string, unknown>)
+            : undefined;
 
       if (!appPath && parsedRequest.appId) {
         appPath = await this.flogoAppsService.resolveTaskAppPath(parsedRequest.projectId, parsedRequest.appId);
@@ -464,19 +501,23 @@ export class OrchestrationService {
       if (!appPath && diffTargetApp && typeof diffTargetApp["appPath"] === "string") {
         appPath = diffTargetApp["appPath"] as string;
       }
+      if (!appPath && updateDiffTargetApp && typeof updateDiffTargetApp["appPath"] === "string") {
+        appPath = updateDiffTargetApp["appPath"] as string;
+      }
       if (!appPath) {
         const resolvedAppId =
           parsedRequest.appId ??
           (typeof targetApp["appId"] === "string" ? (targetApp["appId"] as string) : undefined) ??
           (planTargetApp && typeof planTargetApp["appId"] === "string" ? (planTargetApp["appId"] as string) : undefined) ??
           (updatePlanTargetApp && typeof updatePlanTargetApp["appId"] === "string" ? (updatePlanTargetApp["appId"] as string) : undefined) ??
-          (diffTargetApp && typeof diffTargetApp["appId"] === "string" ? (diffTargetApp["appId"] as string) : undefined);
+          (diffTargetApp && typeof diffTargetApp["appId"] === "string" ? (diffTargetApp["appId"] as string) : undefined) ??
+          (updateDiffTargetApp && typeof updateDiffTargetApp["appId"] === "string" ? (updateDiffTargetApp["appId"] as string) : undefined);
         if (resolvedAppId) {
           appPath = await this.flogoAppsService.resolveTaskAppPath(parsedRequest.projectId, resolvedAppId);
         }
       }
       if (!appPath) {
-        throw new Error("Contribution install/update planning, exact diff preview, and install apply require a target appPath or a resolvable appId.");
+        throw new Error("Contribution install/update planning, exact diff preview, and install/update apply require a target appPath or a resolvable appId.");
       }
 
       inputs = {
@@ -485,6 +526,7 @@ export class OrchestrationService {
           ...planTargetApp,
           ...updatePlanTargetApp,
           ...diffTargetApp,
+          ...updateDiffTargetApp,
           ...targetApp,
           projectId: parsedRequest.projectId,
           appId:
@@ -492,7 +534,8 @@ export class OrchestrationService {
             (typeof targetApp["appId"] === "string" ? (targetApp["appId"] as string) : undefined) ??
             (planTargetApp && typeof planTargetApp["appId"] === "string" ? (planTargetApp["appId"] as string) : undefined) ??
             (updatePlanTargetApp && typeof updatePlanTargetApp["appId"] === "string" ? (updatePlanTargetApp["appId"] as string) : undefined) ??
-            (diffTargetApp && typeof diffTargetApp["appId"] === "string" ? (diffTargetApp["appId"] as string) : undefined),
+            (diffTargetApp && typeof diffTargetApp["appId"] === "string" ? (diffTargetApp["appId"] as string) : undefined) ??
+            (updateDiffTargetApp && typeof updateDiffTargetApp["appId"] === "string" ? (updateDiffTargetApp["appId"] as string) : undefined),
           appPath
         }
       };
@@ -515,7 +558,7 @@ export class OrchestrationService {
 
     if (!this.storage.isConfigured()) {
       throw new Error(
-        "Contribution artifact storage is not configured. Set APP_ANALYSIS_STORAGE_CONNECTION_STRING, AZURITE_CONNECTION_STRING, or DURABLE_STORAGE_CONNECTION_STRING before running contribution scaffold, validate, package, install-plan, update-plan, update-diff-plan, install-diff-plan, or install-apply tasks."
+        "Contribution artifact storage is not configured. Set APP_ANALYSIS_STORAGE_CONNECTION_STRING, AZURITE_CONNECTION_STRING, or DURABLE_STORAGE_CONNECTION_STRING before running contribution scaffold, validate, package, install-plan, update-plan, update-diff-plan, install-diff-plan, install-apply, or update-apply tasks."
       );
     }
 
@@ -550,7 +593,7 @@ export class OrchestrationService {
   private shouldPersistTaskArtifact(
     artifact: ArtifactRef
   ): artifact is ArtifactRef & {
-    type: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "contrib_install_plan" | "contrib_update_plan" | "contrib_update_diff_plan" | "contrib_install_diff_plan" | "contrib_install_apply_result" | "build_log" | "test_report" | "flogo_json";
+    type: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "contrib_install_plan" | "contrib_update_plan" | "contrib_update_diff_plan" | "contrib_install_diff_plan" | "contrib_install_apply_result" | "contrib_update_apply" | "build_log" | "test_report" | "flogo_json";
     metadata: Record<string, unknown>;
   } {
     return (
@@ -563,6 +606,7 @@ export class OrchestrationService {
         artifact.type === "contrib_update_diff_plan" ||
         artifact.type === "contrib_install_diff_plan" ||
         artifact.type === "contrib_install_apply_result" ||
+        artifact.type === "contrib_update_apply" ||
         artifact.type === "flogo_json" ||
         artifact.type === "build_log" ||
         artifact.type === "test_report"
@@ -582,6 +626,9 @@ export class OrchestrationService {
       return "patch";
     }
     if (tool.includes("installContribApply")) {
+      return "patch";
+    }
+    if (tool.includes("updateContribApply")) {
       return "patch";
     }
     if (tool.includes("buildApp") || tool.includes("runSmoke")) {

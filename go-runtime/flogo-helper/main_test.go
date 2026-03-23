@@ -1667,6 +1667,347 @@ func TestValidateContributionInstallApplyRequestRequiresPreviewBasis(t *testing.
 	}
 }
 
+func TestApplyContributionUpdateDiffWritesCanonicalMutation(t *testing.T) {
+	app := flogoApp{
+		Name:     "update-apply-app",
+		Type:     "flogo:app",
+		AppModel: "1.1.0",
+		Imports: []flogoImport{
+			{Alias: "webhooktrigger", Ref: "example.com/acme/webhook", Version: "0.1.0"},
+		},
+		Triggers:  []flogoTrigger{},
+		Resources: []flogoFlow{},
+		Raw: map[string]any{
+			"name":     "update-apply-app",
+			"type":     "flogo:app",
+			"appModel": "1.1.0",
+			"imports": []any{
+				map[string]any{
+					"alias":   "webhooktrigger",
+					"ref":     "example.com/acme/webhook",
+					"version": "0.1.0",
+				},
+			},
+		},
+	}
+	appPath := filepath.Join(t.TempDir(), "flogo.json")
+	if err := os.WriteFile(appPath, []byte(canonicalJSONString(app.Raw)), 0o644); err != nil {
+		t.Fatalf("expected seed app write to succeed, got %v", err)
+	}
+
+	response := scaffoldTrigger(triggerScaffoldRequest{
+		TriggerName: "Webhook Trigger",
+		ModulePath:  "example.com/acme/webhook",
+		PackageName: "webhooktrigger",
+		Title:       "Webhook Trigger",
+		Description: "Dispatches an internal webhook event.",
+		Version:     "0.2.0",
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	plan := planContributionUpdate(app, appPath, contributionUpdatePlanRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundleFromTrigger(result.Bundle),
+			Validation: result.Validation,
+			Build:      result.Build,
+			Test:       result.Test,
+		},
+		Source: "inline_result",
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   appPath,
+		},
+	})
+
+	diff := planContributionUpdateDiff(app, appPath, contributionUpdateDiffPlanRequest{
+		UpdatePlan:         plan.Result,
+		UpdatePlanArtifact: "update-plan-artifact-1",
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   appPath,
+		},
+	})
+
+	applied := applyContributionUpdateDiff(app, appPath, contributionUpdateApplyRequest{
+		UpdateDiffPlan:     diff.Result,
+		UpdateDiffArtifact: "update-diff-artifact-1",
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   appPath,
+		},
+	})
+
+	if !applied.Result.Applied {
+		t.Fatalf("expected update apply to materialize the saved canonical mutation, got %+v", applied.Result)
+	}
+	if applied.Result.IsStale {
+		t.Fatalf("expected fresh update diff preview to remain non-stale during apply, got %+v", applied.Result)
+	}
+	if applied.Result.CanonicalAfterJSON == "" || applied.Result.CanonicalAfterJSON == applied.Result.CanonicalBeforeJSON {
+		t.Fatalf("expected canonical after document to differ from before, got %+v", applied.Result)
+	}
+	if !containsString(applied.Result.ChangedPaths, "imports") {
+		t.Fatalf("expected imports to remain the applied changed path, got %+v", applied.Result)
+	}
+	if len(applied.Result.AppliedImports) != 1 || applied.Result.AppliedImports[0].Alias != "webhooktrigger" {
+		t.Fatalf("expected applied import summary to preserve the planned alias, got %+v", applied.Result.AppliedImports)
+	}
+	if applied.Result.CanonicalApp["imports"] == nil {
+		t.Fatalf("expected canonical app payload to include imports, got %+v", applied.Result.CanonicalApp)
+	}
+	if applied.Result.BasedOnUpdateDiff.SourceArtifact != "update-diff-artifact-1" {
+		t.Fatalf("expected apply result to retain diff artifact id, got %+v", applied.Result.BasedOnUpdateDiff)
+	}
+	if applied.Result.AppFingerprintAfter == "" || applied.Result.AppFingerprintAfter == applied.Result.AppFingerprintBefore {
+		t.Fatalf("expected apply fingerprints to reflect the canonical mutation, got %+v", applied.Result)
+	}
+	written, err := os.ReadFile(appPath)
+	if err != nil {
+		t.Fatalf("expected applied app to be written, got %v", err)
+	}
+	if string(written) != applied.Result.CanonicalAfterJSON {
+		t.Fatalf("expected written flogo.json to match the applied canonical preview")
+	}
+}
+
+func TestApplyContributionUpdateDiffRejectsDriftedApps(t *testing.T) {
+	app := flogoApp{
+		Name:     "update-apply-drifted-app",
+		Type:     "flogo:app",
+		AppModel: "1.1.0",
+		Imports: []flogoImport{
+			{Alias: "webhooktrigger", Ref: "example.com/acme/webhook", Version: "0.1.0"},
+		},
+		Triggers:  []flogoTrigger{},
+		Resources: []flogoFlow{},
+		Raw: map[string]any{
+			"name":     "update-apply-drifted-app",
+			"type":     "flogo:app",
+			"appModel": "1.1.0",
+			"imports": []any{
+				map[string]any{
+					"alias":   "webhooktrigger",
+					"ref":     "example.com/acme/webhook",
+					"version": "0.1.0",
+				},
+			},
+		},
+	}
+	appPath := filepath.Join(t.TempDir(), "flogo.json")
+	if err := os.WriteFile(appPath, []byte(canonicalJSONString(app.Raw)), 0o644); err != nil {
+		t.Fatalf("expected seed app write to succeed, got %v", err)
+	}
+
+	response := scaffoldTrigger(triggerScaffoldRequest{
+		TriggerName: "Webhook Trigger",
+		ModulePath:  "example.com/acme/webhook",
+		PackageName: "webhooktrigger",
+		Title:       "Webhook Trigger",
+		Description: "Dispatches an internal webhook event.",
+		Version:     "0.2.0",
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	plan := planContributionUpdate(app, appPath, contributionUpdatePlanRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundleFromTrigger(result.Bundle),
+			Validation: result.Validation,
+			Build:      result.Build,
+			Test:       result.Test,
+		},
+		Source: "inline_result",
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   appPath,
+		},
+	})
+
+	diff := planContributionUpdateDiff(app, appPath, contributionUpdateDiffPlanRequest{
+		UpdatePlan: plan.Result,
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   appPath,
+		},
+	})
+
+	driftedRaw := cloneStringAnyMap(app.Raw)
+	driftedRaw["imports"] = append(buildRawImports(app.Imports), map[string]any{
+		"alias": "alreadyInstalled",
+		"ref":   "example.com/acme/already",
+	})
+	driftedApp := normalizeApp(driftedRaw)
+
+	applied := applyContributionUpdateDiff(driftedApp, appPath, contributionUpdateApplyRequest{
+		UpdateDiffPlan: diff.Result,
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   appPath,
+		},
+	})
+
+	if !applied.Result.IsStale {
+		t.Fatalf("expected drifted app to fail update apply as stale, got %+v", applied.Result)
+	}
+	if applied.Result.Applied {
+		t.Fatalf("expected stale update apply to avoid mutation, got %+v", applied.Result)
+	}
+	if applied.Result.CanonicalAfterJSON != "" {
+		t.Fatalf("expected stale update apply to avoid emitting an applied canonical after document, got %+v", applied.Result)
+	}
+	if !strings.Contains(applied.Result.StaleReason, "changed after the exact update diff preview") {
+		t.Fatalf("expected stale reason to mention app drift, got %+v", applied.Result)
+	}
+	written, err := os.ReadFile(appPath)
+	if err != nil {
+		t.Fatalf("expected drifted app file to remain readable, got %v", err)
+	}
+	if string(written) != canonicalJSONString(app.Raw) {
+		t.Fatalf("expected stale update apply to leave the canonical app file unchanged")
+	}
+}
+
+func TestApplyContributionUpdateDiffSupportsNoOpPreview(t *testing.T) {
+	app := flogoApp{
+		Name:     "update-apply-noop-app",
+		Type:     "flogo:app",
+		AppModel: "1.1.0",
+		Imports: []flogoImport{
+			{Alias: "webhooktrigger", Ref: "example.com/acme/webhook", Version: "0.2.0"},
+		},
+		Triggers:  []flogoTrigger{},
+		Resources: []flogoFlow{},
+		Raw: map[string]any{
+			"name":     "update-apply-noop-app",
+			"type":     "flogo:app",
+			"appModel": "1.1.0",
+			"imports": []any{
+				map[string]any{
+					"alias":   "webhooktrigger",
+					"ref":     "example.com/acme/webhook",
+					"version": "0.2.0",
+				},
+			},
+		},
+	}
+	appPath := filepath.Join(t.TempDir(), "flogo.json")
+	if err := os.WriteFile(appPath, []byte(canonicalJSONString(app.Raw)), 0o644); err != nil {
+		t.Fatalf("expected seed app write to succeed, got %v", err)
+	}
+
+	response := scaffoldTrigger(triggerScaffoldRequest{
+		TriggerName: "Webhook Trigger",
+		ModulePath:  "example.com/acme/webhook",
+		PackageName: "webhooktrigger",
+		Title:       "Webhook Trigger",
+		Description: "Dispatches an internal webhook event.",
+		Version:     "0.2.0",
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	plan := planContributionUpdate(app, appPath, contributionUpdatePlanRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundleFromTrigger(result.Bundle),
+			Validation: result.Validation,
+			Build:      result.Build,
+			Test:       result.Test,
+		},
+		Source: "inline_result",
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   appPath,
+		},
+	})
+
+	diff := planContributionUpdateDiff(app, appPath, contributionUpdateDiffPlanRequest{
+		UpdatePlan: plan.Result,
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   appPath,
+		},
+	})
+
+	applied := applyContributionUpdateDiff(app, appPath, contributionUpdateApplyRequest{
+		UpdateDiffPlan: diff.Result,
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   appPath,
+		},
+	})
+
+	if applied.Result.Applied {
+		t.Fatalf("expected no-op preview to remain not-applied, got %+v", applied.Result)
+	}
+	if applied.Result.IsStale {
+		t.Fatalf("expected no-op preview to remain fresh, got %+v", applied.Result)
+	}
+	if applied.Result.AppFingerprintAfter != applied.Result.AppFingerprintBefore {
+		t.Fatalf("expected no-op apply to preserve the canonical fingerprint, got %+v", applied.Result)
+	}
+	if !containsString(applied.Result.ApplySummary, "No canonical mutation was required by the saved exact diff preview.") {
+		t.Fatalf("expected no-op update apply summary, got %+v", applied.Result.ApplySummary)
+	}
+	written, err := os.ReadFile(appPath)
+	if err != nil {
+		t.Fatalf("expected no-op app file to remain readable, got %v", err)
+	}
+	if string(written) != canonicalJSONString(app.Raw) {
+		t.Fatalf("expected no-op update apply to leave the canonical app file unchanged")
+	}
+}
+
+func TestValidateContributionUpdateApplyRequestRequiresPreviewBasis(t *testing.T) {
+	err := validateContributionUpdateApplyRequest(contributionUpdateApplyRequest{
+		UpdateDiffPlan: contributionUpdateDiffPlanResult{
+			ContributionKind: "trigger",
+			SourceContribution: contributionInstallDiffSource{
+				Kind:          "trigger",
+				ModulePath:    "example.com/acme/webhook",
+				SelectedAlias: "webhooktrigger",
+			},
+			PreviewAvailable:     true,
+			AppFingerprintBefore: "fingerprint",
+			CanonicalBeforeJSON:  "{}",
+			PredictedChanges: contributionUpdateDiffPredictedChanges{
+				ChangedPaths: []string{"imports"},
+			},
+		},
+	})
+
+	if err == nil {
+		t.Fatal("expected missing canonical after document to fail")
+	}
+	if !strings.Contains(err.Error(), "updateDiffPlan.canonicalAfterJson is required") {
+		t.Fatalf("expected missing canonical after error, got %v", err)
+	}
+}
+
 func TestTraceFlowDistinguishesRuntimeBackedAndSimulatedPaths(t *testing.T) {
 	t.Run("runtime-backed direct trace", func(t *testing.T) {
 		app := runtimeBackedTraceTestApp()

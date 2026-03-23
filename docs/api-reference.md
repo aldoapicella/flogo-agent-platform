@@ -78,7 +78,7 @@ Important analysis-only modes:
 - `inputs.mode = "governance"`
 - `inputs.mode = "composition_compare"`
 
-Those modes route the task through analysis-oriented runner steps that avoid patch/build/smoke work. The current explicit mutating exception in the contribution lifecycle is `install_contrib_apply`, which routes to one review-gated runner step instead of the generic mutation tail.
+Those modes route the task through analysis-oriented runner steps that avoid patch/build/smoke work. The current explicit mutating exceptions in the contribution lifecycle are `install_contrib_apply` and `update_contrib_apply`, which route to one review-gated runner step instead of the generic mutation tail.
 
 Example:
 
@@ -346,7 +346,7 @@ Important behavior:
 - the task persists a `contrib_install_apply_result` artifact plus a resulting `flogo_json` artifact through the same Blob/Azurite storage seam used for the rest of the contribution lifecycle,
 - the helper revalidates target-app identity, canonical before JSON, and app fingerprints from the saved diff preview before writing,
 - if the app drifted or the diff preview is insufficient, the apply step fails honestly without mutating the target app,
-- conservative update planning now exists separately, but exact update diff/apply remain explicitly deferred.
+- conservative update planning and exact update diff preview now exist separately, but review-gated update apply only becomes available through the new Phase 4.10 slice.
 
 ### Contribution update-plan task mode
 
@@ -375,7 +375,7 @@ Important behavior:
 - the helper inspects the current target-app imports, aliases, refs, and installed contribution inventory to distinguish exact, likely, ambiguous, and missing installed matches,
 - the result is conservative and review-oriented: it includes detected installed-contribution evidence, match quality, compatibility, predicted imports/refs to replace or keep, changed canonical paths expected in a later diff workflow, warnings, conflicts, readiness, recommended next action, and explicit limitations,
 - malformed input, missing durable storage, no installed match, or ambiguous installed state fail honestly or lower readiness rather than pretending the update is safe,
-- review-gated update apply remains explicitly deferred.
+- exact update diff preview and review-gated update apply now exist as later explicit slices rather than hidden install-style behavior.
 
 ### Contribution update-diff-plan task mode
 
@@ -398,7 +398,30 @@ Important behavior:
 - the task persists a `contrib_update_diff_plan` artifact through the same Blob/Azurite storage seam used for the rest of the contribution lifecycle,
 - the helper computes the exact predicted canonical import mutation preview against the current `flogo.json`, including before/after fingerprints, changed paths, diff summary, predicted import/ref rewrites, and recommended next action,
 - if the target app drifted from the update-plan basis, the update-plan fingerprint no longer matches, or the saved plan is too weak to support an exact preview safely, the diff preview fails honestly or marks the result stale instead of pretending the preview is safe,
-- review-gated update apply remains explicitly deferred.
+- the exact preview is still non-mutating and must be approved through a later review-gated update-apply task before any canonical app change is written.
+
+### Contribution update-apply task mode
+
+Uses the existing task endpoint with `inputs.mode = "update_contrib_apply"` to consume one previously generated exact update diff preview, require approval, revalidate drift, and apply that exact canonical `flogo.json` mutation to the target app.
+
+Important input fields:
+
+- `updateDiffPlanArtifactId?`
+- `updateDiffPlanArtifact?`
+- `updateDiffPlanResult?`
+- `targetApp.projectId`
+- `targetApp.appId`
+- `targetApp.appPath?`
+
+Important behavior:
+
+- update apply is review-gated and mutating rather than analysis-only,
+- the planner routes the task to a single runner `update_contrib_apply` step and requires the explicit `update_contribution` approval type before the runner executes,
+- the task accepts exactly one existing exact update-diff source through a persisted `contrib_update_diff_plan` artifact id, inline artifact metadata, or inline result payload,
+- the task persists a `contrib_update_apply` artifact plus a resulting `flogo_json` artifact through the same Blob/Azurite storage seam used for the rest of the contribution lifecycle,
+- the helper revalidates target-app identity, canonical before JSON, and app fingerprints from the saved update diff preview before writing,
+- if the app drifted, the reviewed preview is stale, or the diff preview is insufficient, the apply step fails honestly without mutating the target app,
+- uninstall, broader lifecycle management, and marketplace/publish behavior remain explicitly deferred.
 
 ### `GET /v1/tasks`
 
@@ -1270,7 +1293,7 @@ Request shape:
 Workflow behavior:
 
 - mutating workflows use build/run/smoke-oriented runner steps,
-- mutating contribution-install workflows now also include the approval-gated `install_contrib_apply` runner step,
+- mutating contribution-install/update workflows now also include the approval-gated `install_contrib_apply` and `update_contrib_apply` runner steps,
 - analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, `preview_mapping`, `infer_flow_contracts`, `extract_subflow`, `inline_subflow`, `add_iterator`, `add_retry_policy`, `add_dowhile`, `add_error_path`, `diagnose_app`, `scaffold_activity`, `scaffold_action`, `scaffold_trigger`, `validate_contrib`, `package_contrib`, `install_contrib_plan`, `install_contrib_diff_plan`, `update_contrib_plan`, or `update_contrib_diff_plan`.
 - analysis-only workflows also support `test_mapping` and `plan_properties`.
 

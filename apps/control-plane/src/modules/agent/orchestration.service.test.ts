@@ -136,6 +136,7 @@ class FakeAppAnalysisStorageService {
       | "contrib_install_plan"
       | "contrib_install_diff_plan"
       | "contrib_install_apply_result"
+      | "contrib_update_apply"
       | "contrib_update_plan"
       | "contrib_update_diff_plan"
       | "build_log"
@@ -829,6 +830,180 @@ describe("OrchestrationService", () => {
     });
   });
 
+  it("submits update apply tasks as approval-gated workflows and resolves the update diff artifact", async () => {
+    const storage = new FakeAppAnalysisStorageService();
+    const taskStore = new FakeTaskStoreService();
+    const service = new OrchestrationService(
+      new ToolsetService(),
+      new OrchestratorClientService(),
+      new TaskEventsService(),
+      taskStore as any,
+      {
+        prepareRunComparisonTaskInputs: async (_projectId: string, _appId: string, inputs: Record<string, unknown>) => inputs,
+        resolveTaskAppPath: async () => "examples/hello-rest/flogo.json"
+      } as any,
+      storage as AppAnalysisStorageService
+    );
+
+    const seedTask = await service.submitTask({
+      type: "review",
+      projectId: "demo",
+      appId: "hello-rest",
+      summary: "Seed contribution update diff artifact",
+      inputs: {
+        mode: "update_contrib_diff_plan",
+        updatePlanResult: {
+          contributionKind: "trigger",
+          sourceContribution: {
+            kind: "trigger",
+            modulePath: "example.com/acme/webhook",
+            packageName: "webhooktrigger",
+            selectedAlias: "webhooktrigger",
+            source: "package_artifact"
+          },
+          detectedInstalledContribution: {
+            alias: "webhooktrigger",
+            ref: "example.com/acme/webhook",
+            version: "0.1.0",
+            type: "trigger",
+            modulePath: "example.com/acme/webhook",
+            packageName: "webhooktrigger",
+            packagePath: "example.com/acme/webhook",
+            matchedBy: ["alias", "ref"],
+            confidence: "high"
+          },
+          targetApp: {
+            projectId: "demo",
+            appId: "hello-rest",
+            appPath: "examples/hello-rest/flogo.json"
+          },
+          basedOnUpdatePlan: {
+            sourceArtifactId: "update-plan-artifact-1",
+            appFingerprint: "app-sha",
+            planFingerprint: "plan-sha"
+          },
+          appFingerprintBefore: "app-sha",
+          updatePlanFingerprint: "plan-sha",
+          isStale: false,
+          previewAvailable: true,
+          updateReady: true,
+          readiness: "high",
+          warnings: [],
+          conflicts: [],
+          limitations: ["Diff preview only."],
+          predictedChanges: {
+            importsBefore: [],
+            importsAfter: [],
+            importsToReplace: [],
+            importsToKeep: [],
+            importsToAdd: [],
+            importsToRemove: [],
+            refsToReplace: [],
+            refsToKeep: [],
+            refsToAdd: [],
+            refsToRemove: [],
+            structuralChanges: [],
+            changedPaths: ["imports"],
+            diffEntries: [],
+            noMutation: true
+          },
+          diffSummary: ["imports: update alias \"webhooktrigger\" in place"],
+          canonicalBeforeJson: "{}",
+          canonicalAfterJson: "{\"imports\":[{\"alias\":\"webhooktrigger\",\"ref\":\"example.com/acme/webhook\"}]}",
+          recommendedNextAction: "Review the exact canonical update diff."
+        }
+      }
+    });
+
+    await service.syncTaskState(seedTask.id, {
+      artifact: {
+        id: "artifact-update-diff-plan-2",
+        type: "contrib_update_diff_plan",
+        name: "trigger-update-diff-plan-webhooktrigger",
+        uri: "memory://task/trigger-update-diff-plan-webhooktrigger.json",
+        metadata: {
+          result: {
+            contributionKind: "trigger",
+            sourceContribution: {
+              kind: "trigger",
+              modulePath: "example.com/acme/webhook",
+              packageName: "webhooktrigger",
+              selectedAlias: "webhooktrigger",
+              source: "package_artifact",
+              sourceArtifactId: "artifact-package-1"
+            },
+            detectedInstalledContribution: {
+              alias: "webhooktrigger",
+              ref: "example.com/acme/webhook",
+              version: "0.1.0",
+              type: "trigger",
+              modulePath: "example.com/acme/webhook",
+              packageName: "webhooktrigger",
+              packagePath: "example.com/acme/webhook",
+              matchedBy: ["alias", "ref"],
+              confidence: "high"
+            },
+            targetApp: { projectId: "demo", appId: "hello-rest", appPath: "examples/hello-rest/flogo.json" },
+            basedOnUpdatePlan: {
+              sourceArtifactId: "update-plan-artifact-1",
+              appFingerprint: "app-sha",
+              planFingerprint: "plan-sha"
+            },
+            appFingerprintBefore: "app-sha",
+            appFingerprintAfter: "after-sha",
+            updatePlanFingerprint: "plan-sha",
+            isStale: false,
+            previewAvailable: true,
+            updateReady: true,
+            readiness: "high",
+            warnings: [],
+            conflicts: [],
+            limitations: ["Diff preview only."],
+            predictedChanges: {
+              importsBefore: [],
+              importsAfter: [],
+              importsToReplace: [],
+              importsToKeep: [],
+              importsToAdd: [],
+              importsToRemove: [],
+              refsToReplace: [],
+              refsToKeep: [],
+              refsToAdd: [],
+              refsToRemove: [],
+              structuralChanges: ["Replace import alias \"webhooktrigger\" in place."],
+              changedPaths: ["imports"],
+              diffEntries: [],
+              noMutation: true
+            },
+            diffSummary: ["imports: update alias \"webhooktrigger\" in place"],
+            canonicalBeforeJson: "{}",
+            canonicalAfterJson: "{\"imports\":[{\"alias\":\"webhooktrigger\",\"ref\":\"example.com/acme/webhook\"}]}",
+            recommendedNextAction: "Approve update apply to write the canonical mutation."
+          }
+        }
+      }
+    });
+
+    const applyTask = await service.submitTask({
+      type: "update",
+      projectId: "demo",
+      appId: "hello-rest",
+      summary: "Apply the approved contribution update diff",
+      inputs: {
+        mode: "update_contrib_apply",
+        updateDiffPlanArtifactId: "artifact-update-diff-plan-2"
+      }
+    });
+
+    expect(applyTask.result.status).toBe("awaiting_approval");
+    expect(applyTask.result.approvalStatus).toBe("pending");
+    expect(applyTask.result.requiredApprovals).toEqual(["update_contribution"]);
+    expect(applyTask.request.inputs["updateDiffPlanArtifact"]).toMatchObject({
+      id: "artifact-update-diff-plan-2",
+      type: "contrib_update_diff_plan"
+    });
+  });
+
   it("persists install apply result and flogo_json artifacts through blob-backed task artifact storage", async () => {
     const storage = new FakeAppAnalysisStorageService();
     const service = new OrchestrationService(
@@ -918,6 +1093,109 @@ describe("OrchestrationService", () => {
 
     expect(storage.uploads).toHaveLength(2);
     expect(storage.uploads[0]?.kind).toBe("contrib_install_apply_result");
+    expect(storage.uploads[1]?.kind).toBe("flogo_json");
+  });
+
+  it("persists update apply result and flogo_json artifacts through blob-backed task artifact storage", async () => {
+    const storage = new FakeAppAnalysisStorageService();
+    const service = new OrchestrationService(
+      new ToolsetService(),
+      new OrchestratorClientService(),
+      new TaskEventsService(),
+      new FakeTaskStoreService() as any,
+      {
+        prepareRunComparisonTaskInputs: async (_projectId: string, _appId: string, inputs: Record<string, unknown>) => inputs,
+        resolveTaskAppPath: async () => "examples/hello-rest/flogo.json"
+      } as any,
+      storage as AppAnalysisStorageService
+    );
+
+    const task = await service.submitTask({
+      type: "update",
+      projectId: "demo",
+      appId: "hello-rest",
+      summary: "Apply the approved update diff"
+    });
+
+    await service.syncTaskState(task.id, {
+      artifact: {
+        id: "artifact-update-apply-1",
+        type: "contrib_update_apply",
+        name: "trigger-update-apply-webhooktrigger.json",
+        uri: "memory://task-4/trigger-update-apply-webhooktrigger.json",
+        metadata: {
+          result: {
+            contributionKind: "trigger",
+            sourceContribution: {
+              kind: "trigger",
+              modulePath: "example.com/acme/webhook",
+              packageName: "webhooktrigger",
+              selectedAlias: "webhooktrigger",
+              source: "package_artifact"
+            },
+            detectedInstalledContribution: {
+              alias: "webhooktrigger",
+              ref: "example.com/acme/webhook",
+              version: "0.1.0",
+              type: "trigger",
+              modulePath: "example.com/acme/webhook",
+              packageName: "webhooktrigger",
+              packagePath: "example.com/acme/webhook",
+              matchedBy: ["alias", "ref"],
+              confidence: "high"
+            },
+            targetApp: { appId: "hello-rest", appPath: "examples/hello-rest/flogo.json" },
+            basedOnUpdateDiffPlan: {
+              sourceArtifactId: "artifact-update-diff-plan-2",
+              updatePlanArtifactId: "update-plan-artifact-1",
+              diffFingerprint: "diff-sha",
+              appFingerprintBefore: "before-sha",
+              appFingerprintPreview: "after-sha"
+            },
+            appFingerprintBefore: "before-sha",
+            appFingerprintAfter: "after-sha",
+            isStale: false,
+            applied: true,
+            applyReady: true,
+            readiness: "high",
+            warnings: [],
+            conflicts: [],
+            limitations: [],
+            changedPaths: ["imports"],
+            appliedImports: [{ alias: "webhooktrigger", ref: "example.com/acme/webhook", action: "replace_existing" }],
+            appliedRefs: [{ surface: "triggerRef", value: "#webhooktrigger" }],
+            applySummary: ["Applied the approved contribution update to canonical flogo.json."],
+            canonicalBeforeJson: "{}",
+            canonicalAfterJson: "{\"imports\":[{\"alias\":\"webhooktrigger\",\"ref\":\"example.com/acme/webhook\"}]}",
+            canonicalApp: {
+              name: "hello-rest",
+              type: "flogo:app",
+              appModel: "1.1.0",
+              imports: [{ alias: "webhooktrigger", ref: "example.com/acme/webhook" }]
+            },
+            recommendedNextAction: "Review the updated canonical flogo.json artifact.",
+            approvalRequired: true,
+            mutationApplied: true
+          }
+        }
+      }
+    });
+
+    await service.syncTaskState(task.id, {
+      artifact: {
+        id: "artifact-flogo-json-2",
+        type: "flogo_json",
+        name: "task-4-hello-rest-flogo.json",
+        uri: "memory://task-4/hello-rest-flogo.json",
+        metadata: {
+          canonicalJson: "{\"imports\":[{\"alias\":\"webhooktrigger\",\"ref\":\"example.com/acme/webhook\"}]}",
+          appPath: "examples/hello-rest/flogo.json"
+        }
+      }
+    });
+
+    expect(storage.uploads).toHaveLength(2);
+    expect(storage.uploads[0]?.kind).toBe("contrib_update_apply");
     expect(storage.uploads[1]?.kind).toBe("flogo_json");
   });
 
@@ -1292,6 +1570,6 @@ describe("OrchestrationService", () => {
           }
         }
       })
-    ).rejects.toThrow(/contribution scaffold, validate, package, install-plan, update-plan, update-diff-plan, install-diff-plan, or install-apply tasks/i);
+    ).rejects.toThrow(/contribution scaffold, validate, package, install-plan, update-plan, update-diff-plan, install-diff-plan, install-apply, or update-apply tasks/i);
   });
 });

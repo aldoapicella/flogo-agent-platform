@@ -84,6 +84,7 @@ export class AppAnalysisStorageService {
       | "contrib_update_diff_plan"
       | "contrib_install_diff_plan"
       | "contrib_install_apply_result"
+      | "contrib_update_apply"
       | "build_log"
       | "test_report"
       | "flogo_json";

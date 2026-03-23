@@ -550,6 +550,24 @@ export class RunnerTools {
     });
   }
 
+  async updateContribApply(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "update_contrib_apply",
+      jobKind: "contrib_update_apply",
+      analysisKind: "update_contrib_apply"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued contribution update apply job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
   async validateGovernance(spec: unknown): Promise<ToolResponse> {
     const parsed = RunnerJobSpecSchema.parse(spec);
     const result = await this.dispatcher.dispatch({

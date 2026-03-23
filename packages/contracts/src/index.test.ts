@@ -6,6 +6,8 @@ import {
   ContributionInstallApplyResponseSchema,
   ContributionInstallDiffPlanRequestSchema,
   ContributionInstallDiffPlanResponseSchema,
+  ContributionUpdateApplyRequestSchema,
+  ContributionUpdateApplyResponseSchema,
   ContributionUpdateDiffPlanRequestSchema,
   ContributionUpdateDiffPlanResponseSchema,
   ContributionUpdatePlanRequestSchema,
@@ -25,6 +27,10 @@ import {
 describe("ApprovalTypeSchema", () => {
   it("accepts the explicit install contribution approval type", () => {
     expect(ApprovalTypeSchema.parse("install_contribution")).toBe("install_contribution");
+  });
+
+  it("accepts the explicit update contribution approval type", () => {
+    expect(ApprovalTypeSchema.parse("update_contribution")).toBe("update_contribution");
   });
 });
 
@@ -1102,5 +1108,87 @@ describe("ContributionInstallApplyResponseSchema", () => {
     expect(parsed.result.applied).toBe(true);
     expect(parsed.result.changedPaths).toEqual(["imports"]);
     expect(parsed.result.approvalRequired).toBe(true);
+  });
+});
+
+describe("ContributionUpdateApplyRequestSchema", () => {
+  it("accepts updateDiffPlanArtifactId for review-gated update apply", () => {
+    const parsed = ContributionUpdateApplyRequestSchema.parse({
+      updateDiffPlanArtifactId: "artifact-update-diff-1"
+    });
+
+    expect(parsed.updateDiffPlanArtifactId).toBe("artifact-update-diff-1");
+  });
+
+  it("rejects missing update diff plan input", () => {
+    expect(() => ContributionUpdateApplyRequestSchema.parse({})).toThrow(
+      /Provide updateDiffPlanArtifactId, updateDiffPlanArtifact, or updateDiffPlanResult/
+    );
+  });
+});
+
+describe("ContributionUpdateApplyResponseSchema", () => {
+  it("parses review-gated update apply results with canonical after-state metadata", () => {
+    const parsed = ContributionUpdateApplyResponseSchema.parse({
+      result: {
+        contributionKind: "trigger",
+        sourceContribution: {
+          kind: "trigger",
+          modulePath: "example.com/acme/webhook",
+          packageName: "webhooktrigger",
+          selectedAlias: "webhooktrigger",
+          source: "package_artifact",
+          sourceArtifactId: "artifact-package-1"
+        },
+        detectedInstalledContribution: {
+          alias: "webhooktrigger",
+          ref: "example.com/acme/webhook",
+          version: "0.1.0",
+          type: "trigger",
+          modulePath: "example.com/acme/webhook",
+          packageName: "webhooktrigger",
+          packagePath: "example.com/acme/webhook",
+          matchedBy: ["alias", "ref"],
+          confidence: "high"
+        },
+        targetApp: {
+          projectId: "demo",
+          appId: "hello-rest",
+          appPath: "examples/hello-rest/flogo.json"
+        },
+        basedOnUpdateDiffPlan: {
+          sourceArtifactId: "artifact-update-diff-1",
+          updatePlanArtifactId: "artifact-update-plan-1",
+          diffFingerprint: "diff-sha",
+          appFingerprintBefore: "before-sha",
+          appFingerprintPreview: "after-sha"
+        },
+        appFingerprintBefore: "before-sha",
+        appFingerprintAfter: "after-sha",
+        isStale: false,
+        applied: true,
+        applyReady: true,
+        readiness: "high",
+        warnings: [],
+        conflicts: [],
+        limitations: ["Update apply only."],
+        changedPaths: ["imports"],
+        appliedImports: [{ alias: "webhooktrigger", ref: "example.com/acme/webhook", action: "replace_existing" }],
+        appliedRefs: [{ surface: "triggerRef", value: "#webhooktrigger" }],
+        applySummary: ["Applied the approved contribution update to canonical flogo.json."],
+        canonicalBeforeJson: "{}",
+        canonicalAfterJson: "{\"imports\":[]}",
+        canonicalApp: {
+          name: "hello-rest",
+          type: "flogo:app"
+        },
+        recommendedNextAction: "Review the updated canonical flogo.json artifact.",
+        approvalRequired: true,
+        mutationApplied: true
+      }
+    });
+
+    expect(parsed.result.applied).toBe(true);
+    expect(parsed.result.basedOnUpdateDiffPlan.sourceArtifactId).toBe("artifact-update-diff-1");
   });
 });

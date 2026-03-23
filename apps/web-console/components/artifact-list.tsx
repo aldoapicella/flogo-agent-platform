@@ -13,7 +13,8 @@ function artifactSummary(artifact: ArtifactRef) {
       artifact.type !== "contrib_update_plan" &&
       artifact.type !== "contrib_update_diff_plan" &&
       artifact.type !== "contrib_install_diff_plan" &&
-      artifact.type !== "contrib_install_apply_result") ||
+      artifact.type !== "contrib_install_apply_result" &&
+      artifact.type !== "contrib_update_apply") ||
     !isRecord(artifact.metadata)
   ) {
     return null;
@@ -99,10 +100,14 @@ function artifactSummary(artifact: ArtifactRef) {
   const sourceDiffArtifactId =
     isRecord(result?.basedOnInstallDiffPlan) && typeof result.basedOnInstallDiffPlan.sourceArtifactId === "string"
       ? result.basedOnInstallDiffPlan.sourceArtifactId
+      : isRecord(result?.basedOnUpdateDiffPlan) && typeof result.basedOnUpdateDiffPlan.sourceArtifactId === "string"
+        ? result.basedOnUpdateDiffPlan.sourceArtifactId
       : undefined;
   const sourceUpdatePlanArtifactId =
     isRecord(result?.basedOnUpdatePlan) && typeof result.basedOnUpdatePlan.sourceArtifactId === "string"
       ? result.basedOnUpdatePlan.sourceArtifactId
+      : isRecord(result?.basedOnUpdateDiffPlan) && typeof result.basedOnUpdateDiffPlan.updatePlanArtifactId === "string"
+        ? result.basedOnUpdateDiffPlan.updatePlanArtifactId
       : undefined;
   const isStale = typeof result?.isStale === "boolean" ? result.isStale : undefined;
   const staleReason = typeof result?.staleReason === "string" ? result.staleReason : undefined;

@@ -121,6 +121,9 @@ export class PolicyEngine {
     if (task.inputs["mode"] === "install_contrib_apply") {
       return ["install_contribution"];
     }
+    if (task.inputs["mode"] === "update_contrib_apply") {
+      return ["update_contribution"];
+    }
 
     if (getAnalysisMode(task)) {
       return [];
@@ -157,7 +160,8 @@ export class TaskPlanner {
     const summary = task.summary.toLowerCase();
     const analysisMode = getAnalysisMode(task);
     const installApplyMode = task.inputs["mode"] === "install_contrib_apply";
-    let skipMutationTail = Boolean(analysisMode || installApplyMode);
+    const updateApplyMode = task.inputs["mode"] === "update_contrib_apply";
+    let skipMutationTail = Boolean(analysisMode || installApplyMode || updateApplyMode);
     const steps: ExecutionPlanStep[] = [
       { id: "graph", label: "Parse current Flogo graph", tool: "flogo.parseApp" },
       { id: "validate", label: "Validate structure and mappings", tool: "flogo.validateApp" }
@@ -220,6 +224,12 @@ export class TaskPlanner {
         id: "install-contrib-apply",
         label: "Apply one approved exact contribution install diff to canonical flogo.json after drift revalidation",
         tool: "runner.installContribApply"
+      });
+    } else if (updateApplyMode) {
+      steps.push({
+        id: "update-contrib-apply",
+        label: "Apply one approved exact contribution update diff to canonical flogo.json after drift revalidation",
+        tool: "runner.updateContribApply"
       });
     } else if (analysisMode === "mapping_preview") {
       steps.push({ id: "mapping", label: "Preview mappings and suggest coercions", tool: "runner.previewMapping" });

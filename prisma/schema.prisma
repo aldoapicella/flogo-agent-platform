@@ -38,6 +38,7 @@ enum ApprovalType {
   dependency_upgrade
   custom_code
   install_contribution
+  update_contribution
   external_endpoint_change
   deploy
 }
@@ -94,6 +95,7 @@ enum ArtifactKind {
   contrib_install_apply_result
   contrib_update_plan
   contrib_update_diff_plan
+  contrib_update_apply
 }
 
 model Organization {

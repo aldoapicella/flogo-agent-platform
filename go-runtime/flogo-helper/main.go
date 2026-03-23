@@ -833,6 +833,52 @@ type contributionInstallApplyResponse struct {
 	Result contributionInstallApplyResult `json:"result"`
 }
 
+type contributionUpdateApplyRequest struct {
+	UpdateDiffPlan        contributionUpdateDiffPlanResult `json:"updateDiffPlan"`
+	UpdateDiffArtifact    string                           `json:"updateDiffPlanArtifactId,omitempty"`
+	SourceUpdatePlanEntry string                           `json:"sourceUpdatePlanArtifactId,omitempty"`
+	TargetApp             contributionInstallTarget        `json:"targetApp,omitempty"`
+}
+
+type contributionUpdateApplyBasis struct {
+	SourceArtifact        string                     `json:"sourceArtifactId,omitempty"`
+	UpdatePlanArtifact    string                     `json:"updatePlanArtifactId,omitempty"`
+	DiffFingerprint       string                     `json:"diffFingerprint,omitempty"`
+	AppFingerprintBefore  string                     `json:"appFingerprintBefore,omitempty"`
+	AppFingerprintPreview string                     `json:"appFingerprintPreview,omitempty"`
+	TargetApp             *contributionInstallTarget `json:"targetApp,omitempty"`
+}
+
+type contributionUpdateApplyResult struct {
+	ContributionKind              string                                   `json:"contributionKind"`
+	SourceContribution            contributionInstallDiffSource            `json:"sourceContribution"`
+	DetectedInstalledContribution *contributionUpdateInstalledContribution `json:"detectedInstalledContribution,omitempty"`
+	TargetApp                     contributionInstallTarget                `json:"targetApp"`
+	BasedOnUpdateDiff             contributionUpdateApplyBasis             `json:"basedOnUpdateDiffPlan"`
+	AppFingerprintBefore          string                                   `json:"appFingerprintBefore"`
+	AppFingerprintAfter           string                                   `json:"appFingerprintAfter,omitempty"`
+	IsStale                       bool                                     `json:"isStale"`
+	StaleReason                   string                                   `json:"staleReason,omitempty"`
+	Applied                       bool                                     `json:"applied"`
+	ApplyReady                    bool                                     `json:"applyReady"`
+	Readiness                     string                                   `json:"readiness"`
+	Warnings                      []string                                 `json:"warnings"`
+	Conflicts                     []contributionInstallConflict            `json:"conflicts"`
+	Limitations                   []string                                 `json:"limitations"`
+	ChangedPaths                  []string                                 `json:"changedPaths"`
+	AppliedImports                []contributionInstallImportEntry         `json:"appliedImports"`
+	AppliedRefs                   []contributionInstallRefEntry            `json:"appliedRefs"`
+	ApplySummary                  []string                                 `json:"applySummary"`
+	CanonicalBeforeJSON           string                                   `json:"canonicalBeforeJson"`
+	CanonicalAfterJSON            string                                   `json:"canonicalAfterJson,omitempty"`
+	CanonicalApp                  map[string]any                           `json:"canonicalApp,omitempty"`
+	RecommendedNextAction         string                                   `json:"recommendedNextAction"`
+}
+
+type contributionUpdateApplyResponse struct {
+	Result contributionUpdateApplyResult `json:"result"`
+}
+
 type runTraceCaptureOptions struct {
 	IncludeFlowState       bool `json:"includeFlowState"`
 	IncludeActivityOutputs bool `json:"includeActivityOutputs"`
@@ -3156,7 +3202,7 @@ var supportedRuntimeActivityRefs = map[string]bool{
 
 func main() {
 	if len(os.Args) < 3 {
-		fail("expected a command such as 'catalog contribs', 'inspect descriptor', 'preview mapping', 'contrib scaffold-activity', 'contrib scaffold-action', 'contrib scaffold-trigger', 'contrib validate', 'contrib package', 'contrib install-plan', 'contrib update-plan', 'contrib update-diff-plan', 'contrib install-diff-plan', or 'contrib install-apply'")
+		fail("expected a command such as 'catalog contribs', 'inspect descriptor', 'preview mapping', 'contrib scaffold-activity', 'contrib scaffold-action', 'contrib scaffold-trigger', 'contrib validate', 'contrib package', 'contrib install-plan', 'contrib update-plan', 'contrib update-diff-plan', 'contrib install-diff-plan', 'contrib install-apply', or 'contrib update-apply'")
 	}
 
 	command := strings.Join(os.Args[1:3], " ")
@@ -3258,6 +3304,18 @@ func main() {
 			fail("missing required --request flag")
 		}
 		encode(applyContributionInstallDiff(loadApp(appPath), appPath, loadContributionInstallApplyRequest(requestPath)))
+		return
+	}
+	if command == "contrib update-apply" {
+		appPath := lookupFlag("--app")
+		if appPath == "" {
+			fail("missing required --app flag")
+		}
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(applyContributionUpdateDiff(loadApp(appPath), appPath, loadContributionUpdateApplyRequest(requestPath)))
 		return
 	}
 
@@ -3678,6 +3736,20 @@ func loadContributionInstallApplyRequest(inputPath string) contributionInstallAp
 	return request
 }
 
+func loadContributionUpdateApplyRequest(inputPath string) contributionUpdateApplyRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var request contributionUpdateApplyRequest
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+
+	return request
+}
+
 const scaffoldedContributionCoreVersion = "v1.6.17"
 const scaffoldedContributionGoVersion = "1.24.0"
 
@@ -4041,6 +4113,34 @@ func validateContributionInstallApplyRequest(request contributionInstallApplyReq
 	return nil
 }
 
+func validateContributionUpdateApplyRequest(request contributionUpdateApplyRequest) error {
+	diff := request.UpdateDiffPlan
+	switch strings.TrimSpace(diff.ContributionKind) {
+	case "activity", "action", "trigger":
+	default:
+		return fmt.Errorf("updateDiffPlan.contributionKind %q is unsupported", diff.ContributionKind)
+	}
+	if strings.TrimSpace(diff.SourceContribution.ModulePath) == "" {
+		return fmt.Errorf("updateDiffPlan.sourceContribution.modulePath is required")
+	}
+	if strings.TrimSpace(diff.SourceContribution.SelectedAlias) == "" {
+		return fmt.Errorf("updateDiffPlan.sourceContribution.selectedAlias is required")
+	}
+	if strings.TrimSpace(diff.AppFingerprintBefore) == "" {
+		return fmt.Errorf("updateDiffPlan.appFingerprintBefore is required")
+	}
+	if strings.TrimSpace(diff.CanonicalBeforeJSON) == "" {
+		return fmt.Errorf("updateDiffPlan.canonicalBeforeJson is required")
+	}
+	if len(diff.PredictedChanges.ChangedPaths) > 0 && strings.TrimSpace(diff.CanonicalAfterJSON) == "" {
+		return fmt.Errorf("updateDiffPlan.canonicalAfterJson is required when the preview includes canonical changes")
+	}
+	if !diff.PreviewAvailable && !diff.PredictedChanges.NoMutation {
+		return fmt.Errorf("updateDiffPlan must be previewAvailable before apply")
+	}
+	return nil
+}
+
 func normalizeContributionInstallSource(source string, sourceArtifact string, hasPackage bool) string {
 	normalized := strings.TrimSpace(source)
 	switch normalized {
@@ -4149,6 +4249,45 @@ func contributionInstallDiffPlanFingerprint(result contributionInstallDiffPlanRe
 		"diffSummary":            result.DiffSummary,
 		"canonicalBeforeJson":    result.CanonicalBeforeJSON,
 		"canonicalAfterJson":     result.CanonicalAfterJSON,
+	})
+}
+
+func contributionUpdateDiffPlanFingerprint(result contributionUpdateDiffPlanResult) string {
+	return hashProjection(map[string]any{
+		"contributionKind": result.ContributionKind,
+		"sourceContribution": map[string]any{
+			"kind":           result.SourceContribution.Kind,
+			"modulePath":     result.SourceContribution.ModulePath,
+			"packageName":    result.SourceContribution.PackageName,
+			"packagePath":    result.SourceContribution.PackagePath,
+			"descriptorRef":  result.SourceContribution.DescriptorRef,
+			"selectedAlias":  result.SourceContribution.SelectedAlias,
+			"source":         result.SourceContribution.Source,
+			"sourceArtifact": result.SourceContribution.SourceArtifact,
+		},
+		"detectedInstalledContribution": result.DetectedInstalledContribution,
+		"targetApp": map[string]any{
+			"projectId": result.TargetApp.ProjectID,
+			"appId":     result.TargetApp.AppID,
+			"appPath":   result.TargetApp.AppPath,
+			"appName":   result.TargetApp.AppName,
+		},
+		"basedOnUpdatePlan":     result.BasedOnUpdatePlan,
+		"appFingerprintBefore":  result.AppFingerprintBefore,
+		"appFingerprintAfter":   result.AppFingerprintAfter,
+		"updatePlanFingerprint": result.UpdatePlanFingerprint,
+		"isStale":               result.IsStale,
+		"staleReason":           result.StaleReason,
+		"previewAvailable":      result.PreviewAvailable,
+		"updateReady":           result.UpdateReady,
+		"readiness":             result.Readiness,
+		"warnings":              result.Warnings,
+		"conflicts":             result.Conflicts,
+		"limitations":           result.Limitations,
+		"predictedChanges":      result.PredictedChanges,
+		"diffSummary":           result.DiffSummary,
+		"canonicalBeforeJson":   result.CanonicalBeforeJSON,
+		"canonicalAfterJson":    result.CanonicalAfterJSON,
 	})
 }
 
@@ -5201,6 +5340,223 @@ func applyContributionInstallDiff(app flogoApp, appPath string, request contribu
 	}
 
 	return contributionInstallApplyResponse{Result: result}
+}
+
+func applyContributionUpdateDiff(app flogoApp, appPath string, request contributionUpdateApplyRequest) contributionUpdateApplyResponse {
+	if err := validateContributionUpdateApplyRequest(request); err != nil {
+		fail(err.Error())
+	}
+
+	diff := request.UpdateDiffPlan
+	targetApp := copyInstallTarget(diff.TargetApp)
+	overrideTarget := copyInstallTarget(request.TargetApp)
+	if overrideTarget.ProjectID != "" {
+		targetApp.ProjectID = overrideTarget.ProjectID
+	}
+	if overrideTarget.AppID != "" {
+		targetApp.AppID = overrideTarget.AppID
+	}
+	if overrideTarget.AppPath != "" {
+		targetApp.AppPath = overrideTarget.AppPath
+	}
+	if overrideTarget.AppName != "" {
+		targetApp.AppName = overrideTarget.AppName
+	}
+	if targetApp.AppPath == "" {
+		targetApp.AppPath = appPath
+	}
+	if targetApp.AppName == "" {
+		targetApp.AppName = app.Name
+	}
+
+	currentCanonicalBefore := canonicalJSONString(app.Raw)
+	currentFingerprint := appCanonicalFingerprint(app)
+	diffFingerprint := contributionUpdateDiffPlanFingerprint(diff)
+	warnings := cloneStringSlice(diff.Warnings)
+	conflicts := cloneContributionInstallConflicts(diff.Conflicts)
+	limitations := dedupeStrings(append(cloneStringSlice(diff.Limitations),
+		"Apply only materializes the previously previewed canonical flogo.json output for the reviewed update; it does not re-plan update decisions.",
+		"Contribution update apply currently mutates canonical imports only when the exact update diff preview carried a precise canonical-after document.",
+	))
+	changedPaths := dedupeStrings(cloneStringSlice(diff.PredictedChanges.ChangedPaths))
+	appliedImports := append(
+		cloneContributionInstallImportEntries(diff.PredictedChanges.ImportsToReplace),
+		cloneContributionInstallImportEntries(diff.PredictedChanges.ImportsToAdd)...,
+	)
+	appliedRefs := dedupeContributionInstallRefEntries(append(
+		cloneContributionInstallRefEntries(diff.PredictedChanges.RefsToReplace),
+		append(
+			cloneContributionInstallRefEntries(diff.PredictedChanges.RefsToAdd),
+			cloneContributionInstallRefEntries(diff.PredictedChanges.RefsToKeep)...,
+		)...,
+	))
+	applySummary := cloneStringSlice(diff.DiffSummary)
+
+	basisTarget := copyInstallTarget(diff.TargetApp)
+	result := contributionUpdateApplyResult{
+		ContributionKind:              diff.ContributionKind,
+		SourceContribution:            diff.SourceContribution,
+		DetectedInstalledContribution: diff.DetectedInstalledContribution,
+		TargetApp:                     targetApp,
+		BasedOnUpdateDiff: contributionUpdateApplyBasis{
+			SourceArtifact:        strings.TrimSpace(request.UpdateDiffArtifact),
+			UpdatePlanArtifact:    valueOrFallback(strings.TrimSpace(request.SourceUpdatePlanEntry), strings.TrimSpace(diff.BasedOnUpdatePlan.SourceArtifact)),
+			DiffFingerprint:       diffFingerprint,
+			AppFingerprintBefore:  strings.TrimSpace(diff.AppFingerprintBefore),
+			AppFingerprintPreview: strings.TrimSpace(diff.AppFingerprintAfter),
+			TargetApp:             &basisTarget,
+		},
+		AppFingerprintBefore:  currentFingerprint,
+		IsStale:               false,
+		Applied:               false,
+		ApplyReady:            diff.UpdateReady,
+		Readiness:             diff.Readiness,
+		Warnings:              warnings,
+		Conflicts:             conflicts,
+		Limitations:           limitations,
+		ChangedPaths:          changedPaths,
+		AppliedImports:        appliedImports,
+		AppliedRefs:           appliedRefs,
+		ApplySummary:          applySummary,
+		CanonicalBeforeJSON:   currentCanonicalBefore,
+		RecommendedNextAction: "Regenerate the exact update diff preview before attempting contribution update apply.",
+	}
+
+	if !sameInstallTarget(targetApp, diff.TargetApp) {
+		result.IsStale = true
+		result.StaleReason = "The update diff preview target app no longer matches the requested target app context."
+		result.ApplyReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, result.StaleReason)
+		result.ApplySummary = append(result.ApplySummary, "Update apply stopped because the target app context changed since exact diff preview.")
+		return contributionUpdateApplyResponse{Result: result}
+	}
+
+	if diff.IsStale {
+		result.IsStale = true
+		result.StaleReason = valueOrFallback(strings.TrimSpace(diff.StaleReason), "The exact update diff preview is already stale.")
+		result.ApplyReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, result.StaleReason)
+		result.ApplySummary = append(result.ApplySummary, "Update apply stopped because the saved exact diff preview is stale.")
+		return contributionUpdateApplyResponse{Result: result}
+	}
+
+	if !diff.PreviewAvailable {
+		result.ApplyReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, "Update apply requires a previewAvailable exact diff plan.")
+		result.ApplySummary = append(result.ApplySummary, "Update apply stopped because the saved diff preview was not materialized.")
+		return contributionUpdateApplyResponse{Result: result}
+	}
+
+	if !diff.UpdateReady {
+		result.ApplyReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, "Update apply requires an update-ready exact diff preview.")
+		result.ApplySummary = append(result.ApplySummary, "Update apply stopped because the saved exact diff preview was not marked update-ready.")
+		return contributionUpdateApplyResponse{Result: result}
+	}
+
+	if strings.TrimSpace(diff.AppFingerprintBefore) == "" {
+		result.IsStale = true
+		result.StaleReason = "The exact update diff preview does not record the target app fingerprint."
+		result.ApplyReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, result.StaleReason)
+		result.ApplySummary = append(result.ApplySummary, "Update apply requires a fresh exact diff preview that records the target app fingerprint.")
+		return contributionUpdateApplyResponse{Result: result}
+	}
+
+	if strings.TrimSpace(diff.AppFingerprintBefore) != currentFingerprint {
+		result.IsStale = true
+		result.StaleReason = "The target app changed after the exact update diff preview was generated."
+		result.ApplyReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, result.StaleReason)
+		result.ApplySummary = append(result.ApplySummary, "Update apply stopped because flogo.json drifted from the exact diff basis.")
+		return contributionUpdateApplyResponse{Result: result}
+	}
+
+	if strings.TrimSpace(diff.CanonicalBeforeJSON) == "" {
+		result.ApplyReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, "Update apply requires the exact diff preview to record the canonical before document.")
+		result.ApplySummary = append(result.ApplySummary, "Update apply stopped because the saved diff preview omitted the canonical before document.")
+		return contributionUpdateApplyResponse{Result: result}
+	}
+
+	if currentCanonicalBefore != strings.TrimSpace(diff.CanonicalBeforeJSON) {
+		result.IsStale = true
+		result.StaleReason = "The target app canonical document no longer matches the exact update diff preview basis."
+		result.ApplyReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, result.StaleReason)
+		result.ApplySummary = append(result.ApplySummary, "Update apply stopped because the canonical before document drifted since the exact diff preview.")
+		return contributionUpdateApplyResponse{Result: result}
+	}
+
+	if len(changedPaths) > 0 && strings.TrimSpace(diff.CanonicalAfterJSON) == "" {
+		result.ApplyReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, "Update apply requires the exact diff preview to include the canonical after document.")
+		result.ApplySummary = append(result.ApplySummary, "Update apply stopped because the exact after document was missing from the saved diff preview.")
+		return contributionUpdateApplyResponse{Result: result}
+	}
+
+	canonicalAfterJSON := strings.TrimSpace(diff.CanonicalAfterJSON)
+	if canonicalAfterJSON == "" {
+		canonicalAfterJSON = currentCanonicalBefore
+	}
+	afterRaw, err := parseCanonicalAppJSON(canonicalAfterJSON)
+	if err != nil {
+		result.ApplyReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, fmt.Sprintf("Update apply could not decode the exact canonical after document: %v", err))
+		result.ApplySummary = append(result.ApplySummary, "Update apply stopped because the saved exact after document could not be decoded.")
+		return contributionUpdateApplyResponse{Result: result}
+	}
+
+	afterApp := normalizeApp(afterRaw)
+	afterFingerprint := appCanonicalFingerprint(afterApp)
+	if strings.TrimSpace(diff.AppFingerprintAfter) != "" && strings.TrimSpace(diff.AppFingerprintAfter) != afterFingerprint {
+		result.ApplyReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, "Update apply stopped because the exact after document no longer matches the saved diff preview fingerprint.")
+		result.ApplySummary = append(result.ApplySummary, "Update apply stopped because the saved exact after document failed fingerprint verification.")
+		return contributionUpdateApplyResponse{Result: result}
+	}
+
+	if len(changedPaths) == 0 && currentCanonicalBefore != canonicalAfterJSON {
+		result.ApplyReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, "Update apply stopped because the saved diff preview claims no canonical mutation but carries a different after document.")
+		result.ApplySummary = append(result.ApplySummary, "Update apply stopped because the no-op diff preview carried an inconsistent after document.")
+		return contributionUpdateApplyResponse{Result: result}
+	}
+
+	result.CanonicalAfterJSON = canonicalAfterJSON
+	result.CanonicalApp = afterRaw
+	result.AppFingerprintAfter = afterFingerprint
+	if currentFingerprint != afterFingerprint {
+		if err := os.WriteFile(targetApp.AppPath, []byte(canonicalAfterJSON), 0o644); err != nil {
+			result.ApplyReady = false
+			result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+			result.Warnings = append(result.Warnings, fmt.Sprintf("Update apply could not write the updated canonical app: %v", err))
+			result.ApplySummary = append(result.ApplySummary, "Update apply stopped because the updated canonical flogo.json could not be written to the target app path.")
+			result.RecommendedNextAction = "Fix target app write permissions or workspace path issues, then regenerate the exact update diff preview before retrying apply."
+			return contributionUpdateApplyResponse{Result: result}
+		}
+		result.Applied = true
+		result.ApplySummary = append(result.ApplySummary, "Applied the exact canonical flogo.json mutation preview to the target app.")
+		result.RecommendedNextAction = "Review the applied canonical flogo.json output and run follow-up validation before broader update workflows."
+	} else {
+		result.Applied = false
+		result.ApplySummary = append(result.ApplySummary, "No canonical mutation was required by the saved exact diff preview.")
+		result.RecommendedNextAction = "No canonical mutation was required; persist the unchanged flogo.json only if the wider workflow expects an explicit apply artifact."
+	}
+
+	return contributionUpdateApplyResponse{Result: result}
 }
 
 func contributionDescriptorRef(bundle contributionScaffoldBundle) string {
@@ -10879,16 +11235,13 @@ func buildRuntimeChannelTriggerEvidence(prepared runtimeTracePreparedChannelTrig
 	triggerData := map[string]any{
 		"data": makeJSONSafe(bundle.Data),
 	}
-	mappedFlowInput := map[string]any{}
-	for key, value := range prepared.RuntimeInputMappings {
-		mappedFlowInput[key] = makeJSONSafe(resolveValue(value, mappingPreviewContext{
-			Flow:     map[string]any{},
-			Activity: map[string]map[string]any{},
-			Env:      map[string]any{},
-			Property: map[string]any{},
-			Trigger:  triggerData,
-		}))
-	}
+	mappedFlowInput := runtimeRESTApplyMappings(prepared.RuntimeInputMappings, mappingPreviewContext{
+		Flow:     triggerData,
+		Activity: map[string]map[string]any{},
+		Env:      map[string]any{},
+		Property: map[string]any{},
+		Trigger:  triggerData,
+	})
 
 	flowInput := recorderFlowInputs(evidence.FlowStart)
 	if len(flowInput) == 0 {

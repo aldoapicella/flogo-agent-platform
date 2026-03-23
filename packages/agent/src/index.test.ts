@@ -373,6 +373,34 @@ describe("TaskPlanner shared contribution lifecycle modes", () => {
     ]);
   });
 
+  it("routes update_contrib_apply through one approval-gated contribution update apply step", () => {
+    const planner = new TaskPlanner();
+    const plan = planner.plan({
+      type: "update",
+      projectId: "demo",
+      appId: "hello-rest",
+      requestedBy: "operator",
+      summary: "Apply the approved contribution update diff to flogo.json",
+      inputs: {
+        mode: "update_contrib_apply",
+        updateDiffPlanArtifactId: "artifact-update-diff-1"
+      },
+      constraints: {
+        allowDependencyChanges: false,
+        allowCustomCode: false,
+        targetEnv: "dev",
+        requireApproval: true
+      }
+    });
+
+    expect(plan.requiredApprovals).toEqual(["update_contribution"]);
+    expect(plan.steps.map((step) => step.tool)).toEqual([
+      "flogo.parseApp",
+      "flogo.validateApp",
+      "runner.updateContribApply"
+    ]);
+  });
+
   it("treats explicit contribution update planning mode as analysis-only authoring work", () => {
     const planner = new TaskPlanner();
     const plan = planner.plan({

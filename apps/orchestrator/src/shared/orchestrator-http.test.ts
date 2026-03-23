@@ -478,6 +478,48 @@ describe("orchestrator-http", () => {
     });
   });
 
+  it("routes update_contrib_apply mode to the approval-gated canonical update apply runner step", () => {
+    const start: OrchestratorStartRequest = {
+      taskId: "task-update-contrib-apply",
+      request: {
+        type: "update",
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json",
+        requestedBy: "operator",
+        summary: "Apply the approved contribution update diff",
+        inputs: {
+          mode: "update_contrib_apply",
+          updateDiffPlanArtifactId: "artifact-update-diff-5"
+        },
+        constraints: {
+          allowDependencyChanges: false,
+          allowCustomCode: false,
+          targetEnv: "dev",
+          requireApproval: true
+        }
+      },
+      requiredApprovals: ["update_contribution"],
+      planSummary: "Apply contribution update diff",
+      steps: []
+    };
+
+    expect(resolveWorkflowRunnerSteps(start)).toEqual(["update_contrib_apply"]);
+
+    const spec = buildRunnerJobSpec(start, "update_contrib_apply");
+
+    expect(spec.jobKind).toBe("contrib_update_apply");
+    expect(spec.analysisKind).toBe("update_contrib_apply");
+    expect(spec.analysisPayload).toMatchObject({
+      updateDiffPlanArtifactId: "artifact-update-diff-5",
+      targetApp: {
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json"
+      }
+    });
+  });
+
   it("routes update_contrib_plan mode to the shared contribution update-planning runner step", () => {
     const start: OrchestratorStartRequest = {
       taskId: "task-update-contrib-plan",
