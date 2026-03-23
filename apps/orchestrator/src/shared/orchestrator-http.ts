@@ -131,6 +131,9 @@ export function resolveWorkflowRunnerSteps(start: OrchestratorStartRequest): Run
   if (mode === "install_contrib_plan") {
     return ["install_contrib_plan"];
   }
+  if (mode === "update_contrib_plan") {
+    return ["update_contrib_plan"];
+  }
   if (mode === "install_contrib_diff_plan") {
     return ["install_contrib_diff_plan"];
   }
@@ -246,6 +249,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
       break;
     case "install_contrib_plan":
       jobKind = "contrib_install_plan";
+      break;
+    case "update_contrib_plan":
+      jobKind = "contrib_update_plan";
       break;
     case "install_contrib_diff_plan":
       jobKind = "contrib_install_diff_plan";
@@ -788,6 +794,7 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
       };
       break;
     case "install_contrib_plan":
+    case "update_contrib_plan":
       analysisPayload = {
         bundleArtifactId:
           typeof start.request.inputs["bundleArtifactId"] === "string"
@@ -931,6 +938,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
       break;
     case "install_contrib_plan":
       analysisKind = "install_contrib_plan";
+      break;
+    case "update_contrib_plan":
+      analysisKind = "update_contrib_plan";
       break;
     case "install_contrib_diff_plan":
       analysisKind = "install_contrib_diff_plan";

@@ -295,7 +295,7 @@ export class OrchestrationService {
     }
 
     if (
-      (mode === "validate_contrib" || mode === "package_contrib" || mode === "install_contrib_plan") &&
+      (mode === "validate_contrib" || mode === "package_contrib" || mode === "install_contrib_plan" || mode === "update_contrib_plan") &&
       typeof inputs["bundleArtifactId"] === "string" &&
       !inputs["bundleArtifact"] &&
       !inputs["result"]
@@ -314,7 +314,7 @@ export class OrchestrationService {
     }
 
     if (
-      mode === "install_contrib_plan" &&
+      (mode === "install_contrib_plan" || mode === "update_contrib_plan") &&
       typeof inputs["packageArtifactId"] === "string" &&
       !inputs["packageArtifact"] &&
       !inputs["packageResult"]
@@ -370,7 +370,7 @@ export class OrchestrationService {
       };
     }
 
-    if (mode === "install_contrib_plan" || mode === "install_contrib_diff_plan" || mode === "install_contrib_apply") {
+    if (mode === "install_contrib_plan" || mode === "update_contrib_plan" || mode === "install_contrib_diff_plan" || mode === "install_contrib_apply") {
       const targetApp =
         inputs["targetApp"] && typeof inputs["targetApp"] === "object" && !Array.isArray(inputs["targetApp"])
           ? (inputs["targetApp"] as Record<string, unknown>)
@@ -472,7 +472,7 @@ export class OrchestrationService {
 
     if (!this.storage.isConfigured()) {
       throw new Error(
-        "Contribution artifact storage is not configured. Set APP_ANALYSIS_STORAGE_CONNECTION_STRING, AZURITE_CONNECTION_STRING, or DURABLE_STORAGE_CONNECTION_STRING before running contribution scaffold, validate, package, install-plan, install-diff-plan, or install-apply tasks."
+        "Contribution artifact storage is not configured. Set APP_ANALYSIS_STORAGE_CONNECTION_STRING, AZURITE_CONNECTION_STRING, or DURABLE_STORAGE_CONNECTION_STRING before running contribution scaffold, validate, package, install-plan, update-plan, install-diff-plan, or install-apply tasks."
       );
     }
 
@@ -507,7 +507,7 @@ export class OrchestrationService {
   private shouldPersistTaskArtifact(
     artifact: ArtifactRef
   ): artifact is ArtifactRef & {
-    type: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "contrib_install_plan" | "contrib_install_diff_plan" | "contrib_install_apply_result" | "build_log" | "test_report" | "flogo_json";
+    type: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "contrib_install_plan" | "contrib_update_plan" | "contrib_install_diff_plan" | "contrib_install_apply_result" | "build_log" | "test_report" | "flogo_json";
     metadata: Record<string, unknown>;
   } {
     return (
@@ -516,6 +516,7 @@ export class OrchestrationService {
         artifact.type === "contrib_validation_report" ||
         artifact.type === "contrib_package" ||
         artifact.type === "contrib_install_plan" ||
+        artifact.type === "contrib_update_plan" ||
         artifact.type === "contrib_install_diff_plan" ||
         artifact.type === "contrib_install_apply_result" ||
         artifact.type === "flogo_json" ||

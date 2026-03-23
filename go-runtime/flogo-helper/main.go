@@ -598,6 +598,65 @@ type contributionInstallPlanResponse struct {
 	Result contributionInstallPlanResult `json:"result"`
 }
 
+type contributionUpdatePlanRequest = contributionInstallPlanRequest
+
+type contributionUpdateInstalledContribution struct {
+	Alias       string   `json:"alias,omitempty"`
+	Ref         string   `json:"ref,omitempty"`
+	Version     string   `json:"version,omitempty"`
+	Type        string   `json:"type,omitempty"`
+	ModulePath  string   `json:"modulePath,omitempty"`
+	PackagePath string   `json:"packagePath,omitempty"`
+	PackageName string   `json:"packageName,omitempty"`
+	MatchedBy   []string `json:"matchedBy"`
+	Confidence  string   `json:"confidence"`
+}
+
+type contributionUpdatePredictedChanges struct {
+	ImportsToReplace []contributionInstallImportEntry `json:"importsToReplace"`
+	ImportsToKeep    []contributionInstallImportEntry `json:"importsToKeep"`
+	ImportsToAdd     []contributionInstallImportEntry `json:"importsToAdd"`
+	ImportsToRemove  []contributionInstallImportEntry `json:"importsToRemove"`
+	RefsToReplace    []contributionInstallRefEntry    `json:"refsToReplace"`
+	RefsToKeep       []contributionInstallRefEntry    `json:"refsToKeep"`
+	RefsToAdd        []contributionInstallRefEntry    `json:"refsToAdd"`
+	RefsToRemove     []contributionInstallRefEntry    `json:"refsToRemove"`
+	ChangedPaths     []string                         `json:"changedPaths"`
+	SummaryLines     []string                         `json:"summaryLines"`
+	NoMutation       bool                             `json:"noMutation"`
+}
+
+type contributionUpdatePlanResult struct {
+	ContributionKind              string                                   `json:"contributionKind"`
+	Source                        string                                   `json:"source"`
+	SourceArtifact                string                                   `json:"sourceArtifactId,omitempty"`
+	TargetApp                     contributionInstallTarget                `json:"targetApp"`
+	Bundle                        contributionScaffoldBundle               `json:"bundle"`
+	Package                       *contributionPackageArchive              `json:"package,omitempty"`
+	ModulePath                    string                                   `json:"modulePath"`
+	PackageName                   string                                   `json:"packageName,omitempty"`
+	PackagePath                   string                                   `json:"packagePath,omitempty"`
+	DescriptorRef                 string                                   `json:"descriptorRef,omitempty"`
+	AppFingerprint                string                                   `json:"appFingerprint,omitempty"`
+	PlanFingerprint               string                                   `json:"planFingerprint,omitempty"`
+	SelectedAlias                 string                                   `json:"selectedAlias"`
+	DetectedInstalledContribution *contributionUpdateInstalledContribution `json:"detectedInstalledContribution,omitempty"`
+	MatchQuality                  string                                   `json:"matchQuality"`
+	Compatibility                 string                                   `json:"compatibility"`
+	UpdateReady                   bool                                     `json:"updateReady"`
+	Readiness                     string                                   `json:"readiness"`
+	PredictedChanges              contributionUpdatePredictedChanges       `json:"predictedChanges"`
+	Warnings                      []string                                 `json:"warnings"`
+	Conflicts                     []contributionInstallConflict            `json:"conflicts"`
+	Diagnostics                   []diagnostic                             `json:"diagnostics"`
+	RecommendedNextAction         string                                   `json:"recommendedNextAction"`
+	Limitations                   []string                                 `json:"limitations"`
+}
+
+type contributionUpdatePlanResponse struct {
+	Result contributionUpdatePlanResult `json:"result"`
+}
+
 type contributionInstallDiffPlanRequest struct {
 	InstallPlan         contributionInstallPlanResult `json:"installPlan"`
 	InstallPlanArtifact string                        `json:"installPlanArtifactId,omitempty"`
@@ -3039,7 +3098,7 @@ var supportedRuntimeActivityRefs = map[string]bool{
 
 func main() {
 	if len(os.Args) < 3 {
-		fail("expected a command such as 'catalog contribs', 'inspect descriptor', 'preview mapping', 'contrib scaffold-activity', 'contrib scaffold-action', 'contrib scaffold-trigger', 'contrib validate', 'contrib package', 'contrib install-plan', 'contrib install-diff-plan', or 'contrib install-apply'")
+		fail("expected a command such as 'catalog contribs', 'inspect descriptor', 'preview mapping', 'contrib scaffold-activity', 'contrib scaffold-action', 'contrib scaffold-trigger', 'contrib validate', 'contrib package', 'contrib install-plan', 'contrib update-plan', 'contrib install-diff-plan', or 'contrib install-apply'")
 	}
 
 	command := strings.Join(os.Args[1:3], " ")
@@ -3093,6 +3152,18 @@ func main() {
 			fail("missing required --request flag")
 		}
 		encode(planContributionInstall(loadApp(appPath), appPath, loadContributionInstallPlanRequest(requestPath)))
+		return
+	}
+	if command == "contrib update-plan" {
+		appPath := lookupFlag("--app")
+		if appPath == "" {
+			fail("missing required --app flag")
+		}
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(planContributionUpdate(loadApp(appPath), appPath, loadContributionUpdatePlanRequest(requestPath)))
 		return
 	}
 	if command == "contrib install-diff-plan" {
@@ -3491,6 +3562,10 @@ func loadContributionInstallPlanRequest(inputPath string) contributionInstallPla
 	return request
 }
 
+func loadContributionUpdatePlanRequest(inputPath string) contributionUpdatePlanRequest {
+	return loadContributionInstallPlanRequest(inputPath)
+}
+
 func loadContributionInstallDiffPlanRequest(inputPath string) contributionInstallDiffPlanRequest {
 	contents, err := os.ReadFile(inputPath)
 	if err != nil {
@@ -3824,6 +3899,10 @@ func validateContributionInstallPlanRequest(request contributionInstallPlanReque
 	return nil
 }
 
+func validateContributionUpdatePlanRequest(request contributionUpdatePlanRequest) error {
+	return validateContributionInstallPlanRequest(request)
+}
+
 func validateContributionInstallDiffPlanRequest(request contributionInstallDiffPlanRequest) error {
 	if err := validateContributionScaffoldResult(contributionScaffoldResult{Bundle: request.InstallPlan.Bundle}); err != nil {
 		return err
@@ -3907,6 +3986,34 @@ func contributionInstallPlanFingerprint(result contributionInstallPlanResult) st
 		"warnings":         result.Warnings,
 		"conflicts":        result.Conflicts,
 		"limitations":      result.Limitations,
+	})
+}
+
+func contributionUpdatePlanFingerprint(result contributionUpdatePlanResult) string {
+	return hashProjection(map[string]any{
+		"contributionKind": result.ContributionKind,
+		"source":           result.Source,
+		"sourceArtifactId": result.SourceArtifact,
+		"targetApp": map[string]any{
+			"projectId": result.TargetApp.ProjectID,
+			"appId":     result.TargetApp.AppID,
+			"appPath":   result.TargetApp.AppPath,
+			"appName":   result.TargetApp.AppName,
+		},
+		"modulePath":                    result.ModulePath,
+		"packageName":                   result.PackageName,
+		"packagePath":                   result.PackagePath,
+		"descriptorRef":                 result.DescriptorRef,
+		"selectedAlias":                 result.SelectedAlias,
+		"detectedInstalledContribution": result.DetectedInstalledContribution,
+		"matchQuality":                  result.MatchQuality,
+		"compatibility":                 result.Compatibility,
+		"updateReady":                   result.UpdateReady,
+		"readiness":                     result.Readiness,
+		"predictedChanges":              result.PredictedChanges,
+		"warnings":                      result.Warnings,
+		"conflicts":                     result.Conflicts,
+		"limitations":                   result.Limitations,
 	})
 }
 
@@ -4949,6 +5056,381 @@ func planContributionInstall(app flogoApp, appPath string, request contributionI
 	result.PlanFingerprint = contributionInstallPlanFingerprint(result)
 
 	return contributionInstallPlanResponse{
+		Result: result,
+	}
+}
+
+func planContributionUpdate(app flogoApp, appPath string, request contributionUpdatePlanRequest) contributionUpdatePlanResponse {
+	if err := validateContributionUpdatePlanRequest(request); err != nil {
+		fail(err.Error())
+	}
+
+	bundle := request.Result.Bundle
+	descriptorRef := contributionDescriptorRef(bundle)
+	if descriptorRef == "" {
+		fail("contribution update planning requires bundle.descriptor.ref or bundle.modulePath")
+	}
+
+	requestedAlias := contributionInstallAlias(bundle, request.PreferredAlias)
+	selectedAlias := requestedAlias
+	version := contributionDescriptorVersion(bundle)
+	readiness := "high"
+	updateReady := true
+	warnings := []string{}
+	conflicts := []contributionInstallConflict{}
+	diagnostics := []diagnostic{}
+	predictedChanges := contributionUpdatePredictedChanges{
+		ImportsToReplace: []contributionInstallImportEntry{},
+		ImportsToKeep:    []contributionInstallImportEntry{},
+		ImportsToAdd:     []contributionInstallImportEntry{},
+		ImportsToRemove:  []contributionInstallImportEntry{},
+		RefsToReplace:    []contributionInstallRefEntry{},
+		RefsToKeep:       []contributionInstallRefEntry{},
+		RefsToAdd:        []contributionInstallRefEntry{},
+		RefsToRemove:     []contributionInstallRefEntry{},
+		ChangedPaths:     []string{},
+		SummaryLines:     []string{},
+		NoMutation:       true,
+	}
+
+	type updateCandidate struct {
+		installed contributionUpdateInstalledContribution
+	}
+
+	candidateKey := func(alias, ref string) string {
+		return normalizeAlias(alias) + "|" + strings.TrimSpace(ref)
+	}
+
+	candidates := map[string]*updateCandidate{}
+	addCandidate := func(alias, ref, existingVersion, existingType, modulePath, packagePath, packageName, matchedBy string) {
+		key := candidateKey(alias, ref)
+		candidate := candidates[key]
+		if candidate == nil {
+			confidence := "medium"
+			if matchedBy == "ref" || matchedBy == "alias+ref" {
+				confidence = "high"
+			}
+			candidate = &updateCandidate{
+				installed: contributionUpdateInstalledContribution{
+					Alias:       strings.TrimSpace(alias),
+					Ref:         strings.TrimSpace(ref),
+					Version:     strings.TrimSpace(existingVersion),
+					Type:        strings.TrimSpace(existingType),
+					ModulePath:  strings.TrimSpace(modulePath),
+					PackagePath: strings.TrimSpace(packagePath),
+					PackageName: strings.TrimSpace(packageName),
+					MatchedBy:   []string{},
+					Confidence:  confidence,
+				},
+			}
+			candidates[key] = candidate
+		}
+		candidate.installed.MatchedBy = appendUniqueString(candidate.installed.MatchedBy, matchedBy)
+		if candidate.installed.Confidence != "high" && (matchedBy == "ref" || matchedBy == "alias+ref") {
+			candidate.installed.Confidence = "high"
+		}
+		if candidate.installed.Alias == "" {
+			candidate.installed.Alias = strings.TrimSpace(alias)
+		}
+		if candidate.installed.Ref == "" {
+			candidate.installed.Ref = strings.TrimSpace(ref)
+		}
+		if candidate.installed.Version == "" {
+			candidate.installed.Version = strings.TrimSpace(existingVersion)
+		}
+		if candidate.installed.Type == "" {
+			candidate.installed.Type = strings.TrimSpace(existingType)
+		}
+		if candidate.installed.ModulePath == "" {
+			candidate.installed.ModulePath = strings.TrimSpace(modulePath)
+		}
+		if candidate.installed.PackagePath == "" {
+			candidate.installed.PackagePath = strings.TrimSpace(packagePath)
+		}
+		if candidate.installed.PackageName == "" {
+			candidate.installed.PackageName = strings.TrimSpace(packageName)
+		}
+	}
+
+	for _, entry := range app.Imports {
+		refMatch := strings.TrimSpace(entry.Ref) == descriptorRef
+		aliasMatch := normalizeAlias(entry.Alias) == normalizeAlias(requestedAlias) && requestedAlias != ""
+		switch {
+		case refMatch && aliasMatch:
+			addCandidate(entry.Alias, entry.Ref, entry.Version, bundle.Kind, bundle.ModulePath, bundle.ModulePath, bundle.PackageName, "alias+ref")
+		case refMatch:
+			addCandidate(entry.Alias, entry.Ref, entry.Version, bundle.Kind, bundle.ModulePath, bundle.ModulePath, bundle.PackageName, "ref")
+		case aliasMatch:
+			addCandidate(entry.Alias, entry.Ref, entry.Version, "", "", "", "", "alias")
+		}
+	}
+
+	inventory := buildContributionInventory(app, appPath)
+	for _, entry := range inventory.Entries {
+		refMatch := strings.TrimSpace(entry.Ref) == descriptorRef
+		aliasMatch := normalizeAlias(entry.Alias) == normalizeAlias(requestedAlias) && requestedAlias != ""
+		moduleMatch := strings.TrimSpace(bundle.ModulePath) != "" &&
+			(strings.TrimSpace(entry.ModulePath) == strings.TrimSpace(bundle.ModulePath) ||
+				strings.TrimSpace(entry.GoPackagePath) == strings.TrimSpace(bundle.ModulePath))
+		switch {
+		case refMatch && aliasMatch:
+			addCandidate(entry.Alias, entry.Ref, entry.Version, entry.Type, entry.ModulePath, entry.GoPackagePath, entry.Name, "inventory_alias+ref")
+		case refMatch:
+			addCandidate(entry.Alias, entry.Ref, entry.Version, entry.Type, entry.ModulePath, entry.GoPackagePath, entry.Name, "inventory_ref")
+		case aliasMatch:
+			addCandidate(entry.Alias, entry.Ref, entry.Version, entry.Type, entry.ModulePath, entry.GoPackagePath, entry.Name, "inventory_alias")
+		case moduleMatch:
+			addCandidate(entry.Alias, entry.Ref, entry.Version, entry.Type, entry.ModulePath, entry.GoPackagePath, entry.Name, "module")
+		}
+	}
+
+	orderedCandidates := []*updateCandidate{}
+	for _, candidate := range candidates {
+		orderedCandidates = append(orderedCandidates, candidate)
+	}
+	sort.Slice(orderedCandidates, func(i, j int) bool {
+		left := orderedCandidates[i].installed
+		right := orderedCandidates[j].installed
+		return candidateKey(left.Alias, left.Ref) < candidateKey(right.Alias, right.Ref)
+	})
+
+	matchQuality := "none"
+	compatibility := "not_installed"
+	var detected *contributionUpdateInstalledContribution
+	if len(orderedCandidates) > 1 {
+		matchQuality = "ambiguous"
+		compatibility = "ambiguous"
+		updateReady = false
+		readiness = lowerInstallReadiness(readiness, "low")
+		conflicts = append(conflicts, contributionInstallConflict{
+			Kind:          "ambiguous_match",
+			Severity:      "error",
+			Message:       fmt.Sprintf("Found %d possible installed contribution matches for %q in the target app.", len(orderedCandidates), descriptorRef),
+			ProposedAlias: requestedAlias,
+			ProposedRef:   descriptorRef,
+		})
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.contrib.update_plan.ambiguous_match",
+			Message:  fmt.Sprintf("Found %d possible installed contribution matches for %q.", len(orderedCandidates), descriptorRef),
+			Severity: "error",
+			Path:     "imports",
+		})
+		warnings = append(warnings, "Multiple installed contribution candidates match the requested update; review alias/ref evidence before planning an update diff.")
+		predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, "Update planning stopped because the installed contribution match is ambiguous.")
+	} else if len(orderedCandidates) == 1 {
+		candidate := orderedCandidates[0].installed
+		detected = &candidate
+		if candidate.Ref == descriptorRef && normalizeAlias(candidate.Alias) == normalizeAlias(requestedAlias) {
+			matchQuality = "exact"
+		} else if candidate.Ref == descriptorRef || normalizeAlias(candidate.Alias) == normalizeAlias(requestedAlias) || candidate.ModulePath == strings.TrimSpace(bundle.ModulePath) {
+			matchQuality = "likely"
+		}
+		compatibility = "compatible"
+		if candidate.Type != "" && candidate.Type != bundle.Kind {
+			compatibility = "incompatible"
+			updateReady = false
+			readiness = lowerInstallReadiness(readiness, "low")
+			conflicts = append(conflicts, contributionInstallConflict{
+				Kind:          "type_conflict",
+				Severity:      "error",
+				Message:       fmt.Sprintf("Installed alias %q resolves to a %s, not a %s.", valueOrFallback(candidate.Alias, requestedAlias), candidate.Type, bundle.Kind),
+				ExistingAlias: candidate.Alias,
+				ExistingRef:   candidate.Ref,
+				ProposedAlias: requestedAlias,
+				ProposedRef:   descriptorRef,
+			})
+			diagnostics = append(diagnostics, diagnostic{
+				Code:     "flogo.contrib.update_plan.type_conflict",
+				Message:  fmt.Sprintf("Installed contribution type %q is incompatible with requested bundle kind %q.", candidate.Type, bundle.Kind),
+				Severity: "error",
+				Path:     "imports." + valueOrFallback(candidate.Alias, requestedAlias),
+			})
+		}
+	} else {
+		updateReady = false
+		readiness = lowerInstallReadiness(readiness, "low")
+		conflicts = append(conflicts, contributionInstallConflict{
+			Kind:          "no_installed_match",
+			Severity:      "error",
+			Message:       fmt.Sprintf("Target app does not appear to have %q installed already.", descriptorRef),
+			ProposedAlias: requestedAlias,
+			ProposedRef:   descriptorRef,
+		})
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.contrib.update_plan.no_match",
+			Message:  fmt.Sprintf("Could not find an installed contribution match for %q.", descriptorRef),
+			Severity: "error",
+			Path:     "imports",
+		})
+		warnings = append(warnings, "No installed contribution match was detected; use install planning instead of update planning if this contribution is new to the app.")
+		predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, "Update planning stopped because the target app does not currently install the requested contribution.")
+	}
+
+	if !request.Result.Validation.Ok || !request.Result.Build.Ok || !request.Result.Test.Ok {
+		warnings = append(warnings, "The provided contribution proof does not currently show a clean validation/test/build pass.")
+		conflicts = append(conflicts, contributionInstallConflict{
+			Kind:          "insufficient_metadata",
+			Severity:      "error",
+			Message:       "Contribution proof is incomplete or failing; update planning cannot claim high readiness.",
+			ProposedAlias: requestedAlias,
+			ProposedRef:   descriptorRef,
+		})
+		diagnostics = append(diagnostics, diagnostic{
+			Code:     "flogo.contrib.update_plan.proof_incomplete",
+			Message:  "Contribution validation, build, or test proof is not fully passing.",
+			Severity: "error",
+			Path:     "proof",
+		})
+		updateReady = false
+		readiness = lowerInstallReadiness(readiness, "low")
+	}
+
+	if request.Package == nil {
+		warnings = append(warnings, "No packaged archive was supplied, so update planning is based on scaffold and proof metadata only.")
+		readiness = lowerInstallReadiness(readiness, "medium")
+	}
+	if request.ReplaceExisting {
+		warnings = append(warnings, "replaceExisting is planning-only in this slice; no canonical update was applied.")
+	}
+
+	targetApp := request.TargetApp
+	if targetApp.AppPath == "" {
+		targetApp.AppPath = appPath
+	}
+	targetApp.AppName = app.Name
+
+	if detected != nil && strings.TrimSpace(detected.Alias) != "" {
+		selectedAlias = detected.Alias
+		if normalizeAlias(requestedAlias) != normalizeAlias(detected.Alias) && strings.TrimSpace(request.PreferredAlias) != "" {
+			warnings = append(warnings, fmt.Sprintf("Preferred alias %q was not selected because the installed contribution currently uses alias %q.", request.PreferredAlias, detected.Alias))
+			readiness = lowerInstallReadiness(readiness, "medium")
+		}
+	}
+
+	surface, surfaceNote := contributionInstallSurface(bundle.Kind)
+	if detected != nil && updateReady && compatibility == "compatible" {
+		currentImport := flogoImport{
+			Alias:   detected.Alias,
+			Ref:     detected.Ref,
+			Version: detected.Version,
+		}
+		nextImport := flogoImport{
+			Alias:   valueOrFallback(detected.Alias, selectedAlias),
+			Ref:     descriptorRef,
+			Version: version,
+		}
+		refValue := "#" + normalizeAlias(valueOrFallback(detected.Alias, selectedAlias))
+		refEntry := contributionInstallRefEntry{
+			Surface: surface,
+			Value:   refValue,
+			Note:    surfaceNote,
+		}
+
+		switch {
+		case currentImport.Alias == nextImport.Alias && currentImport.Ref == nextImport.Ref && currentImport.Version == nextImport.Version:
+			predictedChanges.ImportsToKeep = append(predictedChanges.ImportsToKeep, toInstallImportEntry(currentImport, "keep_existing"))
+			predictedChanges.RefsToKeep = append(predictedChanges.RefsToKeep, refEntry)
+			predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, fmt.Sprintf("No canonical import update is required because alias %q already matches the requested contribution metadata.", currentImport.Alias))
+		case currentImport.Alias == nextImport.Alias:
+			predictedChanges.ImportsToReplace = append(predictedChanges.ImportsToReplace, contributionInstallImportEntry{
+				Alias:         nextImport.Alias,
+				Ref:           nextImport.Ref,
+				Version:       nextImport.Version,
+				Action:        "replace_existing",
+				ExistingAlias: currentImport.Alias,
+				ExistingRef:   currentImport.Ref,
+				Note:          "Review updating the installed import metadata in place.",
+			})
+			predictedChanges.RefsToKeep = append(predictedChanges.RefsToKeep, refEntry)
+			predictedChanges.ChangedPaths = appendUniqueString(predictedChanges.ChangedPaths, "imports")
+			predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, fmt.Sprintf("Replace import alias %q from ref %q to %q.", currentImport.Alias, currentImport.Ref, nextImport.Ref))
+			if currentImport.Version != nextImport.Version && nextImport.Version != "" {
+				predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, fmt.Sprintf("Review import version change for alias %q from %q to %q.", currentImport.Alias, valueOrFallback(currentImport.Version, "unset"), nextImport.Version))
+			}
+		default:
+			updateReady = false
+			readiness = lowerInstallReadiness(readiness, "low")
+			conflicts = append(conflicts, contributionInstallConflict{
+				Kind:          "alias_change_requires_rewire",
+				Severity:      "error",
+				Message:       fmt.Sprintf("Installed contribution alias %q would need to change to %q, which this planning slice does not rewrite safely.", currentImport.Alias, nextImport.Alias),
+				ExistingAlias: currentImport.Alias,
+				ExistingRef:   currentImport.Ref,
+				ProposedAlias: nextImport.Alias,
+				ProposedRef:   nextImport.Ref,
+			})
+			warnings = append(warnings, "This update would require alias or reference rewrites inside the app, which this planning slice does not materialize yet.")
+			predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, "Update planning stopped because alias rewrites would be required and are not supported in this slice.")
+		}
+	}
+
+	matchQualityValue := matchQuality
+	if detected != nil && matchQualityValue == "none" {
+		matchQualityValue = "likely"
+	}
+
+	recommendedNextAction := "Use install planning instead of update planning if the contribution is not already installed."
+	switch {
+	case compatibility == "incompatible":
+		recommendedNextAction = "Resolve the installed contribution type mismatch before requesting an update diff preview."
+	case matchQualityValue == "ambiguous":
+		recommendedNextAction = "Clarify the installed contribution alias/ref match before requesting an update diff preview."
+	case matchQualityValue == "none":
+		recommendedNextAction = "Use install planning for new contributions or supply a bundle/package that matches an installed app import."
+	case updateReady && len(predictedChanges.ChangedPaths) > 0:
+		recommendedNextAction = "Review the update plan and request an exact update diff preview in a later workflow."
+	case updateReady:
+		recommendedNextAction = "Review the no-op update plan; the installed contribution already matches the requested canonical import metadata."
+	default:
+		recommendedNextAction = "Resolve the warnings and conflicts before attempting a later update diff workflow."
+	}
+
+	limitations := []string{
+		"Planning only; this slice does not mutate flogo.json or update the installed contribution.",
+		"Update planning is currently limited to import/alias/ref replacement analysis and does not materialize exact canonical before/after documents yet.",
+		"Alias rewrites across trigger, action, and activity usage sites remain a later update diff/apply workflow.",
+	}
+	if request.Package == nil {
+		limitations = append(limitations, "Update readiness is inferred without a packaged archive and may be reduced when package metadata is unavailable.")
+	}
+
+	result := contributionUpdatePlanResult{
+		ContributionKind:              bundle.Kind,
+		Source:                        normalizeContributionInstallSource(request.Source, request.SourceArtifact, request.Package != nil),
+		SourceArtifact:                strings.TrimSpace(request.SourceArtifact),
+		TargetApp:                     targetApp,
+		Bundle:                        bundle,
+		Package:                       request.Package,
+		ModulePath:                    bundle.ModulePath,
+		PackageName:                   strings.TrimSpace(bundle.PackageName),
+		PackagePath:                   strings.TrimSpace(bundle.ModulePath),
+		DescriptorRef:                 strings.TrimSpace(descriptorRef),
+		SelectedAlias:                 selectedAlias,
+		DetectedInstalledContribution: detected,
+		MatchQuality:                  matchQualityValue,
+		Compatibility:                 compatibility,
+		UpdateReady:                   updateReady && compatibility == "compatible" && (matchQualityValue == "exact" || matchQualityValue == "likely"),
+		Readiness:                     readiness,
+		PredictedChanges:              predictedChanges,
+		Warnings:                      dedupeStrings(warnings),
+		Conflicts:                     conflicts,
+		Diagnostics:                   dedupeDiagnostics(diagnostics),
+		RecommendedNextAction:         recommendedNextAction,
+		Limitations:                   dedupeStrings(limitations),
+	}
+	result.PredictedChanges.ChangedPaths = dedupeStrings(result.PredictedChanges.ChangedPaths)
+	result.PredictedChanges.ImportsToReplace = cloneContributionInstallImportEntries(result.PredictedChanges.ImportsToReplace)
+	result.PredictedChanges.ImportsToKeep = cloneContributionInstallImportEntries(result.PredictedChanges.ImportsToKeep)
+	result.PredictedChanges.ImportsToAdd = cloneContributionInstallImportEntries(result.PredictedChanges.ImportsToAdd)
+	result.PredictedChanges.ImportsToRemove = cloneContributionInstallImportEntries(result.PredictedChanges.ImportsToRemove)
+	result.PredictedChanges.RefsToReplace = dedupeContributionInstallRefEntries(result.PredictedChanges.RefsToReplace)
+	result.PredictedChanges.RefsToKeep = dedupeContributionInstallRefEntries(result.PredictedChanges.RefsToKeep)
+	result.PredictedChanges.RefsToAdd = dedupeContributionInstallRefEntries(result.PredictedChanges.RefsToAdd)
+	result.PredictedChanges.RefsToRemove = dedupeContributionInstallRefEntries(result.PredictedChanges.RefsToRemove)
+	result.AppFingerprint = appCanonicalFingerprint(app)
+	result.PlanFingerprint = contributionUpdatePlanFingerprint(result)
+
+	return contributionUpdatePlanResponse{
 		Result: result,
 	}
 }

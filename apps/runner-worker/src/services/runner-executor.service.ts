@@ -21,6 +21,9 @@ import {
   ContributionInstallPlanRequestSchema,
   ContributionInstallPlanResponseSchema,
   type ContributionInstallPlanResponse,
+  ContributionUpdatePlanRequestSchema,
+  ContributionUpdatePlanResponseSchema,
+  type ContributionUpdatePlanResponse,
   ContributionPackageRequestSchema,
   ContributionPackageResponseSchema,
   type ContributionPackageResponse,
@@ -186,6 +189,8 @@ function createCommand(spec: RunnerJobSpec): string[] {
       return createHelperCommand("contrib", "package");
     case "install_contrib_plan":
       return createHelperCommand("contrib", "install-plan", "--app", spec.appPath);
+    case "update_contrib_plan":
+      return createHelperCommand("contrib", "update-plan", "--app", spec.appPath);
     case "install_contrib_diff_plan":
       return createHelperCommand("contrib", "install-diff-plan", "--app", spec.appPath);
     case "install_contrib_apply":
@@ -253,6 +258,7 @@ function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
     stepType === "validate_contrib" ||
     stepType === "package_contrib" ||
     stepType === "install_contrib_plan" ||
+    stepType === "update_contrib_plan" ||
     stepType === "install_contrib_diff_plan" ||
     stepType === "install_contrib_apply" ||
     stepType === "diagnose_app"
@@ -394,6 +400,55 @@ type ContributionInstallPlanResultLike = {
     proposedAlias?: string;
     proposedRef?: string;
   }>;
+  diagnostics: Diagnostic[];
+  recommendedNextAction: string;
+  limitations: string[];
+};
+
+type ContributionUpdatePlanResultLike = {
+  contributionKind: "activity" | "action" | "trigger";
+  source: ContributionInstallPlanResultLike["source"];
+  sourceArtifactId?: string;
+  targetApp: ContributionInstallPlanResultLike["targetApp"];
+  bundle: ContributionScaffoldResultLike["bundle"];
+  package?: ContributionPackageResultLike["package"];
+  modulePath: string;
+  packageName?: string;
+  packagePath?: string;
+  descriptorRef?: string;
+  appFingerprint?: string;
+  planFingerprint?: string;
+  selectedAlias: string;
+  detectedInstalledContribution?: {
+    alias?: string;
+    ref?: string;
+    version?: string;
+    type?: string;
+    modulePath?: string;
+    packagePath?: string;
+    packageName?: string;
+    matchedBy: string[];
+    confidence: "high" | "medium" | "low";
+  };
+  matchQuality: "exact" | "likely" | "ambiguous" | "none";
+  compatibility: "compatible" | "incompatible" | "ambiguous" | "not_installed";
+  updateReady: boolean;
+  readiness: "high" | "medium" | "low";
+  predictedChanges: {
+    importsToReplace: ContributionInstallPlanResultLike["proposedImports"];
+    importsToKeep: ContributionInstallPlanResultLike["proposedImports"];
+    importsToAdd: ContributionInstallPlanResultLike["proposedImports"];
+    importsToRemove: ContributionInstallPlanResultLike["proposedImports"];
+    refsToReplace: ContributionInstallPlanResultLike["proposedRefs"];
+    refsToKeep: ContributionInstallPlanResultLike["proposedRefs"];
+    refsToAdd: ContributionInstallPlanResultLike["proposedRefs"];
+    refsToRemove: ContributionInstallPlanResultLike["proposedRefs"];
+    changedPaths: string[];
+    summaryLines: string[];
+    noMutation: true;
+  };
+  warnings: string[];
+  conflicts: ContributionInstallPlanResultLike["conflicts"];
   diagnostics: Diagnostic[];
   recommendedNextAction: string;
   limitations: string[];
@@ -633,6 +688,17 @@ function resolveContributionInstallSourceFromPayload(
   };
 }
 
+function resolveContributionUpdateSourceFromPayload(
+  analysisPayload: Record<string, unknown> | undefined
+): {
+  result: ContributionScaffoldResultLike;
+  package?: ContributionPackageResultLike["package"];
+  source: ContributionInstallPlanResultLike["source"];
+  sourceArtifactId?: string;
+} {
+  return resolveContributionInstallSourceFromPayload(analysisPayload);
+}
+
 function resolveContributionInstallPlanFromPayload(
   analysisPayload: Record<string, unknown> | undefined
 ): { result: ContributionInstallPlanResultLike; sourceArtifactId?: string } {
@@ -806,6 +872,43 @@ function createContributionPackageArtifacts(
       summary: result.test.summary,
       contributionKind
     })
+  ];
+}
+
+function createContributionUpdatePlanArtifacts(
+  spec: RunnerJobSpec,
+  result: ContributionUpdatePlanResultLike,
+  diagnostics: Diagnostic[]
+): ArtifactRef[] {
+  return [
+    createAnalysisArtifact(
+      spec,
+      "contrib_update_plan",
+      `${result.contributionKind}-update-plan-${result.packageName ?? result.bundle.packageName}`,
+      {
+        result,
+        bundle: result.bundle,
+        package: result.package,
+        contributionKind: result.contributionKind,
+        targetApp: result.targetApp,
+        modulePath: result.modulePath,
+        packageName: result.packageName,
+        packagePath: result.packagePath,
+        descriptorRef: result.descriptorRef,
+        selectedAlias: result.selectedAlias,
+        detectedInstalledContribution: result.detectedInstalledContribution,
+        matchQuality: result.matchQuality,
+        compatibility: result.compatibility,
+        updateReady: result.updateReady,
+        readiness: result.readiness,
+        predictedChanges: result.predictedChanges,
+        warnings: result.warnings,
+        conflicts: result.conflicts,
+        recommendedNextAction: result.recommendedNextAction,
+        limitations: result.limitations,
+        diagnostics
+      }
+    )
   ];
 }
 
@@ -1335,6 +1438,7 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     && spec.stepType !== "validate_contrib"
     && spec.stepType !== "package_contrib"
     && spec.stepType !== "install_contrib_plan"
+    && spec.stepType !== "update_contrib_plan"
     && spec.stepType !== "install_contrib_diff_plan"
     && spec.stepType !== "install_contrib_apply"
   ) {
@@ -1585,6 +1689,27 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     }, null, 2), "utf8");
     return {
       command: createHelperCommand("contrib", "install-plan", "--app", spec.appPath, "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "update_contrib_plan") {
+    const request = ContributionUpdatePlanRequestSchema.parse(spec.analysisPayload ?? {});
+    const resolved = resolveContributionUpdateSourceFromPayload(spec.analysisPayload);
+    const requestPath = path.join(tempDir, "contrib-update-plan-request.json");
+    await fs.writeFile(requestPath, JSON.stringify({
+      result: resolved.result,
+      package: resolved.package,
+      source: resolved.source,
+      sourceArtifactId: resolved.sourceArtifactId,
+      preferredAlias: request.preferredAlias,
+      replaceExisting: request.replaceExisting,
+      targetApp: request.targetApp
+    }, null, 2), "utf8");
+    return {
+      command: createHelperCommand("contrib", "update-plan", "--app", spec.appPath, "--request", requestPath),
       cleanup: async () => {
         await fs.rm(tempDir, { recursive: true, force: true });
       }
@@ -2048,6 +2173,11 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
       return createContributionInstallPlanArtifacts(spec, response.result as ContributionInstallPlanResultLike, diagnostics);
     }
 
+    if (spec.stepType === "update_contrib_plan") {
+      const response = ContributionUpdatePlanResponseSchema.parse(JSON.parse(stdout) as ContributionUpdatePlanResponse);
+      return createContributionUpdatePlanArtifacts(spec, response.result as ContributionUpdatePlanResultLike, diagnostics);
+    }
+
     if (spec.stepType === "install_contrib_diff_plan") {
       const response = ContributionInstallDiffPlanResponseSchema.parse(JSON.parse(stdout) as ContributionInstallDiffPlanResponse);
       return createContributionInstallDiffPlanArtifacts(spec, response.result as ContributionInstallDiffPlanResultLike, diagnostics);
@@ -2174,6 +2304,17 @@ function parseContributionInstallApplyArtifact(artifact?: ArtifactRef) {
   }
 
   const parsed = ContributionInstallApplyResponseSchema.safeParse({
+    result: artifact.metadata?.["result"]
+  });
+  return parsed.success ? parsed.data : undefined;
+}
+
+function parseContributionUpdatePlanArtifact(artifact?: ArtifactRef) {
+  if (!artifact) {
+    return undefined;
+  }
+
+  const parsed = ContributionUpdatePlanResponseSchema.safeParse({
     result: artifact.metadata?.["result"]
   });
   return parsed.success ? parsed.data : undefined;
@@ -2493,6 +2634,32 @@ export class RunnerExecutorService implements RunnerExecutor {
             applyResult?.staleReason ??
             applyResult?.recommendedNextAction ??
             "Contribution install apply was blocked because the saved diff preview was stale or not apply-ready.",
+          severity: "error"
+        });
+      }
+    }
+
+    if (spec.stepType === "update_contrib_plan" && executed.ok) {
+      const parsedUpdate = parseContributionUpdatePlanArtifact(
+        artifactByType(executed.artifacts, "contrib_update_plan")
+      );
+      const updateResult = parsedUpdate?.result;
+      const shouldFail =
+        updateResult?.updateReady === false ||
+        updateResult?.matchQuality === "ambiguous" ||
+        updateResult?.matchQuality === "none" ||
+        updateResult?.compatibility === "ambiguous" ||
+        updateResult?.compatibility === "incompatible" ||
+        (updateResult?.detectedInstalledContribution == null);
+      if (shouldFail) {
+        ok = false;
+        exitCode = 1;
+        summary = "Execution failed for update_contrib_plan";
+        diagnostics.push({
+          code: "runner.update_plan_blocked",
+          message:
+            updateResult?.recommendedNextAction ??
+            "Contribution update planning was blocked because the installed contribution could not be matched safely.",
           severity: "error"
         });
       }

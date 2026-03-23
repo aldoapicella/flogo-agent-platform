@@ -696,6 +696,286 @@ func TestValidateContributionInstallPlanRequestRejectsUnsupportedFormats(t *test
 	}
 }
 
+func TestPlanContributionUpdateBuildsConservativeExactMatchPlan(t *testing.T) {
+	app := flogoApp{
+		Name:     "update-app",
+		Type:     "flogo:app",
+		AppModel: "1.1.0",
+		Imports: []flogoImport{
+			{Alias: "webhooktrigger", Ref: "example.com/acme/webhook", Version: "0.1.0"},
+		},
+		Triggers:  []flogoTrigger{},
+		Resources: []flogoFlow{},
+		Raw:       map[string]any{},
+	}
+	response := scaffoldTrigger(triggerScaffoldRequest{
+		TriggerName: "Webhook Trigger",
+		ModulePath:  "example.com/acme/webhook",
+		PackageName: "webhooktrigger",
+		Title:       "Webhook Trigger",
+		Description: "Dispatches an internal webhook event.",
+		Version:     "0.2.0",
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	packaged := packageContribution(contributionPackageRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundleFromTrigger(result.Bundle),
+			Validation: result.Validation,
+			Build:      result.Build,
+			Test:       result.Test,
+		},
+		Source: "inline_result",
+		Format: "zip",
+	})
+
+	plan := planContributionUpdate(app, "examples/hello-rest/flogo.json", contributionUpdatePlanRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     packaged.Result.Bundle,
+			Validation: packaged.Result.Validation,
+			Build:      packaged.Result.Build,
+			Test:       packaged.Result.Test,
+		},
+		Package: &packaged.Result.Package,
+		Source:  "inline_package",
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   "examples/hello-rest/flogo.json",
+		},
+	})
+
+	if !plan.Result.UpdateReady {
+		t.Fatalf("expected exact installed match to produce an update-ready plan, got %+v", plan.Result)
+	}
+	if plan.Result.MatchQuality != "exact" {
+		t.Fatalf("expected exact match quality, got %+v", plan.Result)
+	}
+	if plan.Result.Compatibility != "compatible" {
+		t.Fatalf("expected compatible update plan, got %+v", plan.Result)
+	}
+	if plan.Result.DetectedInstalledContribution == nil || plan.Result.DetectedInstalledContribution.Alias != "webhooktrigger" {
+		t.Fatalf("expected installed contribution evidence, got %+v", plan.Result.DetectedInstalledContribution)
+	}
+	if len(plan.Result.PredictedChanges.ImportsToReplace) != 1 {
+		t.Fatalf("expected one import replacement, got %+v", plan.Result.PredictedChanges)
+	}
+	if !containsString(plan.Result.PredictedChanges.ChangedPaths, "imports") {
+		t.Fatalf("expected imports to be marked as changed, got %+v", plan.Result.PredictedChanges)
+	}
+}
+
+func TestPlanContributionUpdateMarksAmbiguousInstalledMatches(t *testing.T) {
+	app := flogoApp{
+		Name:     "ambiguous-update-app",
+		Type:     "flogo:app",
+		AppModel: "1.1.0",
+		Imports: []flogoImport{
+			{Alias: "webhooktrigger", Ref: "example.com/acme/webhook", Version: "0.1.0"},
+			{Alias: "legacywebhook", Ref: "example.com/acme/webhook", Version: "0.0.9"},
+		},
+		Triggers:  []flogoTrigger{},
+		Resources: []flogoFlow{},
+		Raw:       map[string]any{},
+	}
+	response := scaffoldTrigger(triggerScaffoldRequest{
+		TriggerName: "Webhook Trigger",
+		ModulePath:  "example.com/acme/webhook",
+		PackageName: "webhooktrigger",
+		Title:       "Webhook Trigger",
+		Description: "Dispatches an internal webhook event.",
+		Version:     "0.2.0",
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	plan := planContributionUpdate(app, "", contributionUpdatePlanRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundleFromTrigger(result.Bundle),
+			Validation: result.Validation,
+			Build:      result.Build,
+			Test:       result.Test,
+		},
+		Source: "inline_result",
+	})
+
+	if plan.Result.UpdateReady {
+		t.Fatalf("expected ambiguous installed matches to block update planning, got %+v", plan.Result)
+	}
+	if plan.Result.MatchQuality != "ambiguous" || plan.Result.Compatibility != "ambiguous" {
+		t.Fatalf("expected ambiguous update result, got %+v", plan.Result)
+	}
+	if len(plan.Result.Conflicts) == 0 || plan.Result.Conflicts[0].Kind != "ambiguous_match" {
+		t.Fatalf("expected ambiguous_match conflict metadata, got %+v", plan.Result.Conflicts)
+	}
+}
+
+func TestPlanContributionUpdateReportsNoInstalledMatch(t *testing.T) {
+	app := bindableTestApp()
+	response := scaffoldTrigger(triggerScaffoldRequest{
+		TriggerName: "Webhook Trigger",
+		ModulePath:  "example.com/acme/webhook",
+		PackageName: "webhooktrigger",
+		Title:       "Webhook Trigger",
+		Description: "Dispatches an internal webhook event.",
+		Version:     "0.2.0",
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	plan := planContributionUpdate(app, "examples/hello-rest/flogo.json", contributionUpdatePlanRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundleFromTrigger(result.Bundle),
+			Validation: result.Validation,
+			Build:      result.Build,
+			Test:       result.Test,
+		},
+		Source: "inline_result",
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   "examples/hello-rest/flogo.json",
+		},
+	})
+
+	if plan.Result.MatchQuality != "none" {
+		t.Fatalf("expected no installed match, got %+v", plan.Result)
+	}
+	if plan.Result.Compatibility != "not_installed" {
+		t.Fatalf("expected not_installed compatibility, got %+v", plan.Result)
+	}
+	if plan.Result.UpdateReady {
+		t.Fatalf("expected update planning to stop without an installed match, got %+v", plan.Result)
+	}
+	if !containsString(plan.Result.Warnings, "No installed contribution match was detected; use install planning instead of update planning if this contribution is new to the app.") {
+		t.Fatalf("expected no-match warning, got %+v", plan.Result.Warnings)
+	}
+}
+
+func TestPlanContributionUpdatePlansAliasScopedReplacement(t *testing.T) {
+	app := flogoApp{
+		Name:     "replace-update-app",
+		Type:     "flogo:app",
+		AppModel: "1.1.0",
+		Imports: []flogoImport{
+			{Alias: "webhooktrigger", Ref: "github.com/project-flogo/contrib/trigger/rest", Version: "0.1.0"},
+		},
+		Triggers:  []flogoTrigger{},
+		Resources: []flogoFlow{},
+		Raw:       map[string]any{},
+	}
+	response := scaffoldTrigger(triggerScaffoldRequest{
+		TriggerName: "Webhook Trigger",
+		ModulePath:  "example.com/acme/webhook",
+		PackageName: "webhooktrigger",
+		Title:       "Webhook Trigger",
+		Description: "Dispatches an internal webhook event.",
+		Version:     "0.2.0",
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	plan := planContributionUpdate(app, "", contributionUpdatePlanRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundleFromTrigger(result.Bundle),
+			Validation: result.Validation,
+			Build:      result.Build,
+			Test:       result.Test,
+		},
+		Source:         "inline_result",
+		PreferredAlias: "webhooktrigger",
+	})
+
+	if !plan.Result.UpdateReady {
+		t.Fatalf("expected alias-scoped replacement to remain update-ready, got %+v", plan.Result)
+	}
+	if len(plan.Result.PredictedChanges.ImportsToReplace) != 1 {
+		t.Fatalf("expected one replacement import, got %+v", plan.Result.PredictedChanges)
+	}
+	if plan.Result.PredictedChanges.ImportsToReplace[0].ExistingRef != "github.com/project-flogo/contrib/trigger/rest" {
+		t.Fatalf("expected replacement to retain the existing ref evidence, got %+v", plan.Result.PredictedChanges.ImportsToReplace)
+	}
+	if plan.Result.PredictedChanges.ImportsToReplace[0].Ref != "example.com/acme/webhook" {
+		t.Fatalf("expected replacement to point at the new ref, got %+v", plan.Result.PredictedChanges.ImportsToReplace)
+	}
+}
+
+func TestPlanContributionUpdateLowersReadinessWhenProofIsIncomplete(t *testing.T) {
+	app := flogoApp{
+		Name:     "proof-update-app",
+		Type:     "flogo:app",
+		AppModel: "1.1.0",
+		Imports: []flogoImport{
+			{Alias: "webhooktrigger", Ref: "example.com/acme/webhook", Version: "0.1.0"},
+		},
+		Triggers:  []flogoTrigger{},
+		Resources: []flogoFlow{},
+		Raw:       map[string]any{},
+	}
+	response := scaffoldTrigger(triggerScaffoldRequest{
+		TriggerName: "Webhook Trigger",
+		ModulePath:  "example.com/acme/webhook",
+		PackageName: "webhooktrigger",
+		Title:       "Webhook Trigger",
+		Description: "Dispatches an internal webhook event.",
+		Version:     "0.2.0",
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	plan := planContributionUpdate(app, "", contributionUpdatePlanRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundleFromTrigger(result.Bundle),
+			Validation: result.Validation,
+			Build: contribProofStep{
+				Kind:     "build",
+				Ok:       false,
+				ExitCode: 1,
+				Summary:  "go build failed",
+				Command:  []string{"go", "build", "./..."},
+			},
+			Test: result.Test,
+		},
+		Source: "inline_result",
+	})
+
+	if plan.Result.UpdateReady {
+		t.Fatalf("expected incomplete proof to block update planning, got %+v", plan.Result)
+	}
+	if plan.Result.Readiness != "low" {
+		t.Fatalf("expected low readiness when proof is incomplete, got %+v", plan.Result)
+	}
+	if len(plan.Result.Conflicts) == 0 || plan.Result.Conflicts[0].Kind != "insufficient_metadata" {
+		t.Fatalf("expected insufficient_metadata conflict, got %+v", plan.Result.Conflicts)
+	}
+}
+
 func TestPlanContributionInstallDiffBuildsExactCanonicalPreview(t *testing.T) {
 	app := bindableTestApp()
 	response := scaffoldTrigger(triggerScaffoldRequest{

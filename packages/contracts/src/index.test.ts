@@ -6,6 +6,8 @@ import {
   ContributionInstallApplyResponseSchema,
   ContributionInstallDiffPlanRequestSchema,
   ContributionInstallDiffPlanResponseSchema,
+  ContributionUpdatePlanRequestSchema,
+  ContributionUpdatePlanResponseSchema,
   ActionScaffoldRequestSchema,
   ActionScaffoldResponseSchema,
   ContributionInstallPlanRequestSchema,
@@ -612,6 +614,131 @@ describe("ContributionInstallDiffPlanRequestSchema", () => {
 
     expect(parsed.installPlanArtifactId).toBe("artifact-install-plan-1");
     expect(parsed.installPlanResult?.selectedAlias).toBe("webhooktrigger");
+  });
+});
+
+describe("ContributionUpdatePlanRequestSchema", () => {
+  it("accepts update planning input backed by a contribution package artifact id", () => {
+    const parsed = ContributionUpdatePlanRequestSchema.parse({
+      packageArtifactId: "artifact-package-9",
+      targetApp: {
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json"
+      }
+    });
+
+    expect(parsed.packageArtifactId).toBe("artifact-package-9");
+  });
+
+  it("rejects missing contribution update sources", () => {
+    expect(() => ContributionUpdatePlanRequestSchema.parse({})).toThrow(
+      /Provide one contribution source via bundleArtifactId, bundleArtifact, result, packageArtifactId, packageArtifact, or packageResult/
+    );
+  });
+});
+
+describe("ContributionUpdatePlanResponseSchema", () => {
+  it("parses a conservative contribution update plan result", () => {
+    const parsed = ContributionUpdatePlanResponseSchema.parse({
+      result: {
+        contributionKind: "trigger",
+        source: "package_artifact",
+        sourceArtifactId: "artifact-package-9",
+        targetApp: {
+          projectId: "demo",
+          appId: "hello-rest",
+          appPath: "examples/hello-rest/flogo.json",
+          appName: "hello-rest"
+        },
+        bundle: {
+          kind: "trigger",
+          modulePath: "example.com/acme/webhook",
+          packageName: "webhooktrigger",
+          bundleRoot: "/tmp/flogo-trigger-webhooktrigger",
+          descriptor: {
+            ref: "example.com/acme/webhook",
+            alias: "webhooktrigger",
+            type: "trigger",
+            name: "webhook-trigger",
+            version: "0.2.0",
+            title: "Webhook Trigger",
+            settings: [],
+            handlerSettings: [],
+            outputs: [],
+            reply: [],
+            examples: [],
+            compatibilityNotes: ["Generated scaffold"],
+            source: "trigger_scaffold"
+          },
+          files: []
+        },
+        package: {
+          format: "zip",
+          fileName: "trigger-webhooktrigger.zip",
+          path: "/tmp/trigger-webhooktrigger.zip",
+          bytes: 128,
+          sha256: "abc123",
+          base64: "YWJj"
+        },
+        modulePath: "example.com/acme/webhook",
+        packageName: "webhooktrigger",
+        packagePath: "example.com/acme/webhook",
+        descriptorRef: "example.com/acme/webhook",
+        appFingerprint: "app-sha",
+        planFingerprint: "update-sha",
+        selectedAlias: "webhooktrigger",
+        detectedInstalledContribution: {
+          alias: "webhooktrigger",
+          ref: "example.com/acme/webhook",
+          version: "0.1.0",
+          type: "trigger",
+          modulePath: "example.com/acme/webhook",
+          matchedBy: ["ref", "alias"],
+          confidence: "high"
+        },
+        matchQuality: "exact",
+        compatibility: "compatible",
+        updateReady: true,
+        readiness: "high",
+        predictedChanges: {
+          importsToReplace: [
+            {
+              alias: "webhooktrigger",
+              ref: "example.com/acme/webhook",
+              version: "0.2.0",
+              action: "replace_existing",
+              existingAlias: "webhooktrigger",
+              existingRef: "example.com/acme/webhook"
+            }
+          ],
+          importsToKeep: [],
+          importsToAdd: [],
+          importsToRemove: [],
+          refsToReplace: [],
+          refsToKeep: [
+            {
+              surface: "triggerRef",
+              value: "#webhooktrigger"
+            }
+          ],
+          refsToAdd: [],
+          refsToRemove: [],
+          changedPaths: ["imports"],
+          summaryLines: ["Replace the existing import metadata for alias \"webhooktrigger\"."],
+          noMutation: true
+        },
+        warnings: [],
+        conflicts: [],
+        diagnostics: [],
+        recommendedNextAction: "Review the update plan before requesting an exact update diff preview.",
+        limitations: ["Planning only; no flogo.json mutation was applied."]
+      }
+    });
+
+    expect(parsed.result.matchQuality).toBe("exact");
+    expect(parsed.result.updateReady).toBe(true);
+    expect(parsed.result.predictedChanges.changedPaths).toEqual(["imports"]);
   });
 });
 

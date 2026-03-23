@@ -478,6 +478,24 @@ export class RunnerTools {
     });
   }
 
+  async updateContribPlan(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "update_contrib_plan",
+      jobKind: "contrib_update_plan",
+      analysisKind: "update_contrib_plan"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued contribution update planning job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
   async installContribDiffPlan(spec: unknown): Promise<ToolResponse> {
     const parsed = RunnerJobSpecSchema.parse(spec);
     const result = await this.dispatcher.dispatch({

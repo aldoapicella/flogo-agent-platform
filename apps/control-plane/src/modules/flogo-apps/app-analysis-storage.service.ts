@@ -80,6 +80,7 @@ export class AppAnalysisStorageService {
       | "contrib_validation_report"
       | "contrib_package"
       | "contrib_install_plan"
+      | "contrib_update_plan"
       | "contrib_install_diff_plan"
       | "contrib_install_apply_result"
       | "build_log"

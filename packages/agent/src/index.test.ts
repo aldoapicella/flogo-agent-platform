@@ -372,4 +372,32 @@ describe("TaskPlanner shared contribution lifecycle modes", () => {
       "runner.installContribApply"
     ]);
   });
+
+  it("treats explicit contribution update planning mode as analysis-only authoring work", () => {
+    const planner = new TaskPlanner();
+    const plan = planner.plan({
+      type: "review",
+      projectId: "demo",
+      appId: "hello-rest",
+      requestedBy: "operator",
+      summary: "Plan how to update an already installed contribution in the target app",
+      inputs: {
+        mode: "update_contrib_plan",
+        packageArtifactId: "artifact-1"
+      },
+      constraints: {
+        allowDependencyChanges: false,
+        allowCustomCode: false,
+        targetEnv: "dev",
+        requireApproval: true
+      }
+    });
+
+    expect(plan.requiredApprovals).toEqual([]);
+    expect(plan.steps.map((step) => step.tool)).toEqual([
+      "flogo.parseApp",
+      "flogo.validateApp",
+      "runner.updateContribPlan"
+    ]);
+  });
 });

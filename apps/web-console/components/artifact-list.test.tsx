@@ -369,6 +369,93 @@ describe("ArtifactList", () => {
     expect(html).toContain("blob path: task-artifacts/demo/task-7/contrib_install_diff_plan/artifact-7.json");
   });
 
+  it("renders contribution update-plan summaries with installed-match evidence and conservative replacements", () => {
+    const html = renderToStaticMarkup(
+      <ArtifactList
+        artifacts={[
+          {
+            id: "artifact-9",
+            type: "contrib_update_plan",
+            name: "trigger-update-plan-webhooktrigger",
+            uri: "memory://task-9/trigger-update-plan-webhooktrigger",
+            metadata: {
+              storage: {
+                kind: "blob",
+                blobPath: "task-artifacts/demo/task-9/contrib_update_plan/artifact-9.json",
+                durablePayload: true
+              },
+              result: {
+                contributionKind: "trigger",
+                targetApp: {
+                  appId: "hello-rest"
+                },
+                bundle: {
+                  kind: "trigger",
+                  packageName: "webhooktrigger",
+                  modulePath: "example.com/acme/webhook",
+                  files: [{ kind: "descriptor" }, { kind: "implementation" }, { kind: "test" }]
+                },
+                modulePath: "example.com/acme/webhook",
+                selectedAlias: "webhooktrigger",
+                detectedInstalledContribution: {
+                  alias: "webhooktrigger",
+                  ref: "example.com/acme/webhook",
+                  version: "0.1.0",
+                  matchedBy: ["alias+ref"],
+                  confidence: "high"
+                },
+                matchQuality: "exact",
+                compatibility: "compatible",
+                updateReady: true,
+                readiness: "high",
+                predictedChanges: {
+                  importsToReplace: [
+                    {
+                      alias: "webhooktrigger",
+                      ref: "example.com/acme/webhook",
+                      action: "replace_existing"
+                    }
+                  ],
+                  importsToKeep: [],
+                  importsToAdd: [],
+                  importsToRemove: [],
+                  refsToReplace: [
+                    {
+                      surface: "triggerRef",
+                      value: "#webhooktrigger"
+                    }
+                  ],
+                  refsToKeep: [],
+                  refsToAdd: [],
+                  refsToRemove: [],
+                  changedPaths: ["imports"],
+                  summaryLines: ["Replace import alias \"webhooktrigger\" in place."],
+                  noMutation: true
+                },
+                warnings: [],
+                conflicts: [],
+                recommendedNextAction: "Review the update plan before requesting an exact update diff preview."
+              }
+            }
+          }
+        ]}
+      />
+    );
+
+    expect(html).toContain("contribution type: trigger");
+    expect(html).toContain("target app: hello-rest");
+    expect(html).toContain("detected installed contribution: alias webhooktrigger, ref example.com/acme/webhook, version 0.1.0");
+    expect(html).toContain("match quality: exact");
+    expect(html).toContain("compatibility: compatible");
+    expect(html).toContain("proposed imports: webhooktrigger -&gt; example.com/acme/webhook (replace_existing)");
+    expect(html).toContain("proposed refs: triggerRef: #webhooktrigger");
+    expect(html).toContain("update ready: yes");
+    expect(html).toContain("readiness: high");
+    expect(html).toContain("changed paths: imports");
+    expect(html).toContain("next action: Review the update plan before requesting an exact update diff preview.");
+    expect(html).toContain("blob path: task-artifacts/demo/task-9/contrib_update_plan/artifact-9.json");
+  });
+
   it("renders install apply summaries with approval, apply status, and changed canonical paths", () => {
     const html = renderToStaticMarkup(
       <ArtifactList

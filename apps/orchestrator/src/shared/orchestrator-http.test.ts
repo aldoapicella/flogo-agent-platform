@@ -477,4 +477,50 @@ describe("orchestrator-http", () => {
       }
     });
   });
+
+  it("routes update_contrib_plan mode to the shared contribution update-planning runner step", () => {
+    const start: OrchestratorStartRequest = {
+      taskId: "task-update-contrib-plan",
+      request: {
+        type: "review",
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json",
+        requestedBy: "operator",
+        summary: "Plan how to update an installed contribution in the target app",
+        inputs: {
+          mode: "update_contrib_plan",
+          packageArtifactId: "artifact-6",
+          preferredAlias: "webhooktrigger",
+          replaceExisting: true
+        },
+        constraints: {
+          allowDependencyChanges: false,
+          allowCustomCode: false,
+          targetEnv: "dev",
+          requireApproval: true
+        }
+      },
+      requiredApprovals: [],
+      planSummary: "Plan contribution update",
+      steps: []
+    };
+
+    expect(resolveWorkflowRunnerSteps(start)).toEqual(["update_contrib_plan"]);
+
+    const spec = buildRunnerJobSpec(start, "update_contrib_plan");
+
+    expect(spec.jobKind).toBe("contrib_update_plan");
+    expect(spec.analysisKind).toBe("update_contrib_plan");
+    expect(spec.analysisPayload).toMatchObject({
+      packageArtifactId: "artifact-6",
+      preferredAlias: "webhooktrigger",
+      replaceExisting: true,
+      targetApp: {
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json"
+      }
+    });
+  });
 });

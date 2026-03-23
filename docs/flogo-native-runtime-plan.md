@@ -511,16 +511,17 @@ Focus:
 
 Current status:
 
-- partially implemented in three narrow scaffold slices plus five shared authoring-generalization slices: custom Activity scaffolding, custom Trigger scaffolding, and a narrower custom Action scaffolding slice now exist as analysis-oriented task modes that generate descriptor metadata plus Go/module/test/readme files, shared `validate_contrib` / `package_contrib` task modes can now re-run proof and package one existing scaffold bundle reviewably, `install_contrib_plan` can now analyze one existing bundle/package against one target app reviewably, `install_contrib_diff_plan` can now materialize the exact canonical `flogo.json` preview for one existing install plan without mutating the target app, and `install_contrib_apply` can now consume that exact diff preview review-gated and write the saved canonical mutation to one target app,
-- the resulting `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `contrib_install_apply_result`, `flogo_json`, `build_log`, and `test_report` artifacts are now persisted through the control-plane task pipeline and uploaded through the Blob/Azurite storage seam used for app-analysis payloads,
+- partially implemented in three narrow scaffold slices plus six shared authoring-generalization slices: custom Activity scaffolding, custom Trigger scaffolding, and a narrower custom Action scaffolding slice now exist as analysis-oriented task modes that generate descriptor metadata plus Go/module/test/readme files, shared `validate_contrib` / `package_contrib` task modes can now re-run proof and package one existing scaffold bundle reviewably, `install_contrib_plan` can now analyze one existing bundle/package against one target app reviewably, `install_contrib_diff_plan` can now materialize the exact canonical `flogo.json` preview for one existing install plan without mutating the target app, `install_contrib_apply` can now consume that exact diff preview review-gated and write the saved canonical mutation to one target app, and `update_contrib_plan` can now analyze one existing installed contribution conservatively without mutating the target app,
+- the resulting `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `contrib_install_apply_result`, `contrib_update_plan`, `flogo_json`, `build_log`, and `test_report` artifacts are now persisted through the control-plane task pipeline and uploaded through the Blob/Azurite storage seam used for app-analysis payloads,
 - `install_contrib_plan` is now implemented as an analysis-only Phase 4.5 slice that inspects one existing bundle/package against one target app and emits a reviewable predicted install without mutating `flogo.json`,
 - `install_contrib_diff_plan` is now implemented as an analysis-only Phase 4.6 slice that consumes one prior install plan, validates that the target app still matches the planning basis, and emits the exact canonical diff preview without mutating `flogo.json`,
 - `install_contrib_apply` is now implemented as the narrow Phase 4.7 review-gated install/apply slice that consumes one prior exact diff preview, revalidates drift, writes the exact saved canonical mutation to `flogo.json`, and persists both an apply-result artifact and the resulting canonical app output,
-- update/apply flows and automatic install/update into apps remain later work.
+- `update_contrib_plan` is now implemented as the narrow Phase 4.8 analysis-only slice that inspects one existing bundle/package against one target app, detects an already installed contribution match conservatively, and emits a reviewable update plan without mutating `flogo.json`,
+- exact update diff/apply flows and automatic install/update into apps remain later work.
 
 ## Current Implementation Baseline
 
-The current codebase has a completed Phase 1 foundation, an implemented Phase 2 design surface with the limitations noted above, a partially runtime-backed Phase 3 runtime-evidence surface with a landed Phase 3.2 recorder-backed/narrow-replay foundation on one supported slice, and a narrow Phase 4 Activity/Trigger/Action authoring foundation plus shared validate/package/install-plan/install-diff-plan/install-apply groundwork rather than only placeholders.
+The current codebase has a completed Phase 1 foundation, an implemented Phase 2 design surface with the limitations noted above, a partially runtime-backed Phase 3 runtime-evidence surface with a landed Phase 3.2 recorder-backed/narrow-replay foundation on one supported slice, and a narrow Phase 4 Activity/Trigger/Action authoring foundation plus shared validate/package/install-plan/install-diff-plan/install-apply/update-plan groundwork rather than only placeholders.
 
 ### Implemented now
 
@@ -583,8 +584,10 @@ Analysis-only planner modes:
 - `inputs.mode = "package_contrib"`
 - `inputs.mode = "install_contrib_plan"`
 - `inputs.mode = "install_contrib_diff_plan"`
+- `inputs.mode = "update_contrib_plan"`
+Review-gated mutating planner modes:
 - `inputs.mode = "install_contrib_apply"`
-Runner job kinds and execution steps for flow contracts, runtime trace capture, replay, run comparison, diagnosis, trigger binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, contribution evidence, governance, composition comparison, mapping preview, and narrow Activity/Action/Trigger scaffold/validate/package/install-plan/install-diff-plan/install-apply authoring
+Runner job kinds and execution steps for flow contracts, runtime trace capture, replay, run comparison, diagnosis, trigger binding, subflow extraction/inlining, iterator/retry/doWhile/error-path synthesis, inventory, catalog, contribution evidence, governance, composition comparison, mapping preview, and narrow Activity/Action/Trigger scaffold/validate/package/install-plan/install-diff-plan/install-apply/update-plan authoring
 Go helper commands:
 - `flows contracts`
 - `triggers bind`
@@ -614,6 +617,7 @@ Go helper commands:
 - `contrib install-plan`
 - `contrib install-diff-plan`
 - `contrib install-apply`
+- `contrib update-plan`
 
 ### Not implemented yet
 
