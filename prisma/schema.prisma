@@ -37,6 +37,7 @@ enum ApprovalType {
   change_public_contract
   dependency_upgrade
   custom_code
+  install_contribution
   external_endpoint_change
   deploy
 }
@@ -86,6 +87,11 @@ enum ArtifactKind {
   run_comparison_plan
   run_comparison
   contrib_bundle
+  contrib_validation_report
+  contrib_package
+  contrib_install_plan
+  contrib_install_diff_plan
+  contrib_install_apply_result
 }
 
 model Organization {

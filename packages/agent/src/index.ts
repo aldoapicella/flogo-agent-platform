@@ -114,6 +114,10 @@ function getAnalysisMode(
 
 export class PolicyEngine {
   evaluate(task: TaskRequest): ApprovalType[] {
+    if (task.inputs["mode"] === "install_contrib_apply") {
+      return ["install_contribution"];
+    }
+
     if (getAnalysisMode(task)) {
       return [];
     }
@@ -148,7 +152,8 @@ export class TaskPlanner {
     const validation = task.type === "create" ? undefined : this.validateDraft(task);
     const summary = task.summary.toLowerCase();
     const analysisMode = getAnalysisMode(task);
-    let skipMutationTail = Boolean(analysisMode);
+    const installApplyMode = task.inputs["mode"] === "install_contrib_apply";
+    let skipMutationTail = Boolean(analysisMode || installApplyMode);
     const steps: ExecutionPlanStep[] = [
       { id: "graph", label: "Parse current Flogo graph", tool: "flogo.parseApp" },
       { id: "validate", label: "Validate structure and mappings", tool: "flogo.validateApp" }
@@ -202,6 +207,12 @@ export class TaskPlanner {
       steps.push({ id: "install-contrib-plan", label: "Plan a reviewable contribution install into the target Flogo app without mutating flogo.json", tool: "runner.installContribPlan" });
     } else if (analysisMode === "install_contrib_diff_plan") {
       steps.push({ id: "install-contrib-diff-plan", label: "Preview the exact canonical flogo.json mutation for a reviewable contribution install without mutating the app", tool: "runner.installContribDiffPlan" });
+    } else if (installApplyMode) {
+      steps.push({
+        id: "install-contrib-apply",
+        label: "Apply one approved exact contribution install diff to canonical flogo.json after drift revalidation",
+        tool: "runner.installContribApply"
+      });
     } else if (analysisMode === "mapping_preview") {
       steps.push({ id: "mapping", label: "Preview mappings and suggest coercions", tool: "runner.previewMapping" });
       steps.push({ id: "properties", label: "Plan app properties and environment usage", tool: "flogo.planProperties" });

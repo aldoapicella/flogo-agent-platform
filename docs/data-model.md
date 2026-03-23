@@ -76,6 +76,7 @@ Important current `inputs` conventions:
 - `mode = "package_contrib"` for analysis-only shared contribution packaging after proof
 - `mode = "install_contrib_plan"` for analysis-only reviewable install planning against one target app
 - `mode = "install_contrib_diff_plan"` for analysis-only exact canonical install diff preview against one target app
+- `mode = "install_contrib_apply"` for review-gated exact install apply against one target app
 - `mode = "governance"` for analysis-only alias/orphan/version validation
 - `mode = "composition_compare"` for analysis-only JSON vs programmatic comparison
 
@@ -197,6 +198,7 @@ Current artifact kinds:
 - `contrib_package`
 - `contrib_install_plan`
 - `contrib_install_diff_plan`
+- `contrib_install_apply_result`
 
 ## Flogo-native contracts
 
@@ -235,6 +237,24 @@ These describe:
 - machine-readable predicted import/ref changes plus changed paths and diff summary,
 - warnings, conflicts, limitations, and recommended next action,
 - review-oriented diff preview without any `flogo.json` mutation.
+
+### Contribution install-apply contracts
+
+Important schemas:
+
+- `ContributionInstallApplyRequest`
+- `ContributionInstallApplyResult`
+- `ContributionInstallApplyResponse`
+
+These describe:
+
+- one exact install-diff source selected from a persisted or inline `contrib_install_diff_plan`,
+- one target app identity and resolved app path,
+- review-gated apply metadata including source diff/install-plan identity plus before/after fingerprints,
+- stale/drift detection before writing the canonical app,
+- exact changed paths and applied import/ref decisions reused from the saved diff preview,
+- warnings, conflicts, limitations, approval metadata, and recommended next action,
+- one resulting canonical app payload plus persisted `flogo_json` output when the apply succeeds.
 
 ### Contribution catalog contracts
 
@@ -795,7 +815,7 @@ Current runtime behavior is mixed:
 
 - persisted metadata is stored in PostgreSQL,
 - inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test payloads are stored as Blob/Azurite-backed JSON objects,
-- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `build_log`, and `test_report` task artifacts are also stored as Blob/Azurite-backed JSON objects while retaining Prisma metadata for task detail rendering,
+- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `contrib_install_apply_result`, `flogo_json`, `build_log`, and `test_report` task artifacts are also stored as Blob/Azurite-backed JSON objects while retaining Prisma metadata for task detail rendering,
 - many broader task artifacts still use logical or local URIs.
 
 This matters for operators:
@@ -835,6 +855,8 @@ Examples:
 - `contrib_package` is now produced by the shared contribution packaging slice, carries conservative package metadata plus shared proof results for Activity, Action, and Trigger bundles, and is uploaded through the same Blob/Azurite storage seam.
 - `contrib_install_plan` is now produced by the shared contribution install-planning slice, carries target-app identity, predicted imports/refs, warnings, conflicts, readiness, recommended next action, and limitations for Activity, Action, and Trigger bundles/packages, and is uploaded through the same Blob/Azurite storage seam.
 - `contrib_install_diff_plan` is now produced by the exact install diff-preview slice, carries target-app/install-plan fingerprints, exact canonical before/after preview content, changed paths, predicted import/ref changes, stale-plan detection, warnings/conflicts, and recommended next action for Activity, Action, and Trigger bundles/packages, and is uploaded through the same Blob/Azurite storage seam.
+- `contrib_install_apply_result` is now produced by the review-gated install/apply slice, carries source diff/install-plan identity, before/after app fingerprints, apply status, changed paths, applied import/ref decisions, warnings/conflicts/limitations, and recommended next action, and is uploaded through the same Blob/Azurite storage seam.
+- `flogo_json` is now also emitted as a task artifact for successful install/apply tasks so the exact updated canonical app output remains reviewable and durable alongside the apply result.
 - graph projections in Prisma exist, but the current runtime does not fully maintain them.
 - task persistence is live, app-analysis payload storage is live, and contribution-authoring bundle/validation/package/proof payload storage is live, but workspace snapshots and broader blob-backed runtime artifact content are still planned work.
 

@@ -134,6 +134,9 @@ export function resolveWorkflowRunnerSteps(start: OrchestratorStartRequest): Run
   if (mode === "install_contrib_diff_plan") {
     return ["install_contrib_diff_plan"];
   }
+  if (mode === "install_contrib_apply") {
+    return ["install_contrib_apply"];
+  }
   if (mode === "mapping_preview") {
     return ["preview_mapping"];
   }
@@ -246,6 +249,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
       break;
     case "install_contrib_diff_plan":
       jobKind = "contrib_install_diff_plan";
+      break;
+    case "install_contrib_apply":
+      jobKind = "contrib_install_apply";
       break;
     case "preview_mapping":
       jobKind = "mapping_preview";
@@ -843,6 +849,27 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
         }
       };
       break;
+    case "install_contrib_apply":
+      analysisPayload = {
+        installDiffArtifactId:
+          typeof start.request.inputs["installDiffArtifactId"] === "string"
+            ? (start.request.inputs["installDiffArtifactId"] as string)
+            : undefined,
+        installDiffArtifact:
+          start.request.inputs["installDiffArtifact"] && typeof start.request.inputs["installDiffArtifact"] === "object" && !Array.isArray(start.request.inputs["installDiffArtifact"])
+            ? (start.request.inputs["installDiffArtifact"] as Record<string, unknown>)
+            : undefined,
+        installDiffResult:
+          start.request.inputs["installDiffResult"] && typeof start.request.inputs["installDiffResult"] === "object" && !Array.isArray(start.request.inputs["installDiffResult"])
+            ? (start.request.inputs["installDiffResult"] as Record<string, unknown>)
+            : undefined,
+        targetApp: {
+          projectId: start.request.projectId,
+          appId: start.request.appId,
+          appPath: start.request.appPath
+        }
+      };
+      break;
     default:
       analysisPayload = undefined;
       break;
@@ -907,6 +934,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
       break;
     case "install_contrib_diff_plan":
       analysisKind = "install_contrib_diff_plan";
+      break;
+    case "install_contrib_apply":
+      analysisKind = "install_contrib_apply";
       break;
     case "preview_mapping":
       analysisKind = "mapping_preview";

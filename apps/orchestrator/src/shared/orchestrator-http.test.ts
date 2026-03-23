@@ -435,4 +435,46 @@ describe("orchestrator-http", () => {
       }
     });
   });
+
+  it("routes install_contrib_apply mode to the approval-gated canonical apply runner step", () => {
+    const start: OrchestratorStartRequest = {
+      taskId: "task-install-contrib-apply",
+      request: {
+        type: "update",
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json",
+        requestedBy: "operator",
+        summary: "Apply the approved contribution install diff",
+        inputs: {
+          mode: "install_contrib_apply",
+          installDiffArtifactId: "artifact-install-diff-5"
+        },
+        constraints: {
+          allowDependencyChanges: false,
+          allowCustomCode: false,
+          targetEnv: "dev",
+          requireApproval: true
+        }
+      },
+      requiredApprovals: ["install_contribution"],
+      planSummary: "Apply contribution install diff",
+      steps: []
+    };
+
+    expect(resolveWorkflowRunnerSteps(start)).toEqual(["install_contrib_apply"]);
+
+    const spec = buildRunnerJobSpec(start, "install_contrib_apply");
+
+    expect(spec.jobKind).toBe("contrib_install_apply");
+    expect(spec.analysisKind).toBe("install_contrib_apply");
+    expect(spec.analysisPayload).toMatchObject({
+      installDiffArtifactId: "artifact-install-diff-5",
+      targetApp: {
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json"
+      }
+    });
+  });
 });

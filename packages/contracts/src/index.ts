@@ -20,6 +20,7 @@ export const ApprovalTypeSchema = z.enum([
   "change_public_contract",
   "dependency_upgrade",
   "custom_code",
+  "install_contribution",
   "external_endpoint_change",
   "deploy"
 ]);
@@ -71,7 +72,8 @@ export const ArtifactTypeSchema = z.enum([
   "contrib_validation_report",
   "contrib_package",
   "contrib_install_plan",
-  "contrib_install_diff_plan"
+  "contrib_install_diff_plan",
+  "contrib_install_apply_result"
 ]);
 export type ArtifactType = z.infer<typeof ArtifactTypeSchema>;
 
@@ -705,6 +707,12 @@ export const ContributionInstallDiffPlanArtifactSchema = ArtifactRefSchema.exten
 });
 export type ContributionInstallDiffPlanArtifact = z.infer<typeof ContributionInstallDiffPlanArtifactSchema>;
 
+export const ContributionInstallApplyResultArtifactSchema = ArtifactRefSchema.extend({
+  type: z.literal("contrib_install_apply_result"),
+  metadata: z.record(z.string(), z.unknown())
+});
+export type ContributionInstallApplyResultArtifact = z.infer<typeof ContributionInstallApplyResultArtifactSchema>;
+
 const contributionBundleInputShape = {
   bundleArtifactId: z.string().min(1).optional(),
   bundleArtifact: ContributionBundleArtifactSchema.optional(),
@@ -979,6 +987,26 @@ export const ContributionInstallDiffChangeSchema = z.object({
 });
 export type ContributionInstallDiffChange = z.infer<typeof ContributionInstallDiffChangeSchema>;
 
+export const ContributionInstallDiffSourceSchema = z.object({
+  kind: ContributionKindSchema,
+  modulePath: z.string(),
+  packageName: z.string().optional(),
+  packagePath: z.string().optional(),
+  descriptorRef: z.string().optional(),
+  selectedAlias: z.string(),
+  source: ContributionInstallSourceSchema,
+  sourceArtifactId: z.string().optional()
+});
+export type ContributionInstallDiffSource = z.infer<typeof ContributionInstallDiffSourceSchema>;
+
+export const ContributionInstallDiffPlanBasisSchema = z.object({
+  sourceArtifactId: z.string().optional(),
+  appFingerprint: z.string().optional(),
+  planFingerprint: z.string().optional(),
+  targetApp: ContributionInstallTargetSchema.optional()
+});
+export type ContributionInstallDiffPlanBasis = z.infer<typeof ContributionInstallDiffPlanBasisSchema>;
+
 export const ContributionInstallDiffPredictedChangesSchema = z.object({
   importsBefore: z.array(ContributionInstallImportEntrySchema).default([]),
   importsAfter: z.array(ContributionInstallImportEntrySchema).default([]),
@@ -999,23 +1027,9 @@ export type ContributionInstallDiffPlanRequest = z.infer<typeof ContributionInst
 
 export const ContributionInstallDiffPlanResultSchema = z.object({
   contributionKind: ContributionKindSchema,
-  sourceContribution: z.object({
-    kind: ContributionKindSchema,
-    modulePath: z.string(),
-    packageName: z.string().optional(),
-    packagePath: z.string().optional(),
-    descriptorRef: z.string().optional(),
-    selectedAlias: z.string(),
-    source: ContributionInstallSourceSchema,
-    sourceArtifactId: z.string().optional()
-  }),
+  sourceContribution: ContributionInstallDiffSourceSchema,
   targetApp: ContributionInstallTargetSchema,
-  basedOnInstallPlan: z.object({
-    sourceArtifactId: z.string().optional(),
-    appFingerprint: z.string().optional(),
-    planFingerprint: z.string().optional(),
-    targetApp: ContributionInstallTargetSchema.optional()
-  }),
+  basedOnInstallPlan: ContributionInstallDiffPlanBasisSchema,
   appFingerprintBefore: z.string(),
   appFingerprintAfter: z.string().optional(),
   installPlanFingerprint: z.string().optional(),
@@ -1051,6 +1065,84 @@ export const ContributionInstallDiffPlanResponseSchema = z.object({
   result: ContributionInstallDiffPlanResultSchema
 });
 export type ContributionInstallDiffPlanResponse = z.infer<typeof ContributionInstallDiffPlanResponseSchema>;
+
+const contributionInstallApplyInputShape = {
+  installDiffArtifactId: z.string().min(1).optional(),
+  installDiffArtifact: ContributionInstallDiffPlanArtifactSchema.optional(),
+  installDiffResult: ContributionInstallDiffPlanResultSchema.optional(),
+  targetApp: ContributionInstallTargetSchema.default({})
+} as const;
+
+function validateContributionInstallApplyInput(
+  value: {
+    installDiffArtifactId?: string;
+    installDiffArtifact?: ContributionInstallDiffPlanArtifact;
+    installDiffResult?: ContributionInstallDiffPlanResult;
+  },
+  ctx: z.RefinementCtx
+) {
+  const sourceCount = [
+    value.installDiffArtifactId,
+    value.installDiffArtifact,
+    value.installDiffResult
+  ].filter(Boolean).length;
+
+  if (sourceCount === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide installDiffArtifactId, installDiffArtifact, or installDiffResult.",
+      path: ["installDiffArtifactId"]
+    });
+  }
+}
+
+export const ContributionInstallApplyRequestSchema = z
+  .object(contributionInstallApplyInputShape)
+  .superRefine(validateContributionInstallApplyInput);
+export type ContributionInstallApplyRequest = z.infer<typeof ContributionInstallApplyRequestSchema>;
+
+export const ContributionInstallApplyBasisSchema = z.object({
+  sourceArtifactId: z.string().optional(),
+  installPlanArtifactId: z.string().optional(),
+  diffFingerprint: z.string().optional(),
+  appFingerprintBefore: z.string().optional(),
+  appFingerprintPreview: z.string().optional(),
+  targetApp: ContributionInstallTargetSchema.optional()
+});
+export type ContributionInstallApplyBasis = z.infer<typeof ContributionInstallApplyBasisSchema>;
+
+export const ContributionInstallApplyResultSchema = z.object({
+  contributionKind: ContributionKindSchema,
+  sourceContribution: ContributionInstallDiffSourceSchema,
+  targetApp: ContributionInstallTargetSchema,
+  basedOnInstallDiffPlan: ContributionInstallApplyBasisSchema,
+  appFingerprintBefore: z.string(),
+  appFingerprintAfter: z.string().optional(),
+  isStale: z.boolean(),
+  staleReason: z.string().optional(),
+  applied: z.boolean(),
+  applyReady: z.boolean(),
+  readiness: ContributionInstallReadinessSchema,
+  warnings: z.array(z.string()).default([]),
+  conflicts: z.array(ContributionInstallConflictSchema).default([]),
+  limitations: z.array(z.string()).default([]),
+  changedPaths: z.array(z.string()).default([]),
+  appliedImports: z.array(ContributionInstallImportEntrySchema).default([]),
+  appliedRefs: z.array(ContributionInstallRefEntrySchema).default([]),
+  applySummary: z.array(z.string()).default([]),
+  canonicalBeforeJson: z.string(),
+  canonicalAfterJson: z.string().optional(),
+  canonicalApp: z.record(z.string(), z.unknown()).optional(),
+  recommendedNextAction: z.string(),
+  approvalRequired: z.boolean().default(true),
+  mutationApplied: z.boolean().optional()
+});
+export type ContributionInstallApplyResult = z.infer<typeof ContributionInstallApplyResultSchema>;
+
+export const ContributionInstallApplyResponseSchema = z.object({
+  result: ContributionInstallApplyResultSchema
+});
+export type ContributionInstallApplyResponse = z.infer<typeof ContributionInstallApplyResponseSchema>;
 
 export const MappingKindSchema = z.enum(["literal", "expression", "object", "array"]);
 export type MappingKind = z.infer<typeof MappingKindSchema>;
@@ -2409,6 +2501,7 @@ export const RunnerStepTypeSchema = z.enum([
   "package_contrib",
   "install_contrib_plan",
   "install_contrib_diff_plan",
+  "install_contrib_apply",
   "diagnose_app"
 ]);
 export type RunnerStepType = z.infer<typeof RunnerStepTypeSchema>;
@@ -2444,6 +2537,7 @@ export const RunnerJobKindSchema = z.enum([
   "contrib_package",
   "contrib_install_plan",
   "contrib_install_diff_plan",
+  "contrib_install_apply",
   "diagnosis"
 ]);
 export type RunnerJobKind = z.infer<typeof RunnerJobKindSchema>;
@@ -2478,6 +2572,7 @@ export const AnalysisKindSchema = z.enum([
   "package_contrib",
   "install_contrib_plan",
   "install_contrib_diff_plan",
+  "install_contrib_apply",
   "diagnosis"
 ]);
 export type AnalysisKind = z.infer<typeof AnalysisKindSchema>;

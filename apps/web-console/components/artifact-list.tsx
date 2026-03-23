@@ -10,7 +10,8 @@ function artifactSummary(artifact: ArtifactRef) {
       artifact.type !== "contrib_validation_report" &&
       artifact.type !== "contrib_package" &&
       artifact.type !== "contrib_install_plan" &&
-      artifact.type !== "contrib_install_diff_plan") ||
+      artifact.type !== "contrib_install_diff_plan" &&
+      artifact.type !== "contrib_install_apply_result") ||
     !isRecord(artifact.metadata)
   ) {
     return null;
@@ -76,6 +77,13 @@ function artifactSummary(artifact: ArtifactRef) {
   const installReady = typeof result?.installReady === "boolean" ? result.installReady : undefined;
   const readiness = typeof result?.readiness === "string" ? result.readiness : undefined;
   const previewAvailable = typeof result?.previewAvailable === "boolean" ? result.previewAvailable : undefined;
+  const applied = typeof result?.applied === "boolean" ? result.applied : undefined;
+  const applyReady = typeof result?.applyReady === "boolean" ? result.applyReady : undefined;
+  const approvalRequired = typeof result?.approvalRequired === "boolean" ? result.approvalRequired : undefined;
+  const sourceDiffArtifactId =
+    isRecord(result?.basedOnInstallDiffPlan) && typeof result.basedOnInstallDiffPlan.sourceArtifactId === "string"
+      ? result.basedOnInstallDiffPlan.sourceArtifactId
+      : undefined;
   const isStale = typeof result?.isStale === "boolean" ? result.isStale : undefined;
   const staleReason = typeof result?.staleReason === "string" ? result.staleReason : undefined;
   const recommendedNextAction = typeof result?.recommendedNextAction === "string" ? result.recommendedNextAction : undefined;
@@ -90,20 +98,35 @@ function artifactSummary(artifact: ArtifactRef) {
             ...(Array.isArray(predictedChanges?.importsToUpdate) ? predictedChanges.importsToUpdate.filter(isRecord) : [])
           ];
   const proposedRefs =
-    Array.isArray(result?.proposedRefs)
+    Array.isArray(result?.appliedRefs)
+      ? result.appliedRefs.filter(isRecord)
+      : Array.isArray(result?.proposedRefs)
       ? result.proposedRefs.filter(isRecord)
       : [
             ...(Array.isArray(predictedChanges?.refsToAdd) ? predictedChanges.refsToAdd.filter(isRecord) : []),
             ...(Array.isArray(predictedChanges?.refsToReuse) ? predictedChanges.refsToReuse.filter(isRecord) : [])
           ];
-  const changedPaths = Array.isArray(predictedChanges?.changedPaths)
-    ? predictedChanges.changedPaths.filter((value): value is string => typeof value === "string")
-    : [];
-  const diffSummary = Array.isArray(result?.diffSummary)
-    ? result.diffSummary.filter((value): value is string => typeof value === "string")
+  const changedPaths = Array.isArray(result?.changedPaths)
+    ? result.changedPaths.filter((value): value is string => typeof value === "string")
+    : Array.isArray(predictedChanges?.changedPaths)
+      ? predictedChanges.changedPaths.filter((value): value is string => typeof value === "string")
+      : [];
+  const diffSummary = Array.isArray(result?.applySummary)
+    ? result.applySummary.filter((value): value is string => typeof value === "string")
+    : Array.isArray(result?.diffSummary)
+      ? result.diffSummary.filter((value): value is string => typeof value === "string")
     : [];
   const proposedImportSummary =
-    proposedImports.length > 0
+    Array.isArray(result?.appliedImports)
+      ? result.appliedImports.filter(isRecord)
+          .map((entry) => {
+            const alias = typeof entry.alias === "string" ? entry.alias : "unknown";
+            const ref = typeof entry.ref === "string" ? entry.ref : "unknown";
+            const action = typeof entry.action === "string" ? entry.action : "applied";
+            return `${alias} -> ${ref} (${action})`;
+          })
+          .join("; ")
+      : proposedImports.length > 0
       ? proposedImports
           .map((entry) => {
             const alias = typeof entry.alias === "string" ? entry.alias : "unknown";
@@ -113,6 +136,9 @@ function artifactSummary(artifact: ArtifactRef) {
           })
           .join("; ")
       : undefined;
+  const importSummaryLabel = Array.isArray(result?.appliedImports) ? "applied imports" : "proposed imports";
+  const refSummaryLabel = Array.isArray(result?.appliedRefs) ? "applied refs" : "proposed refs";
+  const summaryLabel = Array.isArray(result?.applySummary) ? "apply summary" : "diff summary";
   const proposedRefSummary =
     proposedRefs.length > 0
       ? proposedRefs
@@ -142,6 +168,10 @@ function artifactSummary(artifact: ArtifactRef) {
     !readiness &&
     !recommendedNextAction &&
     previewAvailable === undefined &&
+    applied === undefined &&
+    applyReady === undefined &&
+    approvalRequired === undefined &&
+    !sourceDiffArtifactId &&
     isStale === undefined &&
     !staleReason &&
     warnings.length === 0 &&
@@ -170,13 +200,17 @@ function artifactSummary(artifact: ArtifactRef) {
       {packageBytes !== undefined ? <div>package bytes: {packageBytes}</div> : null}
       {targetAppLabel ? <div>target app: {targetAppLabel}</div> : null}
       {selectedAlias ? <div>selected alias: {selectedAlias}</div> : null}
-      {proposedImportSummary ? <div>proposed imports: {proposedImportSummary}</div> : null}
-      {proposedRefSummary ? <div>proposed refs: {proposedRefSummary}</div> : null}
+      {sourceDiffArtifactId ? <div>source diff artifact: {sourceDiffArtifactId}</div> : null}
+      {proposedImportSummary ? <div>{importSummaryLabel}: {proposedImportSummary}</div> : null}
+      {proposedRefSummary ? <div>{refSummaryLabel}: {proposedRefSummary}</div> : null}
       {previewAvailable !== undefined ? <div>preview available: {previewAvailable ? "yes" : "no"}</div> : null}
+      {approvalRequired !== undefined ? <div>approval required: {approvalRequired ? "yes" : "no"}</div> : null}
+      {applyReady !== undefined ? <div>apply ready: {applyReady ? "yes" : "no"}</div> : null}
+      {applied !== undefined ? <div>applied: {applied ? "yes" : "no"}</div> : null}
       {isStale !== undefined ? <div>stale: {isStale ? "yes" : "no"}</div> : null}
       {staleReason ? <div>stale reason: {staleReason}</div> : null}
       {changedPaths.length > 0 ? <div>changed paths: {changedPaths.join(", ")}</div> : null}
-      {diffSummary.length > 0 ? <div>diff summary: {diffSummary.join("; ")}</div> : null}
+      {diffSummary.length > 0 ? <div>{summaryLabel}: {diffSummary.join("; ")}</div> : null}
       {installReady !== undefined ? <div>install ready: {installReady ? "yes" : "no"}</div> : null}
       {readiness ? <div>readiness: {readiness}</div> : null}
       {warnings.length > 0 ? <div>warnings: {warnings.length}</div> : null}

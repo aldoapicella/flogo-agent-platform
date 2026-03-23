@@ -70,6 +70,7 @@ Important analysis-only modes:
 - `inputs.mode = "package_contrib"`
 - `inputs.mode = "install_contrib_plan"`
 - `inputs.mode = "install_contrib_diff_plan"`
+- `inputs.mode = "install_contrib_apply"`
 - `inputs.mode = "mapping_preview"`
 - `inputs.mode = "mapping_test"`
 - `inputs.mode = "property_plan"`
@@ -322,6 +323,29 @@ Important behavior:
 - the helper computes the exact predicted canonical import mutation preview against the current `flogo.json`, including before/after fingerprints, changed paths, diff summary, proposed aliases/refs, and recommended next action,
 - if the target app drifted from the install-plan basis or the install-plan fingerprint no longer matches, the diff preview fails honestly or marks the result stale instead of pretending the preview is safe,
 - later install/apply remains explicitly deferred.
+
+### Contribution install-apply task mode
+
+Uses the existing task endpoint with `inputs.mode = "install_contrib_apply"` to consume one previously generated exact install diff preview, require approval, revalidate drift, and apply that exact canonical `flogo.json` mutation to the target app.
+
+Important input fields:
+
+- `installDiffArtifactId?`
+- `installDiffArtifact?`
+- `installDiffResult?`
+- `targetApp.projectId`
+- `targetApp.appId`
+- `targetApp.appPath?`
+
+Important behavior:
+
+- install apply is review-gated and mutating rather than analysis-only,
+- the planner routes the task to a single runner `install_contrib_apply` step and requires the explicit `install_contribution` approval type before the runner executes,
+- the task accepts exactly one existing exact diff source through a persisted `contrib_install_diff_plan` artifact id, inline artifact metadata, or inline result payload,
+- the task persists a `contrib_install_apply_result` artifact plus a resulting `flogo_json` artifact through the same Blob/Azurite storage seam used for the rest of the contribution lifecycle,
+- the helper revalidates target-app identity, canonical before JSON, and app fingerprints from the saved diff preview before writing,
+- if the app drifted or the diff preview is insufficient, the apply step fails honestly without mutating the target app,
+- update/apply flows remain explicitly deferred.
 
 ### `GET /v1/tasks`
 
@@ -1193,6 +1217,7 @@ Request shape:
 Workflow behavior:
 
 - mutating workflows use build/run/smoke-oriented runner steps,
+- mutating contribution-install workflows now also include the approval-gated `install_contrib_apply` runner step,
 - analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, `preview_mapping`, `infer_flow_contracts`, `extract_subflow`, `inline_subflow`, `add_iterator`, `add_retry_policy`, `add_dowhile`, `add_error_path`, `diagnose_app`, `scaffold_activity`, `scaffold_action`, `scaffold_trigger`, `validate_contrib`, `package_contrib`, `install_contrib_plan`, or `install_contrib_diff_plan`.
 - analysis-only workflows also support `test_mapping` and `plan_properties`.
 

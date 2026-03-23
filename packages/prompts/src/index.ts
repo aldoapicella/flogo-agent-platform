@@ -48,7 +48,7 @@ export const promptCatalog: Record<"orchestrator" | "builder" | "debugger" | "re
     version: "0.1.0",
     evalId: "eval-policy-v1",
     content: [
-      "Require approval for destructive changes, dependency upgrades, public contract changes, custom code, external endpoint changes, and deployments."
+      "Require approval for destructive changes, dependency upgrades, public contract changes, custom code, review-gated contribution installs, external endpoint changes, and deployments."
     ].join("\n")
   }
 };

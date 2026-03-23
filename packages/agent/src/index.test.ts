@@ -344,4 +344,32 @@ describe("TaskPlanner shared contribution lifecycle modes", () => {
       "runner.installContribDiffPlan"
     ]);
   });
+
+  it("routes install_contrib_apply through one approval-gated contribution install apply step", () => {
+    const planner = new TaskPlanner();
+    const plan = planner.plan({
+      type: "update",
+      projectId: "demo",
+      appId: "hello-rest",
+      requestedBy: "operator",
+      summary: "Apply the approved contribution install diff to flogo.json",
+      inputs: {
+        mode: "install_contrib_apply",
+        installDiffArtifactId: "artifact-install-diff-1"
+      },
+      constraints: {
+        allowDependencyChanges: false,
+        allowCustomCode: false,
+        targetEnv: "dev",
+        requireApproval: true
+      }
+    });
+
+    expect(plan.requiredApprovals).toEqual(["install_contribution"]);
+    expect(plan.steps.map((step) => step.tool)).toEqual([
+      "flogo.parseApp",
+      "flogo.validateApp",
+      "runner.installContribApply"
+    ]);
+  });
 });

@@ -496,6 +496,24 @@ export class RunnerTools {
     });
   }
 
+  async installContribApply(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "install_contrib_apply",
+      jobKind: "contrib_install_apply",
+      analysisKind: "install_contrib_apply"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued contribution install apply job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
   async validateGovernance(spec: unknown): Promise<ToolResponse> {
     const parsed = RunnerJobSpecSchema.parse(spec);
     const result = await this.dispatcher.dispatch({

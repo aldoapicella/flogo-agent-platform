@@ -12,6 +12,9 @@ import {
   ActionScaffoldResponseSchema,
   type ActionScaffoldResponse,
   ContributionPackageArchiveSchema,
+  ContributionInstallApplyRequestSchema,
+  ContributionInstallApplyResponseSchema,
+  type ContributionInstallApplyResponse,
   ContributionInstallDiffPlanRequestSchema,
   ContributionInstallDiffPlanResponseSchema,
   type ContributionInstallDiffPlanResponse,
@@ -185,6 +188,8 @@ function createCommand(spec: RunnerJobSpec): string[] {
       return createHelperCommand("contrib", "install-plan", "--app", spec.appPath);
     case "install_contrib_diff_plan":
       return createHelperCommand("contrib", "install-diff-plan", "--app", spec.appPath);
+    case "install_contrib_apply":
+      return createHelperCommand("contrib", "install-apply", "--app", spec.appPath);
     default:
       return ["echo", `runner:${spec.stepType}`];
   }
@@ -249,6 +254,7 @@ function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
     stepType === "package_contrib" ||
     stepType === "install_contrib_plan" ||
     stepType === "install_contrib_diff_plan" ||
+    stepType === "install_contrib_apply" ||
     stepType === "diagnose_app"
   );
 }
@@ -494,6 +500,40 @@ type ContributionInstallDiffPlanResultLike = {
   recommendedNextAction: string;
 };
 
+type ContributionInstallApplyResultLike = {
+  contributionKind: "activity" | "action" | "trigger";
+  sourceContribution: ContributionInstallDiffPlanResultLike["sourceContribution"];
+  targetApp: ContributionInstallPlanResultLike["targetApp"];
+  basedOnInstallDiffPlan: {
+    sourceArtifactId?: string;
+    installPlanArtifactId?: string;
+    diffFingerprint?: string;
+    appFingerprintBefore?: string;
+    appFingerprintPreview?: string;
+    targetApp?: ContributionInstallPlanResultLike["targetApp"];
+  };
+  appFingerprintBefore: string;
+  appFingerprintAfter?: string;
+  isStale: boolean;
+  staleReason?: string;
+  applied: boolean;
+  applyReady: boolean;
+  readiness: "high" | "medium" | "low";
+  warnings: string[];
+  conflicts: ContributionInstallPlanResultLike["conflicts"];
+  limitations: string[];
+  changedPaths: string[];
+  appliedImports: ContributionInstallPlanResultLike["proposedImports"];
+  appliedRefs: ContributionInstallPlanResultLike["proposedRefs"];
+  applySummary: string[];
+  canonicalBeforeJson: string;
+  canonicalAfterJson?: string;
+  canonicalApp?: Record<string, unknown>;
+  recommendedNextAction: string;
+  approvalRequired?: boolean;
+  mutationApplied?: boolean;
+};
+
 function resolveContributionScaffoldResultFromPayload(
   analysisPayload: Record<string, unknown> | undefined
 ): { result: ContributionScaffoldResultLike; source: "inline_result" | "bundle_artifact"; sourceArtifactId?: string } {
@@ -616,6 +656,31 @@ function resolveContributionInstallPlanFromPayload(
   }
 
   throw new Error("Contribution install diff planning requires an installPlanResult or contrib_install_plan artifact metadata.result payload");
+}
+
+function resolveContributionInstallDiffPlanFromPayload(
+  analysisPayload: Record<string, unknown> | undefined
+): { result: ContributionInstallDiffPlanResultLike; sourceArtifactId?: string } {
+  const parsedResult = ContributionInstallDiffPlanResponseSchema.shape.result.safeParse(analysisPayload?.installDiffResult);
+  if (parsedResult.success) {
+    return {
+      result: parsedResult.data as ContributionInstallDiffPlanResultLike
+    };
+  }
+
+  const installDiffArtifact = isRecord(analysisPayload?.installDiffArtifact) ? analysisPayload.installDiffArtifact : undefined;
+  if (installDiffArtifact) {
+    const metadata = isRecord(installDiffArtifact.metadata) ? installDiffArtifact.metadata : undefined;
+    const artifactResult = ContributionInstallDiffPlanResponseSchema.shape.result.safeParse(metadata?.result);
+    if (artifactResult.success) {
+      return {
+        result: artifactResult.data as ContributionInstallDiffPlanResultLike,
+        sourceArtifactId: typeof installDiffArtifact.id === "string" ? installDiffArtifact.id : undefined
+      };
+    }
+  }
+
+  throw new Error("Contribution install apply requires an installDiffResult or contrib_install_diff_plan artifact metadata.result payload");
 }
 
 function createContributionScaffoldArtifacts(
@@ -810,6 +875,72 @@ function createContributionInstallDiffPlanArtifacts(
       }
     )
   ];
+}
+
+function createContributionInstallApplyArtifacts(
+  spec: RunnerJobSpec,
+  result: ContributionInstallApplyResultLike,
+  diagnostics: Diagnostic[]
+): ArtifactRef[] {
+  const artifacts: ArtifactRef[] = [
+    createAnalysisArtifact(
+      spec,
+      "contrib_install_apply_result",
+      `${result.contributionKind}-install-apply-${result.sourceContribution.packageName ?? result.sourceContribution.selectedAlias}`,
+      {
+        result,
+        contributionKind: result.contributionKind,
+        sourceContribution: result.sourceContribution,
+        targetApp: result.targetApp,
+        basedOnInstallDiffPlan: result.basedOnInstallDiffPlan,
+        appFingerprintBefore: result.appFingerprintBefore,
+        appFingerprintAfter: result.appFingerprintAfter,
+        isStale: result.isStale,
+        staleReason: result.staleReason,
+        applied: result.applied,
+        applyReady: result.applyReady,
+        readiness: result.readiness,
+        warnings: result.warnings,
+        conflicts: result.conflicts,
+        limitations: result.limitations,
+        changedPaths: result.changedPaths,
+        appliedImports: result.appliedImports,
+        appliedRefs: result.appliedRefs,
+        applySummary: result.applySummary,
+        canonicalBeforeJson: result.canonicalBeforeJson,
+        canonicalAfterJson: result.canonicalAfterJson,
+        recommendedNextAction: result.recommendedNextAction,
+        approvalRequired: result.approvalRequired ?? true,
+        mutationApplied: result.mutationApplied ?? result.applied,
+        diagnostics
+      }
+    )
+  ];
+
+  if (result.applied && result.canonicalAfterJson) {
+    artifacts.push(
+      createNamedArtifact(
+        spec.taskId,
+        "flogo_json",
+        `${spec.taskId}-${result.targetApp.appId ?? result.targetApp.appName ?? "app"}-flogo.json`,
+        {
+          appPath: result.targetApp.appPath,
+          appId: result.targetApp.appId,
+          appName: result.targetApp.appName,
+          canonicalJson: result.canonicalAfterJson,
+          canonicalApp: result.canonicalApp,
+          sourceContribution: result.sourceContribution,
+          basedOnInstallDiffPlan: result.basedOnInstallDiffPlan,
+          appFingerprintBefore: result.appFingerprintBefore,
+          appFingerprintAfter: result.appFingerprintAfter,
+          changedPaths: result.changedPaths,
+          producer: "runner.install_contrib_apply"
+        }
+      )
+    );
+  }
+
+  return artifacts;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1205,6 +1336,7 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     && spec.stepType !== "package_contrib"
     && spec.stepType !== "install_contrib_plan"
     && spec.stepType !== "install_contrib_diff_plan"
+    && spec.stepType !== "install_contrib_apply"
   ) {
     return {
       command: createCommand(spec)
@@ -1470,6 +1602,27 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     }, null, 2), "utf8");
     return {
       command: createHelperCommand("contrib", "install-diff-plan", "--app", spec.appPath, "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "install_contrib_apply") {
+    const request = ContributionInstallApplyRequestSchema.parse(spec.analysisPayload ?? {});
+    const resolved = resolveContributionInstallDiffPlanFromPayload(spec.analysisPayload);
+    const requestPath = path.join(tempDir, "contrib-install-apply-request.json");
+    await fs.writeFile(requestPath, JSON.stringify({
+      installDiffPlan: resolved.result,
+      installDiffArtifactId: request.installDiffArtifactId ?? resolved.sourceArtifactId,
+      sourceInstallPlanArtifactId:
+        typeof resolved.result.basedOnInstallPlan?.sourceArtifactId === "string"
+          ? resolved.result.basedOnInstallPlan.sourceArtifactId
+          : undefined,
+      targetApp: request.targetApp
+    }, null, 2), "utf8");
+    return {
+      command: createHelperCommand("contrib", "install-apply", "--app", spec.appPath, "--request", requestPath),
       cleanup: async () => {
         await fs.rm(tempDir, { recursive: true, force: true });
       }
@@ -1899,6 +2052,11 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
       const response = ContributionInstallDiffPlanResponseSchema.parse(JSON.parse(stdout) as ContributionInstallDiffPlanResponse);
       return createContributionInstallDiffPlanArtifacts(spec, response.result as ContributionInstallDiffPlanResultLike, diagnostics);
     }
+
+    if (spec.stepType === "install_contrib_apply") {
+      const response = ContributionInstallApplyResponseSchema.parse(JSON.parse(stdout) as ContributionInstallApplyResponse);
+      return createContributionInstallApplyArtifacts(spec, response.result as ContributionInstallApplyResultLike, diagnostics);
+    }
   } catch (error) {
     diagnostics.push({
       code: "runner.analysis_parse_failed",
@@ -2008,6 +2166,17 @@ async function executePreparedRunnerCommand(spec: RunnerJobSpec): Promise<Execut
 
 function artifactByType(artifacts: ArtifactRef[], type: ArtifactRef["type"]) {
   return artifacts.find((artifact) => artifact.type === type);
+}
+
+function parseContributionInstallApplyArtifact(artifact?: ArtifactRef) {
+  if (!artifact) {
+    return undefined;
+  }
+
+  const parsed = ContributionInstallApplyResponseSchema.safeParse({
+    result: artifact.metadata?.["result"]
+  });
+  return parsed.success ? parsed.data : undefined;
 }
 
 function parseTraceArtifact(artifact?: ArtifactRef) {
@@ -2299,19 +2468,49 @@ export class RunnerExecutorService implements RunnerExecutor {
     }
 
     const executed = await executePreparedRunnerCommand(spec);
+    let ok = executed.ok;
+    let summary = executed.ok ? `Executed ${spec.stepType}` : `Execution failed for ${spec.stepType}`;
+    let exitCode = executed.exitCode;
+    const diagnostics = [...executed.diagnostics];
+
+    if (spec.stepType === "install_contrib_apply" && executed.ok) {
+      const parsedApply = parseContributionInstallApplyArtifact(
+        artifactByType(executed.artifacts, "contrib_install_apply_result")
+      );
+      const applyResult = parsedApply?.result;
+      const changedPaths = Array.isArray(applyResult?.changedPaths) ? applyResult.changedPaths : [];
+      const shouldFail =
+        applyResult?.isStale === true ||
+        applyResult?.applyReady === false ||
+        (applyResult?.applied === false && changedPaths.length > 0);
+      if (shouldFail) {
+        ok = false;
+        exitCode = 1;
+        summary = "Execution failed for install_contrib_apply";
+        diagnostics.push({
+          code: "runner.install_apply_blocked",
+          message:
+            applyResult?.staleReason ??
+            applyResult?.recommendedNextAction ??
+            "Contribution install apply was blocked because the saved diff preview was stale or not apply-ready.",
+          severity: "error"
+        });
+      }
+    }
+
     return RunnerJobResultSchema.parse({
       jobId: `${spec.taskId}-${spec.stepType}`,
       jobRunId: spec.jobRunId,
-      ok: executed.ok,
-      status: executed.ok ? "succeeded" : "failed",
-      summary: executed.ok ? `Executed ${spec.stepType}` : `Execution failed for ${spec.stepType}`,
-      exitCode: executed.exitCode,
+      ok,
+      status: ok ? "succeeded" : "failed",
+      summary,
+      exitCode,
       startedAt: executed.startedAt,
       finishedAt: executed.finishedAt,
       jobTemplateName: spec.jobTemplateName,
       logArtifact: executed.logArtifact,
       artifacts: executed.artifacts,
-      diagnostics: executed.diagnostics
+      diagnostics
     });
   }
 }

@@ -75,7 +75,16 @@ export class AppAnalysisStorageService {
     projectId: string;
     taskId: string;
     artifactId: string;
-    kind: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "contrib_install_plan" | "contrib_install_diff_plan" | "build_log" | "test_report";
+    kind:
+      | "contrib_bundle"
+      | "contrib_validation_report"
+      | "contrib_package"
+      | "contrib_install_plan"
+      | "contrib_install_diff_plan"
+      | "contrib_install_apply_result"
+      | "build_log"
+      | "test_report"
+      | "flogo_json";
     payload: Record<string, unknown>;
   }): Promise<StoredJsonArtifact> {
     const blobPath = `task-artifacts/${args.projectId}/${args.taskId}/${args.kind}/${args.artifactId}.json`;

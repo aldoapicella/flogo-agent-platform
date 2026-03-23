@@ -1169,6 +1169,273 @@ describe("RunnerExecutorService", () => {
     expect((diffArtifact?.metadata as { result?: { readiness?: string } } | undefined)?.result?.readiness).toBe("high");
   });
 
+  it("executes helper-backed contribution install apply and persists apply plus flogo_json artifacts", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          contributionKind: "trigger",
+          sourceContribution: {
+            kind: "trigger",
+            modulePath: "example.com/acme/webhook",
+            packageName: "webhooktrigger",
+            packagePath: "example.com/acme/webhook",
+            descriptorRef: "example.com/acme/webhook",
+            selectedAlias: "webhooktrigger",
+            source: "package_artifact",
+            sourceArtifactId: "package-artifact-1"
+          },
+          targetApp: {
+            projectId: "demo",
+            appId: "hello-rest",
+            appPath: "examples/hello-rest/flogo.json",
+            appName: "hello-rest"
+          },
+          basedOnInstallDiffPlan: {
+            sourceArtifactId: "install-diff-artifact-1",
+            installPlanArtifactId: "install-plan-artifact-1",
+            diffFingerprint: "diff-sha",
+            appFingerprintBefore: "before-sha",
+            appFingerprintPreview: "after-sha"
+          },
+          appFingerprintBefore: "before-sha",
+          appFingerprintAfter: "after-sha",
+          isStale: false,
+          applied: true,
+          applyReady: true,
+          readiness: "high",
+          warnings: [],
+          conflicts: [],
+          limitations: ["Install apply only."],
+          changedPaths: ["imports"],
+          appliedImports: [
+            {
+              alias: "webhooktrigger",
+              ref: "example.com/acme/webhook",
+              action: "add"
+            }
+          ],
+          appliedRefs: [
+            {
+              surface: "triggerRef",
+              value: "#webhooktrigger",
+              note: "Use this ref when creating a trigger instance."
+            }
+          ],
+          applySummary: ["Applied import alias \"webhooktrigger\" for ref \"example.com/acme/webhook\"."],
+          canonicalBeforeJson: "{\n  \"imports\": []\n}",
+          canonicalAfterJson: "{\n  \"imports\": [{\"alias\":\"webhooktrigger\",\"ref\":\"example.com/acme/webhook\"}]\n}",
+          canonicalApp: {
+            name: "hello-rest",
+            type: "flogo:app",
+            appModel: "1.1.0",
+            imports: [{ alias: "webhooktrigger", ref: "example.com/acme/webhook" }]
+          },
+          recommendedNextAction: "Review the updated canonical flogo.json artifact.",
+          approvalRequired: true,
+          mutationApplied: true
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-install-contrib-apply",
+      jobKind: "contrib_install_apply",
+      stepType: "install_contrib_apply",
+      analysisKind: "install_contrib_apply",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://install-contrib-apply",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        installDiffArtifactId: "install-diff-artifact-1",
+        installDiffArtifact: {
+          id: "install-diff-artifact-1",
+          type: "contrib_install_diff_plan",
+          name: "trigger-install-diff-plan-webhooktrigger",
+          uri: "memory://task/trigger-install-diff-plan-webhooktrigger.json",
+          metadata: {
+            result: {
+              contributionKind: "trigger",
+              sourceContribution: {
+                kind: "trigger",
+                modulePath: "example.com/acme/webhook",
+                packageName: "webhooktrigger",
+                packagePath: "example.com/acme/webhook",
+                descriptorRef: "example.com/acme/webhook",
+                selectedAlias: "webhooktrigger",
+                source: "package_artifact",
+                sourceArtifactId: "package-artifact-1"
+              },
+              targetApp: {
+                projectId: "demo",
+                appId: "hello-rest",
+                appPath: "examples/hello-rest/flogo.json",
+                appName: "hello-rest"
+              },
+              basedOnInstallPlan: {
+                sourceArtifactId: "install-plan-artifact-1",
+                appFingerprint: "before-sha",
+                planFingerprint: "plan-sha"
+              },
+              appFingerprintBefore: "before-sha",
+              appFingerprintAfter: "after-sha",
+              installPlanFingerprint: "plan-sha",
+              isStale: false,
+              previewAvailable: true,
+              installReady: true,
+              readiness: "high",
+              warnings: [],
+              conflicts: [],
+              limitations: ["Diff preview only."],
+              predictedChanges: {
+                importsBefore: [],
+                importsAfter: [{ alias: "webhooktrigger", ref: "example.com/acme/webhook", action: "predicted" }],
+                importsToAdd: [{ alias: "webhooktrigger", ref: "example.com/acme/webhook", action: "add" }],
+                importsToUpdate: [],
+                aliasesToAdd: ["webhooktrigger"],
+                refsToAdd: [{ surface: "triggerRef", value: "#webhooktrigger", note: "Use this ref when creating a trigger instance." }],
+                refsToReuse: [],
+                structuralChanges: ["Add import alias \"webhooktrigger\" for ref \"example.com/acme/webhook\"."],
+                changedPaths: ["imports"],
+                diffEntries: [],
+                noMutation: true
+              },
+              diffSummary: ["imports: add \"webhooktrigger\" -> \"example.com/acme/webhook\""],
+              canonicalBeforeJson: "{\n  \"imports\": []\n}",
+              canonicalAfterJson: "{\n  \"imports\": [{\"alias\":\"webhooktrigger\",\"ref\":\"example.com/acme/webhook\"}]\n}",
+              recommendedNextAction: "Approve install apply to write the canonical import mutation."
+            }
+          }
+        },
+        targetApp: {
+          projectId: "demo",
+          appId: "hello-rest",
+          appPath: "examples/hello-rest/flogo.json"
+        }
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    const applyArtifact = result.artifacts.find((artifact) => artifact.type === "contrib_install_apply_result");
+    const flogoJsonArtifact = result.artifacts.find((artifact) => artifact.type === "flogo_json");
+    expect(result.ok).toBe(true);
+    expect(applyArtifact).toBeDefined();
+    expect(flogoJsonArtifact).toBeDefined();
+    expect((applyArtifact?.metadata as { result?: { applied?: boolean; readiness?: string } } | undefined)?.result?.applied).toBe(true);
+    expect((applyArtifact?.metadata as { result?: { readiness?: string } } | undefined)?.result?.readiness).toBe("high");
+  });
+
+  it("marks install apply jobs as failed when the saved diff preview is stale", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          contributionKind: "trigger",
+          sourceContribution: {
+            kind: "trigger",
+            modulePath: "example.com/acme/webhook",
+            selectedAlias: "webhooktrigger",
+            source: "package_artifact"
+          },
+          targetApp: {
+            projectId: "demo",
+            appId: "hello-rest",
+            appPath: "examples/hello-rest/flogo.json"
+          },
+          basedOnInstallDiffPlan: {
+            sourceArtifactId: "install-diff-artifact-2"
+          },
+          appFingerprintBefore: "before-sha",
+          isStale: true,
+          staleReason: "The target app changed after the exact install diff preview was generated.",
+          applied: false,
+          applyReady: false,
+          readiness: "low",
+          warnings: ["The target app changed after the exact install diff preview was generated."],
+          conflicts: [],
+          limitations: [],
+          changedPaths: ["imports"],
+          appliedImports: [],
+          appliedRefs: [],
+          applySummary: ["Install apply stopped because flogo.json drifted from the exact diff basis."],
+          canonicalBeforeJson: "{}",
+          recommendedNextAction: "Regenerate the exact diff preview before retrying apply."
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-install-contrib-apply-stale",
+      jobKind: "contrib_install_apply",
+      stepType: "install_contrib_apply",
+      analysisKind: "install_contrib_apply",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://install-contrib-apply-stale",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        installDiffResult: {
+          contributionKind: "trigger",
+          sourceContribution: {
+            kind: "trigger",
+            modulePath: "example.com/acme/webhook",
+            selectedAlias: "webhooktrigger",
+            source: "package_artifact"
+          },
+          targetApp: {
+            projectId: "demo",
+            appId: "hello-rest",
+            appPath: "examples/hello-rest/flogo.json"
+          },
+          basedOnInstallPlan: {
+            sourceArtifactId: "install-plan-artifact-1",
+            appFingerprint: "before-sha",
+            planFingerprint: "plan-sha"
+          },
+          appFingerprintBefore: "before-sha",
+          isStale: false,
+          previewAvailable: true,
+          installReady: true,
+          readiness: "high",
+          warnings: [],
+          conflicts: [],
+          limitations: [],
+          predictedChanges: {
+            importsBefore: [],
+            importsAfter: [],
+            importsToAdd: [],
+            importsToUpdate: [],
+            aliasesToAdd: [],
+            refsToAdd: [],
+            refsToReuse: [],
+            structuralChanges: [],
+            changedPaths: ["imports"],
+            diffEntries: [],
+            noMutation: true
+          },
+          diffSummary: [],
+          canonicalBeforeJson: "{}",
+          canonicalAfterJson: "{\"imports\":[]}",
+          recommendedNextAction: "Approve install apply to write the canonical mutation."
+        }
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("failed");
+    expect(result.artifacts.some((artifact) => artifact.type === "contrib_install_apply_result")).toBe(true);
+  });
+
   it("rejects malformed shared contribution validation input before dispatching the helper", async () => {
     const service = new RunnerExecutorService();
 
@@ -1236,6 +1503,29 @@ describe("RunnerExecutorService", () => {
         containerArgs: []
       })
     ).rejects.toThrow(/Provide installPlanArtifactId, installPlanArtifact, or installPlanResult/);
+  });
+
+  it("rejects malformed install apply input before dispatching the helper", async () => {
+    const service = new RunnerExecutorService();
+
+    await expect(
+      service.execute({
+        taskId: "task-invalid-install-contrib-apply",
+        jobKind: "contrib_install_apply",
+        stepType: "install_contrib_apply",
+        analysisKind: "install_contrib_apply",
+        snapshotUri: ".",
+        appPath: "examples/hello-rest/flogo.json",
+        env: {},
+        envSecretRefs: {},
+        timeoutSeconds: 60,
+        artifactOutputUri: "memory://invalid-install-contrib-apply",
+        jobTemplateName: "flogo-runner",
+        analysisPayload: {},
+        command: [],
+        containerArgs: []
+      })
+    ).rejects.toThrow(/Provide installDiffArtifactId, installDiffArtifact, or installDiffResult/);
   });
 
   it("executes helper-backed timer trace capture and persists timer runtime metadata", async () => {

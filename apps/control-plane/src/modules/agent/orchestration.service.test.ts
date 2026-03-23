@@ -129,7 +129,16 @@ class FakeAppAnalysisStorageService {
     projectId: string;
     taskId: string;
     artifactId: string;
-    kind: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "contrib_install_plan" | "contrib_install_diff_plan" | "build_log" | "test_report";
+    kind:
+      | "contrib_bundle"
+      | "contrib_validation_report"
+      | "contrib_package"
+      | "contrib_install_plan"
+      | "contrib_install_diff_plan"
+      | "contrib_install_apply_result"
+      | "build_log"
+      | "test_report"
+      | "flogo_json";
     payload: Record<string, unknown>;
   }) {
     this.uploads.push(args);
@@ -672,6 +681,244 @@ describe("OrchestrationService", () => {
     });
   });
 
+  it("submits install apply tasks as approval-gated workflows and resolves the diff artifact", async () => {
+    const storage = new FakeAppAnalysisStorageService();
+    const taskStore = new FakeTaskStoreService();
+    const service = new OrchestrationService(
+      new ToolsetService(),
+      new OrchestratorClientService(),
+      new TaskEventsService(),
+      taskStore as any,
+      {
+        prepareRunComparisonTaskInputs: async (_projectId: string, _appId: string, inputs: Record<string, unknown>) => inputs,
+        resolveTaskAppPath: async () => "examples/hello-rest/flogo.json"
+      } as any,
+      storage as AppAnalysisStorageService
+    );
+
+    const seedTask = await service.submitTask({
+      type: "review",
+      projectId: "demo",
+      appId: "hello-rest",
+      summary: "Seed contribution install diff artifact",
+      inputs: {
+        mode: "install_contrib_diff_plan",
+        installPlanResult: {
+          contributionKind: "trigger",
+          sourceContribution: {
+            kind: "trigger",
+            modulePath: "example.com/acme/webhook",
+            packageName: "webhooktrigger",
+            selectedAlias: "webhooktrigger",
+            source: "package_artifact"
+          },
+          targetApp: {
+            projectId: "demo",
+            appId: "hello-rest",
+            appPath: "examples/hello-rest/flogo.json"
+          },
+          basedOnInstallPlan: {
+            sourceArtifactId: "install-plan-artifact-1",
+            appFingerprint: "app-sha",
+            planFingerprint: "plan-sha"
+          },
+          appFingerprintBefore: "app-sha",
+          installPlanFingerprint: "plan-sha",
+          isStale: false,
+          previewAvailable: true,
+          installReady: true,
+          readiness: "high",
+          warnings: [],
+          conflicts: [],
+          limitations: ["Diff preview only."],
+          predictedChanges: {
+            importsBefore: [],
+            importsAfter: [],
+            importsToAdd: [],
+            importsToUpdate: [],
+            aliasesToAdd: [],
+            refsToAdd: [],
+            refsToReuse: [],
+            structuralChanges: [],
+            changedPaths: ["imports"],
+            diffEntries: [],
+            noMutation: true
+          },
+          diffSummary: ["imports: add \"webhooktrigger\" -> \"example.com/acme/webhook\""],
+          canonicalBeforeJson: "{}",
+          canonicalAfterJson: "{\"imports\":[{\"alias\":\"webhooktrigger\",\"ref\":\"example.com/acme/webhook\"}]}",
+          recommendedNextAction: "Review the exact canonical import diff."
+        }
+      }
+    });
+
+    await service.syncTaskState(seedTask.id, {
+      artifact: {
+        id: "artifact-install-diff-plan-2",
+        type: "contrib_install_diff_plan",
+        name: "trigger-install-diff-plan-webhooktrigger",
+        uri: "memory://task-2/trigger-install-diff-plan-webhooktrigger.json",
+        metadata: {
+          result: {
+            contributionKind: "trigger",
+            sourceContribution: {
+              kind: "trigger",
+              modulePath: "example.com/acme/webhook",
+              packageName: "webhooktrigger",
+              selectedAlias: "webhooktrigger",
+              source: "package_artifact",
+              sourceArtifactId: "artifact-package-1"
+            },
+            targetApp: { projectId: "demo", appId: "hello-rest", appPath: "examples/hello-rest/flogo.json" },
+            basedOnInstallPlan: {
+              sourceArtifactId: "install-plan-artifact-1",
+              appFingerprint: "app-sha",
+              planFingerprint: "plan-sha"
+            },
+            appFingerprintBefore: "app-sha",
+            appFingerprintAfter: "after-sha",
+            installPlanFingerprint: "plan-sha",
+            isStale: false,
+            previewAvailable: true,
+            installReady: true,
+            readiness: "high",
+            warnings: [],
+            conflicts: [],
+            limitations: ["Diff preview only."],
+            predictedChanges: {
+              importsBefore: [],
+              importsAfter: [],
+              importsToAdd: [],
+              importsToUpdate: [],
+              aliasesToAdd: ["webhooktrigger"],
+              refsToAdd: [],
+              refsToReuse: [],
+              structuralChanges: ["Add import alias \"webhooktrigger\" for ref \"example.com/acme/webhook\"."],
+              changedPaths: ["imports"],
+              diffEntries: [],
+              noMutation: true
+            },
+            diffSummary: ["imports: add \"webhooktrigger\" -> \"example.com/acme/webhook\""],
+            canonicalBeforeJson: "{}",
+            canonicalAfterJson: "{\"imports\":[{\"alias\":\"webhooktrigger\",\"ref\":\"example.com/acme/webhook\"}]}",
+            recommendedNextAction: "Approve install apply to write the canonical import mutation."
+          }
+        }
+      }
+    });
+
+    const applyTask = await service.submitTask({
+      type: "update",
+      projectId: "demo",
+      appId: "hello-rest",
+      summary: "Apply the approved contribution install diff",
+      inputs: {
+        mode: "install_contrib_apply",
+        installDiffArtifactId: "artifact-install-diff-plan-2"
+      }
+    });
+
+    expect(applyTask.result.status).toBe("awaiting_approval");
+    expect(applyTask.result.approvalStatus).toBe("pending");
+    expect(applyTask.result.requiredApprovals).toEqual(["install_contribution"]);
+    expect(applyTask.request.inputs["installDiffArtifact"]).toMatchObject({
+      id: "artifact-install-diff-plan-2",
+      type: "contrib_install_diff_plan"
+    });
+  });
+
+  it("persists install apply result and flogo_json artifacts through blob-backed task artifact storage", async () => {
+    const storage = new FakeAppAnalysisStorageService();
+    const service = new OrchestrationService(
+      new ToolsetService(),
+      new OrchestratorClientService(),
+      new TaskEventsService(),
+      new FakeTaskStoreService() as any,
+      {
+        prepareRunComparisonTaskInputs: async (_projectId: string, _appId: string, inputs: Record<string, unknown>) => inputs,
+        resolveTaskAppPath: async () => "examples/hello-rest/flogo.json"
+      } as any,
+      storage as AppAnalysisStorageService
+    );
+
+    const task = await service.submitTask({
+      type: "update",
+      projectId: "demo",
+      appId: "hello-rest",
+      summary: "Apply the approved install diff"
+    });
+
+    await service.syncTaskState(task.id, {
+      artifact: {
+        id: "artifact-install-apply-1",
+        type: "contrib_install_apply_result",
+        name: "trigger-install-apply-webhooktrigger.json",
+        uri: "memory://task-3/trigger-install-apply-webhooktrigger.json",
+        metadata: {
+          result: {
+            contributionKind: "trigger",
+            sourceContribution: {
+              kind: "trigger",
+              modulePath: "example.com/acme/webhook",
+              packageName: "webhooktrigger",
+              selectedAlias: "webhooktrigger",
+              source: "package_artifact"
+            },
+            targetApp: { appId: "hello-rest", appPath: "examples/hello-rest/flogo.json" },
+            basedOnInstallDiffPlan: {
+              sourceArtifactId: "artifact-install-diff-plan-2",
+              installPlanArtifactId: "install-plan-artifact-1",
+              diffFingerprint: "diff-sha",
+              appFingerprintBefore: "before-sha",
+              appFingerprintPreview: "after-sha"
+            },
+            appFingerprintBefore: "before-sha",
+            appFingerprintAfter: "after-sha",
+            isStale: false,
+            applied: true,
+            applyReady: true,
+            readiness: "high",
+            warnings: [],
+            conflicts: [],
+            limitations: [],
+            changedPaths: ["imports"],
+            appliedImports: [{ alias: "webhooktrigger", ref: "example.com/acme/webhook", action: "add" }],
+            appliedRefs: [{ surface: "triggerRef", value: "#webhooktrigger" }],
+            applySummary: ["Applied import alias \"webhooktrigger\" for ref \"example.com/acme/webhook\"."],
+            canonicalBeforeJson: "{}",
+            canonicalAfterJson: "{\"imports\":[{\"alias\":\"webhooktrigger\",\"ref\":\"example.com/acme/webhook\"}]}",
+            canonicalApp: {
+              name: "hello-rest",
+              type: "flogo:app",
+              appModel: "1.1.0",
+              imports: [{ alias: "webhooktrigger", ref: "example.com/acme/webhook" }]
+            },
+            recommendedNextAction: "Review the updated canonical flogo.json artifact.",
+            approvalRequired: true,
+            mutationApplied: true
+          }
+        }
+      }
+    });
+
+    await service.syncTaskState(task.id, {
+      artifact: {
+        id: "artifact-flogo-json-1",
+        type: "flogo_json",
+        name: "task-3-hello-rest-flogo.json",
+        uri: "memory://task-3/hello-rest-flogo.json",
+        metadata: {
+          canonicalJson: "{\"imports\":[{\"alias\":\"webhooktrigger\",\"ref\":\"example.com/acme/webhook\"}]}",
+          appPath: "examples/hello-rest/flogo.json"
+        }
+      }
+    });
+
+    expect(storage.uploads).toHaveLength(2);
+    expect(storage.uploads[0]?.kind).toBe("contrib_install_apply_result");
+    expect(storage.uploads[1]?.kind).toBe("flogo_json");
+  });
+
   it("fails loudly when contribution artifact storage is not configured", async () => {
     const service = new OrchestrationService(
       new ToolsetService(),
@@ -706,6 +953,6 @@ describe("OrchestrationService", () => {
           }
         }
       })
-    ).rejects.toThrow(/contribution scaffold, validate, package, install-plan, or install-diff-plan tasks/i);
+    ).rejects.toThrow(/contribution scaffold, validate, package, install-plan, install-diff-plan, or install-apply tasks/i);
   });
 });

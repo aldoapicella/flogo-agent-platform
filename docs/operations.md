@@ -164,10 +164,10 @@ Current behavior:
 
 - artifact metadata is persisted,
 - app-analysis payload URIs are Blob-backed,
-- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `build_log`, and `test_report` artifact payload URIs are also Blob-backed,
+- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `contrib_install_apply_result`, `flogo_json`, `build_log`, and `test_report` artifact payload URIs are also Blob-backed,
 - some broader runtime/task artifact URIs are still logical/local.
 
-If a contribution scaffold, validate, package, install-plan, or install-diff-plan task fails immediately with a storage-configuration error, verify the same Blob/Azurite connection settings used for app-analysis artifacts.
+If a contribution scaffold, validate, package, install-plan, install-diff-plan, or install-apply task fails immediately with a storage-configuration error, verify the same Blob/Azurite connection settings used for app-analysis artifacts.
 
 ### Container Apps Job execution does not complete in production mode
 

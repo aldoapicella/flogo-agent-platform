@@ -83,7 +83,7 @@ It is expected to grow into:
 - programmatic Core composition,
 - broader contribution install/update apply workflows.
 
-The runtime-evidence commands above are still mostly artifact-backed, but direct trace capture now has narrow in-process Core/Flow runtime paths for the existing direct-flow slice, one supported REST trigger-driven slice, a narrow timer startup slice, a narrow CLI command-entry slice, and a narrow Channel internal-event slice. Replay reuses those same supported slices, and run comparison prefers normalized runtime artifacts when both sides provide them, REST envelope comparison when both sides are REST-backed, timer startup comparison when both sides carry timer evidence, and Channel boundary comparison when both sides carry channel evidence. Those narrow slices expose normalized per-step task identity, I/O, and flow-state deltas where observable, the REST slice additionally carries request, mapped flow input/output, and reply evidence in `runtimeEvidence.restTriggerRuntime`, the timer slice carries timer settings plus observed tick evidence in `runtimeEvidence.timerTriggerRuntime`, the CLI slice carries command identity, args, flags, mapped flow input, and reply/stdout evidence in `runtimeEvidence.cliTriggerRuntime`, and the Channel slice carries named-channel data, mapped flow input/output, and evidence metadata in `runtimeEvidence.channelTriggerRuntime`. The helper now also has narrow Phase 4 authoring commands, `contrib scaffold-activity`, `contrib scaffold-action`, `contrib scaffold-trigger`, `contrib validate`, `contrib package`, `contrib install-plan`, and `contrib install-diff-plan`, which generate descriptor metadata plus Go/module/test/readme files for custom Activity, Action, and Trigger bundles, re-run isolated proof for existing bundles, emit conservative review archives as persisted artifacts, analyze reviewable target-app install plans, and materialize exact canonical install diff previews without mutating `flogo.json`.
+The runtime-evidence commands above are still mostly artifact-backed, but direct trace capture now has narrow in-process Core/Flow runtime paths for the existing direct-flow slice, one supported REST trigger-driven slice, a narrow timer startup slice, a narrow CLI command-entry slice, and a narrow Channel internal-event slice. Replay reuses those same supported slices, and run comparison prefers normalized runtime artifacts when both sides provide them, REST envelope comparison when both sides are REST-backed, timer startup comparison when both sides carry timer evidence, and Channel boundary comparison when both sides carry channel evidence. Those narrow slices expose normalized per-step task identity, I/O, and flow-state deltas where observable, the REST slice additionally carries request, mapped flow input/output, and reply evidence in `runtimeEvidence.restTriggerRuntime`, the timer slice carries timer settings plus observed tick evidence in `runtimeEvidence.timerTriggerRuntime`, the CLI slice carries command identity, args, flags, mapped flow input, and reply/stdout evidence in `runtimeEvidence.cliTriggerRuntime`, and the Channel slice carries named-channel data, mapped flow input/output, and evidence metadata in `runtimeEvidence.channelTriggerRuntime`. The helper now also has narrow Phase 4 authoring commands, `contrib scaffold-activity`, `contrib scaffold-action`, `contrib scaffold-trigger`, `contrib validate`, `contrib package`, `contrib install-plan`, `contrib install-diff-plan`, and `contrib install-apply`, which generate descriptor metadata plus Go/module/test/readme files for custom Activity, Action, and Trigger bundles, re-run isolated proof for existing bundles, emit conservative review archives as persisted artifacts, analyze reviewable target-app install plans, materialize exact canonical install diff previews, and apply one approved exact canonical mutation to `flogo.json` without re-planning install decisions.
 
 ## High-level topology
 
@@ -185,6 +185,7 @@ Current workflow modes:
   - `package_contrib`
   - `install_contrib_plan`
   - `install_contrib_diff_plan`
+  - `install_contrib_apply`
 
 ## Runner-worker
 
@@ -232,6 +233,7 @@ Current notable behavior:
   - `package_contrib`
   - `install_contrib_plan`
   - `install_contrib_diff_plan`
+  - `install_contrib_apply`
 - Container Apps Job mode includes ARM start/poll logic and job-template routing,
 - build/smoke steps are still less Flogo-native than the catalog/preview slice and remain an ongoing implementation area.
 
@@ -353,6 +355,7 @@ Implements the current Go-side Flogo-native command surface:
 - `contrib package`
 - `contrib install-plan`
 - `contrib install-diff-plan`
+- `contrib install-apply`
 
 ## End-to-end runtime flows
 
@@ -439,7 +442,7 @@ The platform has completed the Phase 1 capability area and has implemented Phase
 - diagnosis confidence is now explicitly calibrated against runtime-backed, mixed, artifact-backed-only, simulated-fallback, and contract-inference-only proof quality rather than treated as a flat heuristic,
 - `packages/evals` now includes a diagnosis-focused regression corpus that exercises planner choice, confidence bands, fallback caveats, and recommendation stability across the current trigger families,
 - the web console now exposes task-detail runtime evidence, trigger-specific summaries, normalized steps, fallback reasons, comparison basis, and diagnosis summaries for the currently supported slices,
-- the same task-detail artifact surface now exposes minimal Activity/Trigger/Action authoring result summaries, validation summaries, package summaries, install-plan summaries, and exact install diff-preview summaries, including contribution type, package/module, generated files, build/test status, package metadata, target-app install entries, changed canonical paths, freshness/warnings/conflicts, and recommended next action from persisted `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, and `contrib_install_diff_plan` metadata,
+- the same task-detail artifact surface now exposes minimal Activity/Trigger/Action authoring result summaries, validation summaries, package summaries, install-plan summaries, exact install diff-preview summaries, and review-gated install-apply summaries, including contribution type, package/module, generated files, build/test status, package metadata, target-app install entries, changed canonical paths, freshness/warnings/conflicts, approval/apply status, and recommended next action from persisted `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `contrib_install_apply_result`, and `flogo_json` metadata,
 - broader runtime coverage beyond the current narrow supported slices remains planned,
 - analysis-only orchestration modes.
 
@@ -463,7 +466,7 @@ Persisted through Prisma today:
 - app-scoped inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, mapping-test, runtime-trace, replay, and run-comparison artifacts are persisted through hidden synthetic analysis tasks,
 - task-scoped `diagnosis_report` artifacts are persisted through the normal task pipeline and can reference nested trace, replay, and comparison artifacts used during diagnosis,
 - those app-analysis payloads are stored in Blob/Azurite-backed JSON objects,
-- task-scoped `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `build_log`, and `test_report` artifacts from Activity/Trigger/Action authoring are now also uploaded as Blob/Azurite-backed JSON payloads through the same storage seam while retaining Prisma metadata for task/detail rendering,
+- task-scoped `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `contrib_install_apply_result`, `flogo_json`, `build_log`, and `test_report` artifacts from Activity/Trigger/Action authoring are now also uploaded as Blob/Azurite-backed JSON payloads through the same storage seam while retaining Prisma metadata for task/detail rendering,
 - broader task artifacts outside the app-analysis and contribution-authoring slices can still include logical/local URIs.
 
 ### Planned persistence growth

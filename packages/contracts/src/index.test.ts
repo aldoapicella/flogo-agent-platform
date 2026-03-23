@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ApprovalTypeSchema,
+  ContributionInstallApplyRequestSchema,
+  ContributionInstallApplyResponseSchema,
   ContributionInstallDiffPlanRequestSchema,
   ContributionInstallDiffPlanResponseSchema,
   ActionScaffoldRequestSchema,
@@ -14,6 +17,12 @@ import {
   TriggerScaffoldRequestSchema,
   TriggerScaffoldResponseSchema
 } from "./index.js";
+
+describe("ApprovalTypeSchema", () => {
+  it("accepts the explicit install contribution approval type", () => {
+    expect(ApprovalTypeSchema.parse("install_contribution")).toBe("install_contribution");
+  });
+});
 
 describe("ActionScaffoldRequestSchema", () => {
   it("accepts the narrow supported action scaffold shape", () => {
@@ -688,5 +697,96 @@ describe("ContributionInstallDiffPlanResponseSchema", () => {
     expect(parsed.result.previewAvailable).toBe(true);
     expect(parsed.result.predictedChanges.changedPaths).toEqual(["imports"]);
     expect(parsed.result.sourceContribution.selectedAlias).toBe("webhooktrigger");
+  });
+});
+
+describe("ContributionInstallApplyRequestSchema", () => {
+  it("accepts install apply input backed by a diff artifact id", () => {
+    const parsed = ContributionInstallApplyRequestSchema.parse({
+      installDiffArtifactId: "artifact-install-diff-1",
+      targetApp: {
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json"
+      }
+    });
+
+    expect(parsed.installDiffArtifactId).toBe("artifact-install-diff-1");
+  });
+
+  it("rejects missing install diff sources", () => {
+    expect(() => ContributionInstallApplyRequestSchema.parse({})).toThrow(/Provide installDiffArtifactId, installDiffArtifact, or installDiffResult/);
+  });
+});
+
+describe("ContributionInstallApplyResponseSchema", () => {
+  it("parses a review-gated contribution install apply result", () => {
+    const parsed = ContributionInstallApplyResponseSchema.parse({
+      result: {
+        contributionKind: "trigger",
+        sourceContribution: {
+          kind: "trigger",
+          modulePath: "example.com/acme/webhook",
+          packageName: "webhooktrigger",
+          packagePath: "example.com/acme/webhook",
+          descriptorRef: "example.com/acme/webhook",
+          selectedAlias: "webhooktrigger",
+          source: "package_artifact",
+          sourceArtifactId: "artifact-package-1"
+        },
+        targetApp: {
+          projectId: "demo",
+          appId: "hello-rest",
+          appPath: "examples/hello-rest/flogo.json",
+          appName: "hello-rest"
+        },
+        basedOnInstallDiffPlan: {
+          sourceArtifactId: "artifact-install-diff-1",
+          installPlanArtifactId: "artifact-install-plan-1",
+          diffFingerprint: "diff-sha",
+          appFingerprintBefore: "before-sha",
+          appFingerprintPreview: "after-sha"
+        },
+        appFingerprintBefore: "before-sha",
+        appFingerprintAfter: "after-sha",
+        isStale: false,
+        applied: true,
+        applyReady: true,
+        readiness: "high",
+        warnings: [],
+        conflicts: [],
+        limitations: ["Install apply only; update/apply remains deferred."],
+        changedPaths: ["imports"],
+        appliedImports: [
+          {
+            alias: "webhooktrigger",
+            ref: "example.com/acme/webhook",
+            action: "add"
+          }
+        ],
+        appliedRefs: [
+          {
+            surface: "triggerRef",
+            value: "#webhooktrigger"
+          }
+        ],
+        applySummary: ["Applied import alias \"webhooktrigger\" for ref \"example.com/acme/webhook\"."],
+        canonicalBeforeJson: "{\n  \"imports\": []\n}",
+        canonicalAfterJson: "{\n  \"imports\": [{\"alias\":\"webhooktrigger\"}]\n}",
+        canonicalApp: {
+          name: "hello-rest",
+          type: "flogo:app",
+          appModel: "1.1.0",
+          imports: [{ alias: "webhooktrigger", ref: "example.com/acme/webhook" }]
+        },
+        recommendedNextAction: "Review the updated canonical flogo.json artifact and run follow-up validation.",
+        approvalRequired: true,
+        mutationApplied: true
+      }
+    });
+
+    expect(parsed.result.applied).toBe(true);
+    expect(parsed.result.changedPaths).toEqual(["imports"]);
+    expect(parsed.result.approvalRequired).toBe(true);
   });
 });
