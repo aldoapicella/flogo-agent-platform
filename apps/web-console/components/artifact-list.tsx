@@ -11,6 +11,7 @@ function artifactSummary(artifact: ArtifactRef) {
       artifact.type !== "contrib_package" &&
       artifact.type !== "contrib_install_plan" &&
       artifact.type !== "contrib_update_plan" &&
+      artifact.type !== "contrib_update_diff_plan" &&
       artifact.type !== "contrib_install_diff_plan" &&
       artifact.type !== "contrib_install_apply_result") ||
     !isRecord(artifact.metadata)
@@ -98,6 +99,10 @@ function artifactSummary(artifact: ArtifactRef) {
   const sourceDiffArtifactId =
     isRecord(result?.basedOnInstallDiffPlan) && typeof result.basedOnInstallDiffPlan.sourceArtifactId === "string"
       ? result.basedOnInstallDiffPlan.sourceArtifactId
+      : undefined;
+  const sourceUpdatePlanArtifactId =
+    isRecord(result?.basedOnUpdatePlan) && typeof result.basedOnUpdatePlan.sourceArtifactId === "string"
+      ? result.basedOnUpdatePlan.sourceArtifactId
       : undefined;
   const isStale = typeof result?.isStale === "boolean" ? result.isStale : undefined;
   const staleReason = typeof result?.staleReason === "string" ? result.staleReason : undefined;
@@ -197,6 +202,7 @@ function artifactSummary(artifact: ArtifactRef) {
     applyReady === undefined &&
     approvalRequired === undefined &&
     !sourceDiffArtifactId &&
+    !sourceUpdatePlanArtifactId &&
     isStale === undefined &&
     !staleReason &&
     warnings.length === 0 &&
@@ -229,6 +235,7 @@ function artifactSummary(artifact: ArtifactRef) {
       {matchQuality ? <div>match quality: {matchQuality}</div> : null}
       {compatibility ? <div>compatibility: {compatibility}</div> : null}
       {sourceDiffArtifactId ? <div>source diff artifact: {sourceDiffArtifactId}</div> : null}
+      {sourceUpdatePlanArtifactId ? <div>source update-plan artifact: {sourceUpdatePlanArtifactId}</div> : null}
       {proposedImportSummary ? <div>{importSummaryLabel}: {proposedImportSummary}</div> : null}
       {proposedRefSummary ? <div>{refSummaryLabel}: {proposedRefSummary}</div> : null}
       {previewAvailable !== undefined ? <div>preview available: {previewAvailable ? "yes" : "no"}</div> : null}

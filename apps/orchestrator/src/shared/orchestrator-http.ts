@@ -134,6 +134,9 @@ export function resolveWorkflowRunnerSteps(start: OrchestratorStartRequest): Run
   if (mode === "update_contrib_plan") {
     return ["update_contrib_plan"];
   }
+  if (mode === "update_contrib_diff_plan") {
+    return ["update_contrib_diff_plan"];
+  }
   if (mode === "install_contrib_diff_plan") {
     return ["install_contrib_diff_plan"];
   }
@@ -252,6 +255,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
       break;
     case "update_contrib_plan":
       jobKind = "contrib_update_plan";
+      break;
+    case "update_contrib_diff_plan":
+      jobKind = "contrib_update_diff_plan";
       break;
     case "install_contrib_diff_plan":
       jobKind = "contrib_install_diff_plan";
@@ -835,6 +841,27 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
         }
       };
       break;
+    case "update_contrib_diff_plan":
+      analysisPayload = {
+        updatePlanArtifactId:
+          typeof start.request.inputs["updatePlanArtifactId"] === "string"
+            ? (start.request.inputs["updatePlanArtifactId"] as string)
+            : undefined,
+        updatePlanArtifact:
+          start.request.inputs["updatePlanArtifact"] && typeof start.request.inputs["updatePlanArtifact"] === "object" && !Array.isArray(start.request.inputs["updatePlanArtifact"])
+            ? (start.request.inputs["updatePlanArtifact"] as Record<string, unknown>)
+            : undefined,
+        updatePlanResult:
+          start.request.inputs["updatePlanResult"] && typeof start.request.inputs["updatePlanResult"] === "object" && !Array.isArray(start.request.inputs["updatePlanResult"])
+            ? (start.request.inputs["updatePlanResult"] as Record<string, unknown>)
+            : undefined,
+        targetApp: {
+          projectId: start.request.projectId,
+          appId: start.request.appId,
+          appPath: start.request.appPath
+        }
+      };
+      break;
     case "install_contrib_diff_plan":
       analysisPayload = {
         installPlanArtifactId:
@@ -941,6 +968,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
       break;
     case "update_contrib_plan":
       analysisKind = "update_contrib_plan";
+      break;
+    case "update_contrib_diff_plan":
+      analysisKind = "update_contrib_diff_plan";
       break;
     case "install_contrib_diff_plan":
       analysisKind = "install_contrib_diff_plan";

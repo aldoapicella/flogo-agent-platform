@@ -456,6 +456,98 @@ describe("ArtifactList", () => {
     expect(html).toContain("blob path: task-artifacts/demo/task-9/contrib_update_plan/artifact-9.json");
   });
 
+  it("renders exact update diff-plan summaries with freshness, changed paths, and next action", () => {
+    const html = renderToStaticMarkup(
+      <ArtifactList
+        artifacts={[
+          {
+            id: "artifact-10",
+            type: "contrib_update_diff_plan",
+            name: "trigger-update-diff-plan-webhooktrigger",
+            uri: "memory://task-10/trigger-update-diff-plan-webhooktrigger",
+            metadata: {
+              storage: {
+                kind: "blob",
+                blobPath: "task-artifacts/demo/task-10/contrib_update_diff_plan/artifact-10.json",
+                durablePayload: true
+              },
+              result: {
+                contributionKind: "trigger",
+                sourceContribution: {
+                  kind: "trigger",
+                  packageName: "webhooktrigger",
+                  modulePath: "example.com/acme/webhook",
+                  selectedAlias: "webhooktrigger",
+                  source: "package_artifact"
+                },
+                detectedInstalledContribution: {
+                  alias: "webhooktrigger",
+                  ref: "example.com/acme/webhook",
+                  version: "0.1.0",
+                  matchedBy: ["alias+ref"],
+                  confidence: "high"
+                },
+                targetApp: {
+                  appId: "hello-rest"
+                },
+                basedOnUpdatePlan: {
+                  sourceArtifactId: "artifact-update-plan-10"
+                },
+                previewAvailable: true,
+                isStale: false,
+                updateReady: true,
+                readiness: "high",
+                warnings: [],
+                conflicts: [],
+                predictedChanges: {
+                  importsToReplace: [
+                    {
+                      alias: "webhooktrigger",
+                      ref: "example.com/acme/webhook",
+                      version: "0.2.0",
+                      action: "replace_existing"
+                    }
+                  ],
+                  importsToKeep: [],
+                  importsToAdd: [],
+                  importsToRemove: [],
+                  refsToReplace: [
+                    {
+                      surface: "triggerRef",
+                      value: "#webhooktrigger"
+                    }
+                  ],
+                  refsToKeep: [],
+                  refsToAdd: [],
+                  refsToRemove: [],
+                  changedPaths: ["imports"],
+                  structuralChanges: ["Update import alias \"webhooktrigger\" version from \"0.1.0\" to \"0.2.0\"."],
+                  diffEntries: [],
+                  noMutation: true
+                },
+                diffSummary: ["Update import alias \"webhooktrigger\" version from \"0.1.0\" to \"0.2.0\"."],
+                recommendedNextAction: "Review the exact canonical update diff."
+              }
+            }
+          }
+        ]}
+      />
+    );
+
+    expect(html).toContain("contribution type: trigger");
+    expect(html).toContain("target app: hello-rest");
+    expect(html).toContain("detected installed contribution: alias webhooktrigger, ref example.com/acme/webhook, version 0.1.0");
+    expect(html).toContain("source update-plan artifact: artifact-update-plan-10");
+    expect(html).toContain("preview available: yes");
+    expect(html).toContain("stale: no");
+    expect(html).toContain("update ready: yes");
+    expect(html).toContain("changed paths: imports");
+    expect(html).toContain("diff summary: Update import alias &quot;webhooktrigger&quot; version from &quot;0.1.0&quot; to &quot;0.2.0&quot;.");
+    expect(html).toContain("proposed imports: webhooktrigger -&gt; example.com/acme/webhook (replace_existing)");
+    expect(html).toContain("proposed refs: triggerRef: #webhooktrigger");
+    expect(html).toContain("blob path: task-artifacts/demo/task-10/contrib_update_diff_plan/artifact-10.json");
+  });
+
   it("renders install apply summaries with approval, apply status, and changed canonical paths", () => {
     const html = renderToStaticMarkup(
       <ArtifactList

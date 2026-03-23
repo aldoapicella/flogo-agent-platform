@@ -523,4 +523,46 @@ describe("orchestrator-http", () => {
       }
     });
   });
+
+  it("routes update_contrib_diff_plan mode to the exact canonical update diff-preview runner step", () => {
+    const start: OrchestratorStartRequest = {
+      taskId: "task-update-contrib-diff-plan",
+      request: {
+        type: "review",
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json",
+        requestedBy: "operator",
+        summary: "Preview the exact canonical update diff for an installed contribution",
+        inputs: {
+          mode: "update_contrib_diff_plan",
+          updatePlanArtifactId: "artifact-update-plan-7"
+        },
+        constraints: {
+          allowDependencyChanges: false,
+          allowCustomCode: false,
+          targetEnv: "dev",
+          requireApproval: true
+        }
+      },
+      requiredApprovals: [],
+      planSummary: "Preview contribution update diff",
+      steps: []
+    };
+
+    expect(resolveWorkflowRunnerSteps(start)).toEqual(["update_contrib_diff_plan"]);
+
+    const spec = buildRunnerJobSpec(start, "update_contrib_diff_plan");
+
+    expect(spec.jobKind).toBe("contrib_update_diff_plan");
+    expect(spec.analysisKind).toBe("update_contrib_diff_plan");
+    expect(spec.analysisPayload).toMatchObject({
+      updatePlanArtifactId: "artifact-update-plan-7",
+      targetApp: {
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json"
+      }
+    });
+  });
 });

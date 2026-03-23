@@ -78,6 +78,7 @@ Important current `inputs` conventions:
 - `mode = "install_contrib_diff_plan"` for analysis-only exact canonical install diff preview against one target app
 - `mode = "install_contrib_apply"` for review-gated exact install apply against one target app
 - `mode = "update_contrib_plan"` for analysis-only conservative installed-contribution update planning against one target app
+- `mode = "update_contrib_diff_plan"` for analysis-only exact canonical update diff preview against one target app
 - `mode = "governance"` for analysis-only alias/orphan/version validation
 - `mode = "composition_compare"` for analysis-only JSON vs programmatic comparison
 
@@ -202,6 +203,7 @@ Current artifact kinds:
 - `contrib_install_diff_plan`
 - `contrib_install_apply_result`
 - `contrib_update_plan`
+- `contrib_update_diff_plan`
 
 ## Flogo-native contracts
 
@@ -256,10 +258,28 @@ These describe:
 - detected installed-contribution identity and alias/ref/import evidence,
 - exact, likely, ambiguous, or missing installed-match quality,
 - compatibility/conflict status plus conservative readiness,
-- predicted imports/refs to replace, keep, add, or remove in a later diff workflow,
+- predicted imports/refs to replace, keep, add, or remove for the exact update diff-preview workflow,
 - changed canonical paths expected at update time,
 - warnings, conflicts, limitations, and recommended next action,
 - review-oriented update planning without any `flogo.json` mutation.
+
+### Contribution update-diff-planning contracts
+
+Important schemas:
+
+- `ContributionUpdateDiffPlanRequest`
+- `ContributionUpdateDiffPlanResult`
+- `ContributionUpdateDiffPlanResponse`
+
+These describe:
+
+- one contribution update-plan source selected from a persisted or inline `contrib_update_plan`,
+- one target app identity and resolved app path,
+- exact canonical before/after `flogo.json` preview metadata for the current app state,
+- app/update-plan fingerprints used to detect stale plans,
+- machine-readable predicted import/ref changes plus changed paths and diff summary,
+- stale/fresh preview availability, warnings, conflicts, limitations, and recommended next action,
+- review-oriented exact update diff preview without any `flogo.json` mutation.
 
 ### Contribution install-apply contracts
 
@@ -838,7 +858,7 @@ Current runtime behavior is mixed:
 
 - persisted metadata is stored in PostgreSQL,
 - inventory, catalog, descriptor, contribution-evidence, governance, composition-compare, mapping-preview, property-plan, and mapping-test payloads are stored as Blob/Azurite-backed JSON objects,
-- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `contrib_install_apply_result`, `contrib_update_plan`, `flogo_json`, `build_log`, and `test_report` task artifacts are also stored as Blob/Azurite-backed JSON objects while retaining Prisma metadata for task detail rendering,
+- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `contrib_install_apply_result`, `contrib_update_plan`, `contrib_update_diff_plan`, `flogo_json`, `build_log`, and `test_report` task artifacts are also stored as Blob/Azurite-backed JSON objects while retaining Prisma metadata for task detail rendering,
 - many broader task artifacts still use logical or local URIs.
 
 This matters for operators:
@@ -846,7 +866,7 @@ This matters for operators:
 - task and analysis history survive restart,
 - artifact metadata survives restart,
 - app-analysis payloads are object-storage-backed,
-- contribution-authoring bundle, validation, package, install-plan, install-diff-plan, install-apply, update-plan, and proof payloads are object-storage-backed,
+- contribution-authoring bundle, validation, package, install-plan, install-diff-plan, install-apply, update-plan, update-diff-plan, and proof payloads are object-storage-backed,
 - broader runtime artifact payload locations may still be logical rather than object-storage-backed.
 
 ## App resolution model
@@ -880,6 +900,7 @@ Examples:
 - `contrib_install_diff_plan` is now produced by the exact install diff-preview slice, carries target-app/install-plan fingerprints, exact canonical before/after preview content, changed paths, predicted import/ref changes, stale-plan detection, warnings/conflicts, and recommended next action for Activity, Action, and Trigger bundles/packages, and is uploaded through the same Blob/Azurite storage seam.
 - `contrib_install_apply_result` is now produced by the review-gated install/apply slice, carries source diff/install-plan identity, before/after app fingerprints, apply status, changed paths, applied import/ref decisions, warnings/conflicts/limitations, and recommended next action, and is uploaded through the same Blob/Azurite storage seam.
 - `contrib_update_plan` is now produced by the conservative update-planning slice, carries detected installed-contribution evidence, match quality, compatibility, predicted replacements/additions/removals, changed paths, warnings/conflicts/limitations, and recommended next action for Activity, Action, and Trigger bundles/packages, and is uploaded through the same Blob/Azurite storage seam.
+- `contrib_update_diff_plan` is now produced by the exact update diff-preview slice, carries target-app/update-plan fingerprints, exact canonical before/after preview content, changed paths, predicted import/ref rewrites, stale-plan detection, warnings/conflicts, and recommended next action for Activity, Action, and Trigger bundles/packages, and is uploaded through the same Blob/Azurite storage seam.
 - `flogo_json` is now also emitted as a task artifact for successful install/apply tasks so the exact updated canonical app output remains reviewable and durable alongside the apply result.
 - graph projections in Prisma exist, but the current runtime does not fully maintain them.
 - task persistence is live, app-analysis payload storage is live, and contribution-authoring bundle/validation/package/proof payload storage is live, but workspace snapshots and broader blob-backed runtime artifact content are still planned work.

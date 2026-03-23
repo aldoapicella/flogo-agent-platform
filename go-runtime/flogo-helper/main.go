@@ -657,6 +657,12 @@ type contributionUpdatePlanResponse struct {
 	Result contributionUpdatePlanResult `json:"result"`
 }
 
+type contributionUpdateDiffPlanRequest struct {
+	UpdatePlan         contributionUpdatePlanResult `json:"updatePlan"`
+	UpdatePlanArtifact string                       `json:"updatePlanArtifactId,omitempty"`
+	TargetApp          contributionInstallTarget    `json:"targetApp,omitempty"`
+}
+
 type contributionInstallDiffPlanRequest struct {
 	InstallPlan         contributionInstallPlanResult `json:"installPlan"`
 	InstallPlanArtifact string                        `json:"installPlanArtifactId,omitempty"`
@@ -685,6 +691,23 @@ type contributionInstallDiffPredictedChanges struct {
 	NoMutation       bool                             `json:"noMutation"`
 }
 
+type contributionUpdateDiffPredictedChanges struct {
+	ImportsBefore    []contributionInstallImportEntry `json:"importsBefore"`
+	ImportsAfter     []contributionInstallImportEntry `json:"importsAfter"`
+	ImportsToReplace []contributionInstallImportEntry `json:"importsToReplace"`
+	ImportsToKeep    []contributionInstallImportEntry `json:"importsToKeep"`
+	ImportsToAdd     []contributionInstallImportEntry `json:"importsToAdd"`
+	ImportsToRemove  []contributionInstallImportEntry `json:"importsToRemove"`
+	RefsToReplace    []contributionInstallRefEntry    `json:"refsToReplace"`
+	RefsToKeep       []contributionInstallRefEntry    `json:"refsToKeep"`
+	RefsToAdd        []contributionInstallRefEntry    `json:"refsToAdd"`
+	RefsToRemove     []contributionInstallRefEntry    `json:"refsToRemove"`
+	StructuralChange []string                         `json:"structuralChanges"`
+	ChangedPaths     []string                         `json:"changedPaths"`
+	DiffEntries      []contributionInstallDiffChange  `json:"diffEntries"`
+	NoMutation       bool                             `json:"noMutation"`
+}
+
 type contributionInstallDiffSource struct {
 	Kind           string `json:"kind"`
 	ModulePath     string `json:"modulePath"`
@@ -697,6 +720,13 @@ type contributionInstallDiffSource struct {
 }
 
 type contributionInstallDiffPlanBasis struct {
+	SourceArtifact  string                     `json:"sourceArtifactId,omitempty"`
+	AppFingerprint  string                     `json:"appFingerprint,omitempty"`
+	PlanFingerprint string                     `json:"planFingerprint,omitempty"`
+	TargetApp       *contributionInstallTarget `json:"targetApp,omitempty"`
+}
+
+type contributionUpdateDiffPlanBasis struct {
 	SourceArtifact  string                     `json:"sourceArtifactId,omitempty"`
 	AppFingerprint  string                     `json:"appFingerprint,omitempty"`
 	PlanFingerprint string                     `json:"planFingerprint,omitempty"`
@@ -726,8 +756,36 @@ type contributionInstallDiffPlanResult struct {
 	RecommendedNextAction  string                                  `json:"recommendedNextAction"`
 }
 
+type contributionUpdateDiffPlanResult struct {
+	ContributionKind              string                                   `json:"contributionKind"`
+	SourceContribution            contributionInstallDiffSource            `json:"sourceContribution"`
+	DetectedInstalledContribution *contributionUpdateInstalledContribution `json:"detectedInstalledContribution,omitempty"`
+	TargetApp                     contributionInstallTarget                `json:"targetApp"`
+	BasedOnUpdatePlan             contributionUpdateDiffPlanBasis          `json:"basedOnUpdatePlan"`
+	AppFingerprintBefore          string                                   `json:"appFingerprintBefore"`
+	AppFingerprintAfter           string                                   `json:"appFingerprintAfter,omitempty"`
+	UpdatePlanFingerprint         string                                   `json:"updatePlanFingerprint,omitempty"`
+	IsStale                       bool                                     `json:"isStale"`
+	StaleReason                   string                                   `json:"staleReason,omitempty"`
+	PreviewAvailable              bool                                     `json:"previewAvailable"`
+	UpdateReady                   bool                                     `json:"updateReady"`
+	Readiness                     string                                   `json:"readiness"`
+	Warnings                      []string                                 `json:"warnings"`
+	Conflicts                     []contributionInstallConflict            `json:"conflicts"`
+	Limitations                   []string                                 `json:"limitations"`
+	PredictedChanges              contributionUpdateDiffPredictedChanges   `json:"predictedChanges"`
+	DiffSummary                   []string                                 `json:"diffSummary"`
+	CanonicalBeforeJSON           string                                   `json:"canonicalBeforeJson"`
+	CanonicalAfterJSON            string                                   `json:"canonicalAfterJson,omitempty"`
+	RecommendedNextAction         string                                   `json:"recommendedNextAction"`
+}
+
 type contributionInstallDiffPlanResponse struct {
 	Result contributionInstallDiffPlanResult `json:"result"`
+}
+
+type contributionUpdateDiffPlanResponse struct {
+	Result contributionUpdateDiffPlanResult `json:"result"`
 }
 
 type contributionInstallApplyRequest struct {
@@ -3098,7 +3156,7 @@ var supportedRuntimeActivityRefs = map[string]bool{
 
 func main() {
 	if len(os.Args) < 3 {
-		fail("expected a command such as 'catalog contribs', 'inspect descriptor', 'preview mapping', 'contrib scaffold-activity', 'contrib scaffold-action', 'contrib scaffold-trigger', 'contrib validate', 'contrib package', 'contrib install-plan', 'contrib update-plan', 'contrib install-diff-plan', or 'contrib install-apply'")
+		fail("expected a command such as 'catalog contribs', 'inspect descriptor', 'preview mapping', 'contrib scaffold-activity', 'contrib scaffold-action', 'contrib scaffold-trigger', 'contrib validate', 'contrib package', 'contrib install-plan', 'contrib update-plan', 'contrib update-diff-plan', 'contrib install-diff-plan', or 'contrib install-apply'")
 	}
 
 	command := strings.Join(os.Args[1:3], " ")
@@ -3164,6 +3222,18 @@ func main() {
 			fail("missing required --request flag")
 		}
 		encode(planContributionUpdate(loadApp(appPath), appPath, loadContributionUpdatePlanRequest(requestPath)))
+		return
+	}
+	if command == "contrib update-diff-plan" {
+		appPath := lookupFlag("--app")
+		if appPath == "" {
+			fail("missing required --app flag")
+		}
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(planContributionUpdateDiff(loadApp(appPath), appPath, loadContributionUpdateDiffPlanRequest(requestPath)))
 		return
 	}
 	if command == "contrib install-diff-plan" {
@@ -3566,6 +3636,20 @@ func loadContributionUpdatePlanRequest(inputPath string) contributionUpdatePlanR
 	return loadContributionInstallPlanRequest(inputPath)
 }
 
+func loadContributionUpdateDiffPlanRequest(inputPath string) contributionUpdateDiffPlanRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var request contributionUpdateDiffPlanRequest
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+
+	return request
+}
+
 func loadContributionInstallDiffPlanRequest(inputPath string) contributionInstallDiffPlanRequest {
 	contents, err := os.ReadFile(inputPath)
 	if err != nil {
@@ -3903,6 +3987,19 @@ func validateContributionUpdatePlanRequest(request contributionUpdatePlanRequest
 	return validateContributionInstallPlanRequest(request)
 }
 
+func validateContributionUpdateDiffPlanRequest(request contributionUpdateDiffPlanRequest) error {
+	if err := validateContributionScaffoldResult(contributionScaffoldResult{Bundle: request.UpdatePlan.Bundle}); err != nil {
+		return err
+	}
+	if strings.TrimSpace(request.UpdatePlan.SelectedAlias) == "" {
+		return fmt.Errorf("updatePlan.selectedAlias is required")
+	}
+	if strings.TrimSpace(request.UpdatePlan.ModulePath) == "" {
+		return fmt.Errorf("updatePlan.modulePath is required")
+	}
+	return nil
+}
+
 func validateContributionInstallDiffPlanRequest(request contributionInstallDiffPlanRequest) error {
 	if err := validateContributionScaffoldResult(contributionScaffoldResult{Bundle: request.InstallPlan.Bundle}); err != nil {
 		return err
@@ -4192,6 +4289,18 @@ func replaceImportEntry(entries []flogoImport, alias string, next flogoImport) (
 	return entries, false
 }
 
+func removeImportEntry(entries []flogoImport, alias string) ([]flogoImport, flogoImport, bool) {
+	normalizedAlias := normalizeAlias(alias)
+	for idx, entry := range entries {
+		if normalizeAlias(entry.Alias) == normalizedAlias {
+			cloned := append([]flogoImport{}, entries[:idx]...)
+			cloned = append(cloned, entries[idx+1:]...)
+			return cloned, entry, true
+		}
+	}
+	return entries, flogoImport{}, false
+}
+
 func findPreviewImport(entries []flogoImport, proposed contributionInstallImportEntry) (flogoImport, bool) {
 	if strings.TrimSpace(proposed.ExistingAlias) != "" {
 		for _, entry := range entries {
@@ -4234,6 +4343,23 @@ func copyInstallTarget(target contributionInstallTarget) contributionInstallTarg
 }
 
 func installDiffSourceFromPlan(plan contributionInstallPlanResult, artifactID string) contributionInstallDiffSource {
+	sourceArtifact := strings.TrimSpace(artifactID)
+	if sourceArtifact == "" {
+		sourceArtifact = strings.TrimSpace(plan.SourceArtifact)
+	}
+	return contributionInstallDiffSource{
+		Kind:           plan.ContributionKind,
+		ModulePath:     strings.TrimSpace(plan.ModulePath),
+		PackageName:    strings.TrimSpace(plan.PackageName),
+		PackagePath:    strings.TrimSpace(plan.PackagePath),
+		DescriptorRef:  strings.TrimSpace(plan.DescriptorRef),
+		SelectedAlias:  strings.TrimSpace(plan.SelectedAlias),
+		Source:         strings.TrimSpace(plan.Source),
+		SourceArtifact: sourceArtifact,
+	}
+}
+
+func updateDiffSourceFromPlan(plan contributionUpdatePlanResult, artifactID string) contributionInstallDiffSource {
 	sourceArtifact := strings.TrimSpace(artifactID)
 	if sourceArtifact == "" {
 		sourceArtifact = strings.TrimSpace(plan.SourceArtifact)
@@ -4520,6 +4646,345 @@ func planContributionInstallDiff(app flogoApp, appPath string, request contribut
 	}
 
 	return contributionInstallDiffPlanResponse{Result: result}
+}
+
+func planContributionUpdateDiff(app flogoApp, appPath string, request contributionUpdateDiffPlanRequest) contributionUpdateDiffPlanResponse {
+	if err := validateContributionUpdateDiffPlanRequest(request); err != nil {
+		fail(err.Error())
+	}
+
+	plan := request.UpdatePlan
+	targetApp := copyInstallTarget(plan.TargetApp)
+	overrideTarget := copyInstallTarget(request.TargetApp)
+	if overrideTarget.ProjectID != "" {
+		targetApp.ProjectID = overrideTarget.ProjectID
+	}
+	if overrideTarget.AppID != "" {
+		targetApp.AppID = overrideTarget.AppID
+	}
+	if overrideTarget.AppPath != "" {
+		targetApp.AppPath = overrideTarget.AppPath
+	}
+	if overrideTarget.AppName != "" {
+		targetApp.AppName = overrideTarget.AppName
+	}
+	if targetApp.AppPath == "" {
+		targetApp.AppPath = appPath
+	}
+	if targetApp.AppName == "" {
+		targetApp.AppName = app.Name
+	}
+
+	appFingerprintBefore := appCanonicalFingerprint(app)
+	computedPlanFingerprint := contributionUpdatePlanFingerprint(plan)
+	warnings := cloneStringSlice(plan.Warnings)
+	conflicts := cloneContributionInstallConflicts(plan.Conflicts)
+	limitations := dedupeStrings(append(cloneStringSlice(plan.Limitations),
+		"Diff preview only; this slice computes a reviewable canonical flogo.json preview without writing app files.",
+		"Exact preview is currently limited to canonical import mutations and does not rewrite usage sites beyond the alias/ref decisions already proven by update planning.",
+	))
+	diffSummary := []string{}
+
+	sourceContribution := updateDiffSourceFromPlan(plan, request.UpdatePlanArtifact)
+	basis := contributionUpdateDiffPlanBasis{
+		SourceArtifact:  strings.TrimSpace(request.UpdatePlanArtifact),
+		AppFingerprint:  strings.TrimSpace(plan.AppFingerprint),
+		PlanFingerprint: strings.TrimSpace(plan.PlanFingerprint),
+	}
+	if basis.SourceArtifact == "" {
+		basis.SourceArtifact = strings.TrimSpace(plan.SourceArtifact)
+	}
+	planTarget := copyInstallTarget(plan.TargetApp)
+	basis.TargetApp = &planTarget
+
+	result := contributionUpdateDiffPlanResult{
+		ContributionKind:              plan.ContributionKind,
+		SourceContribution:            sourceContribution,
+		DetectedInstalledContribution: plan.DetectedInstalledContribution,
+		TargetApp:                     targetApp,
+		BasedOnUpdatePlan:             basis,
+		AppFingerprintBefore:          appFingerprintBefore,
+		UpdatePlanFingerprint:         computedPlanFingerprint,
+		IsStale:                       false,
+		PreviewAvailable:              false,
+		UpdateReady:                   plan.UpdateReady,
+		Readiness:                     plan.Readiness,
+		Warnings:                      warnings,
+		Conflicts:                     conflicts,
+		Limitations:                   limitations,
+		PredictedChanges: contributionUpdateDiffPredictedChanges{
+			ImportsBefore:    []contributionInstallImportEntry{},
+			ImportsAfter:     []contributionInstallImportEntry{},
+			ImportsToReplace: cloneContributionInstallImportEntries(plan.PredictedChanges.ImportsToReplace),
+			ImportsToKeep:    cloneContributionInstallImportEntries(plan.PredictedChanges.ImportsToKeep),
+			ImportsToAdd:     cloneContributionInstallImportEntries(plan.PredictedChanges.ImportsToAdd),
+			ImportsToRemove:  cloneContributionInstallImportEntries(plan.PredictedChanges.ImportsToRemove),
+			RefsToReplace:    cloneContributionInstallRefEntries(plan.PredictedChanges.RefsToReplace),
+			RefsToKeep:       cloneContributionInstallRefEntries(plan.PredictedChanges.RefsToKeep),
+			RefsToAdd:        cloneContributionInstallRefEntries(plan.PredictedChanges.RefsToAdd),
+			RefsToRemove:     cloneContributionInstallRefEntries(plan.PredictedChanges.RefsToRemove),
+			StructuralChange: []string{},
+			ChangedPaths:     []string{},
+			DiffEntries:      []contributionInstallDiffChange{},
+			NoMutation:       true,
+		},
+		DiffSummary:           []string{},
+		CanonicalBeforeJSON:   canonicalJSONString(app.Raw),
+		RecommendedNextAction: "Regenerate the contribution update plan before producing an exact canonical diff preview.",
+	}
+
+	beforeImports := make([]contributionInstallImportEntry, 0, len(app.Imports))
+	for _, entry := range app.Imports {
+		beforeImports = append(beforeImports, toInstallImportEntry(entry, "existing"))
+	}
+	result.PredictedChanges.ImportsBefore = beforeImports
+	result.PredictedChanges.ImportsAfter = cloneContributionInstallImportEntries(beforeImports)
+
+	if !sameInstallTarget(targetApp, plan.TargetApp) {
+		result.IsStale = true
+		result.StaleReason = "The update plan target app no longer matches the requested target app context."
+		result.UpdateReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, result.StaleReason)
+		result.DiffSummary = append(result.DiffSummary, "Update diff preview stopped because the target app context changed since update planning.")
+		return contributionUpdateDiffPlanResponse{Result: result}
+	}
+
+	if strings.TrimSpace(plan.AppFingerprint) == "" {
+		result.IsStale = true
+		result.StaleReason = "The update plan does not include an app fingerprint, so freshness cannot be verified."
+		result.UpdateReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, result.StaleReason)
+		result.DiffSummary = append(result.DiffSummary, "Update diff preview requires a fresh update plan that records the target app fingerprint.")
+		return contributionUpdateDiffPlanResponse{Result: result}
+	}
+
+	if strings.TrimSpace(plan.AppFingerprint) != appFingerprintBefore {
+		result.IsStale = true
+		result.StaleReason = "The target app changed after update planning; regenerate the update plan before reviewing an exact diff."
+		result.UpdateReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, result.StaleReason)
+		result.DiffSummary = append(result.DiffSummary, "Update diff preview stopped because flogo.json drifted from the update-plan basis.")
+		return contributionUpdateDiffPlanResponse{Result: result}
+	}
+
+	if strings.TrimSpace(plan.PlanFingerprint) != "" && strings.TrimSpace(plan.PlanFingerprint) != computedPlanFingerprint {
+		result.IsStale = true
+		result.StaleReason = "The update plan payload no longer matches its recorded fingerprint."
+		result.UpdateReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		result.Warnings = append(result.Warnings, result.StaleReason)
+		result.DiffSummary = append(result.DiffSummary, "Update diff preview stopped because the update plan payload appears to have changed since planning.")
+		return contributionUpdateDiffPlanResponse{Result: result}
+	}
+
+	if !plan.UpdateReady || (plan.MatchQuality != "exact" && plan.MatchQuality != "likely") || plan.Compatibility != "compatible" || plan.DetectedInstalledContribution == nil {
+		result.PreviewAvailable = false
+		result.UpdateReady = false
+		result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+		if plan.DetectedInstalledContribution == nil {
+			result.Warnings = append(result.Warnings, "Update diff preview requires a confident installed-contribution match from the saved update plan.")
+		}
+		if len(result.DiffSummary) == 0 {
+			result.DiffSummary = append(result.DiffSummary, "Update diff preview stopped because the saved update plan is not precise enough to materialize an exact canonical preview safely.")
+		}
+		result.RecommendedNextAction = "Regenerate or refine the update plan until the installed contribution match and compatibility are strong enough for exact diff preview."
+		return contributionUpdateDiffPlanResponse{Result: result}
+	}
+
+	afterImports := append([]flogoImport{}, app.Imports...)
+	for _, proposed := range plan.PredictedChanges.ImportsToReplace {
+		existing, ok := findPreviewImport(afterImports, proposed)
+		if !ok {
+			result.PreviewAvailable = false
+			result.UpdateReady = false
+			result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+			result.Warnings = append(result.Warnings, fmt.Sprintf("Update diff preview could not find alias %q to replace in the target app.", valueOrFallback(proposed.Alias, proposed.ExistingAlias)))
+			result.DiffSummary = append(result.DiffSummary, fmt.Sprintf("Stopped update diff preview because alias %q could not be found for replacement.", valueOrFallback(proposed.Alias, proposed.ExistingAlias)))
+			result.RecommendedNextAction = "Regenerate the update plan against the current app state before reviewing an exact diff preview."
+			return contributionUpdateDiffPlanResponse{Result: result}
+		}
+		nextEntry := flogoImport{
+			Alias:   valueOrFallback(proposed.Alias, existing.Alias),
+			Ref:     valueOrFallback(proposed.Ref, existing.Ref),
+			Version: valueOrFallback(proposed.Version, existing.Version),
+		}
+		if normalizeAlias(existing.Alias) != normalizeAlias(nextEntry.Alias) {
+			result.PreviewAvailable = false
+			result.UpdateReady = false
+			result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+			result.Warnings = append(result.Warnings, fmt.Sprintf("Update diff preview will not rewrite alias %q to %q without a later update-apply workflow.", existing.Alias, nextEntry.Alias))
+			result.DiffSummary = append(result.DiffSummary, fmt.Sprintf("Stopped update diff preview because alias %q would need to change to %q.", existing.Alias, nextEntry.Alias))
+			result.RecommendedNextAction = "Keep alias rewrites deferred until a later review-gated update/apply slice."
+			return contributionUpdateDiffPlanResponse{Result: result}
+		}
+		updated, replaced := replaceImportEntry(afterImports, existing.Alias, nextEntry)
+		if !replaced {
+			result.PreviewAvailable = false
+			result.UpdateReady = false
+			result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+			result.Warnings = append(result.Warnings, fmt.Sprintf("Update diff preview could not replace alias %q in the target app.", existing.Alias))
+			result.DiffSummary = append(result.DiffSummary, fmt.Sprintf("Stopped update diff preview because alias %q could not be replaced.", existing.Alias))
+			result.RecommendedNextAction = "Regenerate the update plan against the current app state before reviewing an exact diff preview."
+			return contributionUpdateDiffPlanResponse{Result: result}
+		}
+		afterImports = updated
+		result.PredictedChanges.ChangedPaths = appendUniqueString(result.PredictedChanges.ChangedPaths, "imports")
+		summary := fmt.Sprintf("Update import alias %q from ref %q to %q.", existing.Alias, existing.Ref, nextEntry.Ref)
+		if existing.Ref == nextEntry.Ref && existing.Version != nextEntry.Version {
+			summary = fmt.Sprintf("Update import alias %q version from %q to %q.", existing.Alias, valueOrFallback(existing.Version, "unset"), valueOrFallback(nextEntry.Version, "unset"))
+		}
+		result.PredictedChanges.StructuralChange = append(result.PredictedChanges.StructuralChange, summary)
+		result.PredictedChanges.DiffEntries = append(result.PredictedChanges.DiffEntries, contributionInstallDiffChange{
+			Path:       "imports",
+			ChangeType: "update",
+			Summary:    summary,
+			Before: map[string]any{
+				"alias":   existing.Alias,
+				"ref":     existing.Ref,
+				"version": existing.Version,
+			},
+			After: map[string]any{
+				"alias":   nextEntry.Alias,
+				"ref":     nextEntry.Ref,
+				"version": nextEntry.Version,
+			},
+		})
+		diffSummary = append(diffSummary, summary)
+	}
+
+	for _, proposed := range plan.PredictedChanges.ImportsToKeep {
+		existing, ok := findPreviewImport(afterImports, proposed)
+		if !ok {
+			result.PreviewAvailable = false
+			result.UpdateReady = false
+			result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+			result.Warnings = append(result.Warnings, fmt.Sprintf("Update diff preview could not confirm existing alias %q for a no-op preview.", valueOrFallback(proposed.Alias, proposed.ExistingAlias)))
+			result.DiffSummary = append(result.DiffSummary, fmt.Sprintf("Stopped update diff preview because alias %q no longer matches the saved update-plan basis.", valueOrFallback(proposed.Alias, proposed.ExistingAlias)))
+			result.RecommendedNextAction = "Regenerate the update plan against the current app state before reviewing an exact diff preview."
+			return contributionUpdateDiffPlanResponse{Result: result}
+		}
+		summary := fmt.Sprintf("No canonical import mutation is required because alias %q already matches the requested contribution metadata.", existing.Alias)
+		result.PredictedChanges.DiffEntries = append(result.PredictedChanges.DiffEntries, contributionInstallDiffChange{
+			Path:       "imports",
+			ChangeType: "reuse",
+			Summary:    summary,
+		})
+		diffSummary = append(diffSummary, summary)
+	}
+
+	for _, proposed := range plan.PredictedChanges.ImportsToAdd {
+		nextEntry := flogoImport{
+			Alias:   strings.TrimSpace(proposed.Alias),
+			Ref:     strings.TrimSpace(proposed.Ref),
+			Version: strings.TrimSpace(proposed.Version),
+		}
+		if existing, ok := findPreviewImport(afterImports, contributionInstallImportEntry{Alias: proposed.Alias}); ok && strings.TrimSpace(existing.Ref) != strings.TrimSpace(proposed.Ref) {
+			result.PreviewAvailable = false
+			result.UpdateReady = false
+			result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+			result.Conflicts = append(result.Conflicts, contributionInstallConflict{
+				Kind:          "alias_conflict",
+				Severity:      "error",
+				Message:       fmt.Sprintf("Alias %q now resolves %q instead of the planned ref %q.", proposed.Alias, existing.Ref, proposed.Ref),
+				ExistingAlias: existing.Alias,
+				ExistingRef:   existing.Ref,
+				ProposedAlias: proposed.Alias,
+				ProposedRef:   proposed.Ref,
+			})
+			result.Warnings = append(result.Warnings, "Update diff preview found a new alias conflict while applying the saved update plan.")
+			result.DiffSummary = append(result.DiffSummary, fmt.Sprintf("Stopped update diff preview because alias %q now points to %q.", proposed.Alias, existing.Ref))
+			result.RecommendedNextAction = "Regenerate the update plan and resolve the alias conflict before reviewing an exact diff preview."
+			return contributionUpdateDiffPlanResponse{Result: result}
+		}
+		afterImports = append(afterImports, nextEntry)
+		result.PredictedChanges.ChangedPaths = appendUniqueString(result.PredictedChanges.ChangedPaths, "imports")
+		summary := fmt.Sprintf("Add import alias %q for ref %q.", nextEntry.Alias, nextEntry.Ref)
+		result.PredictedChanges.StructuralChange = append(result.PredictedChanges.StructuralChange, summary)
+		result.PredictedChanges.DiffEntries = append(result.PredictedChanges.DiffEntries, contributionInstallDiffChange{
+			Path:       "imports",
+			ChangeType: "add",
+			Summary:    summary,
+			After: map[string]any{
+				"alias":   nextEntry.Alias,
+				"ref":     nextEntry.Ref,
+				"version": nextEntry.Version,
+			},
+		})
+		diffSummary = append(diffSummary, summary)
+	}
+
+	for _, proposed := range plan.PredictedChanges.ImportsToRemove {
+		existing, ok := findPreviewImport(afterImports, proposed)
+		if !ok {
+			result.PreviewAvailable = false
+			result.UpdateReady = false
+			result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+			result.Warnings = append(result.Warnings, fmt.Sprintf("Update diff preview could not find alias %q to remove in the target app.", valueOrFallback(proposed.Alias, proposed.ExistingAlias)))
+			result.DiffSummary = append(result.DiffSummary, fmt.Sprintf("Stopped update diff preview because alias %q could not be removed.", valueOrFallback(proposed.Alias, proposed.ExistingAlias)))
+			result.RecommendedNextAction = "Regenerate the update plan against the current app state before reviewing an exact diff preview."
+			return contributionUpdateDiffPlanResponse{Result: result}
+		}
+		updated, removed, ok := removeImportEntry(afterImports, existing.Alias)
+		if !ok {
+			result.PreviewAvailable = false
+			result.UpdateReady = false
+			result.Readiness = lowerInstallReadiness(result.Readiness, "low")
+			result.Warnings = append(result.Warnings, fmt.Sprintf("Update diff preview could not remove alias %q from the target app.", existing.Alias))
+			result.DiffSummary = append(result.DiffSummary, fmt.Sprintf("Stopped update diff preview because alias %q could not be removed.", existing.Alias))
+			result.RecommendedNextAction = "Regenerate the update plan against the current app state before reviewing an exact diff preview."
+			return contributionUpdateDiffPlanResponse{Result: result}
+		}
+		afterImports = updated
+		result.PredictedChanges.ChangedPaths = appendUniqueString(result.PredictedChanges.ChangedPaths, "imports")
+		summary := fmt.Sprintf("Remove import alias %q for ref %q.", removed.Alias, removed.Ref)
+		result.PredictedChanges.StructuralChange = append(result.PredictedChanges.StructuralChange, summary)
+		result.PredictedChanges.DiffEntries = append(result.PredictedChanges.DiffEntries, contributionInstallDiffChange{
+			Path:       "imports",
+			ChangeType: "update",
+			Summary:    summary,
+			Before: map[string]any{
+				"alias":   removed.Alias,
+				"ref":     removed.Ref,
+				"version": removed.Version,
+			},
+		})
+		diffSummary = append(diffSummary, summary)
+	}
+
+	if len(result.PredictedChanges.ChangedPaths) == 0 {
+		diffSummary = append(diffSummary, "No canonical flogo.json import mutation is required for this update plan.")
+	}
+
+	afterEntries := make([]contributionInstallImportEntry, 0, len(afterImports))
+	for _, entry := range afterImports {
+		afterEntries = append(afterEntries, toInstallImportEntry(entry, "predicted"))
+	}
+	result.PredictedChanges.ImportsAfter = afterEntries
+	result.PredictedChanges.StructuralChange = dedupeStrings(result.PredictedChanges.StructuralChange)
+	result.PredictedChanges.ChangedPaths = dedupeStrings(result.PredictedChanges.ChangedPaths)
+	result.PredictedChanges.RefsToReplace = dedupeContributionInstallRefEntries(result.PredictedChanges.RefsToReplace)
+	result.PredictedChanges.RefsToKeep = dedupeContributionInstallRefEntries(result.PredictedChanges.RefsToKeep)
+	result.PredictedChanges.RefsToAdd = dedupeContributionInstallRefEntries(result.PredictedChanges.RefsToAdd)
+	result.PredictedChanges.RefsToRemove = dedupeContributionInstallRefEntries(result.PredictedChanges.RefsToRemove)
+	result.DiffSummary = dedupeStrings(diffSummary)
+
+	afterRaw := cloneStringAnyMap(app.Raw)
+	if len(result.PredictedChanges.ChangedPaths) > 0 {
+		afterRaw["imports"] = buildRawImports(afterImports)
+	}
+	result.CanonicalAfterJSON = canonicalJSONString(afterRaw)
+	result.AppFingerprintAfter = hashProjection(sortValue(afterRaw))
+	result.PreviewAvailable = true
+	if len(result.PredictedChanges.ChangedPaths) > 0 {
+		result.RecommendedNextAction = "Review the exact canonical update diff and keep update/apply gated to a later explicit mutation workflow."
+	} else {
+		result.RecommendedNextAction = "Review the no-op canonical update diff and keep update/apply gated to a later explicit mutation workflow."
+	}
+
+	return contributionUpdateDiffPlanResponse{Result: result}
 }
 
 func applyContributionInstallDiff(app flogoApp, appPath string, request contributionInstallApplyRequest) contributionInstallApplyResponse {

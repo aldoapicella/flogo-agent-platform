@@ -400,4 +400,32 @@ describe("TaskPlanner shared contribution lifecycle modes", () => {
       "runner.updateContribPlan"
     ]);
   });
+
+  it("treats explicit contribution update diff planning mode as analysis-only authoring work", () => {
+    const planner = new TaskPlanner();
+    const plan = planner.plan({
+      type: "review",
+      projectId: "demo",
+      appId: "hello-rest",
+      requestedBy: "operator",
+      summary: "Preview the exact canonical update diff for an installed contribution",
+      inputs: {
+        mode: "update_contrib_diff_plan",
+        updatePlanArtifactId: "artifact-update-plan-1"
+      },
+      constraints: {
+        allowDependencyChanges: false,
+        allowCustomCode: false,
+        targetEnv: "dev",
+        requireApproval: true
+      }
+    });
+
+    expect(plan.requiredApprovals).toEqual([]);
+    expect(plan.steps.map((step) => step.tool)).toEqual([
+      "flogo.parseApp",
+      "flogo.validateApp",
+      "runner.updateContribDiffPlan"
+    ]);
+  });
 });

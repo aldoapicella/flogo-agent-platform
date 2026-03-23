@@ -1479,6 +1479,327 @@ describe("RunnerExecutorService", () => {
     expect(result.artifacts.some((artifact) => artifact.type === "contrib_update_plan")).toBe(true);
   });
 
+  it("executes helper-backed contribution update diff preview and publishes a conservative exact update-diff artifact", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          contributionKind: "trigger",
+          sourceContribution: {
+            kind: "trigger",
+            modulePath: "example.com/acme/webhook",
+            packageName: "webhooktrigger",
+            packagePath: "example.com/acme/webhook",
+            descriptorRef: "example.com/acme/webhook",
+            selectedAlias: "webhooktrigger",
+            source: "package_artifact",
+            sourceArtifactId: "package-artifact-1"
+          },
+          detectedInstalledContribution: {
+            alias: "webhooktrigger",
+            ref: "example.com/acme/webhook",
+            version: "0.1.0",
+            matchedBy: ["alias+ref"],
+            confidence: "high"
+          },
+          targetApp: {
+            projectId: "demo",
+            appId: "hello-rest",
+            appPath: "examples/hello-rest/flogo.json",
+            appName: "hello-rest"
+          },
+          basedOnUpdatePlan: {
+            sourceArtifactId: "update-plan-artifact-1",
+            appFingerprint: "before-sha",
+            planFingerprint: "update-plan-sha"
+          },
+          appFingerprintBefore: "before-sha",
+          appFingerprintAfter: "after-sha",
+          updatePlanFingerprint: "update-plan-sha",
+          isStale: false,
+          previewAvailable: true,
+          updateReady: true,
+          readiness: "high",
+          warnings: [],
+          conflicts: [],
+          limitations: ["Diff preview only."],
+          predictedChanges: {
+            importsBefore: [{ alias: "webhooktrigger", ref: "example.com/acme/webhook", version: "0.1.0", action: "existing" }],
+            importsAfter: [{ alias: "webhooktrigger", ref: "example.com/acme/webhook", version: "0.2.0", action: "predicted" }],
+            importsToReplace: [{ alias: "webhooktrigger", ref: "example.com/acme/webhook", version: "0.2.0", action: "replace_existing" }],
+            importsToKeep: [],
+            importsToAdd: [],
+            importsToRemove: [],
+            refsToReplace: [{ surface: "triggerRef", value: "#webhooktrigger" }],
+            refsToKeep: [],
+            refsToAdd: [],
+            refsToRemove: [],
+            structuralChanges: ["Update import alias \"webhooktrigger\" version from \"0.1.0\" to \"0.2.0\"."],
+            changedPaths: ["imports"],
+            diffEntries: [
+              {
+                path: "imports",
+                changeType: "update",
+                summary: "Update import alias \"webhooktrigger\" version from \"0.1.0\" to \"0.2.0\"."
+              }
+            ],
+            noMutation: true
+          },
+          diffSummary: ["Update import alias \"webhooktrigger\" version from \"0.1.0\" to \"0.2.0\"."],
+          canonicalBeforeJson: "{\n  \"imports\": [{\"alias\":\"webhooktrigger\",\"version\":\"0.1.0\"}]\n}",
+          canonicalAfterJson: "{\n  \"imports\": [{\"alias\":\"webhooktrigger\",\"version\":\"0.2.0\"}]\n}",
+          recommendedNextAction: "Review the exact canonical update diff."
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-update-contrib-diff-plan",
+      jobKind: "contrib_update_diff_plan",
+      stepType: "update_contrib_diff_plan",
+      analysisKind: "update_contrib_diff_plan",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://update-contrib-diff-plan",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        updatePlanArtifactId: "update-plan-artifact-1",
+        updatePlanArtifact: {
+          id: "update-plan-artifact-1",
+          type: "contrib_update_plan",
+          name: "trigger-update-plan-webhooktrigger",
+          uri: "memory://task/trigger-update-plan-webhooktrigger.json",
+          metadata: {
+            result: {
+              contributionKind: "trigger",
+              source: "package_artifact",
+              sourceArtifactId: "package-artifact-1",
+              targetApp: {
+                projectId: "demo",
+                appId: "hello-rest",
+                appPath: "examples/hello-rest/flogo.json",
+                appName: "hello-rest"
+              },
+              bundle: {
+                kind: "trigger",
+                modulePath: "example.com/acme/webhook",
+                packageName: "webhooktrigger",
+                bundleRoot: "/tmp/flogo-trigger-webhooktrigger",
+                descriptor: {
+                  ref: "example.com/acme/webhook",
+                  alias: "webhooktrigger",
+                  type: "trigger",
+                  name: "webhook-trigger",
+                  version: "0.2.0",
+                  title: "Webhook Trigger",
+                  settings: [],
+                  handlerSettings: [],
+                  outputs: [],
+                  reply: [],
+                  examples: [],
+                  compatibilityNotes: ["Generated scaffold"],
+                  source: "trigger_scaffold"
+                },
+                files: []
+              },
+              modulePath: "example.com/acme/webhook",
+              packageName: "webhooktrigger",
+              packagePath: "example.com/acme/webhook",
+              descriptorRef: "example.com/acme/webhook",
+              appFingerprint: "before-sha",
+              planFingerprint: "update-plan-sha",
+              selectedAlias: "webhooktrigger",
+              detectedInstalledContribution: {
+                alias: "webhooktrigger",
+                ref: "example.com/acme/webhook",
+                version: "0.1.0",
+                matchedBy: ["alias+ref"],
+                confidence: "high"
+              },
+              matchQuality: "exact",
+              compatibility: "compatible",
+              updateReady: true,
+              readiness: "high",
+              predictedChanges: {
+                importsToReplace: [{ alias: "webhooktrigger", ref: "example.com/acme/webhook", version: "0.2.0", action: "replace_existing" }],
+                importsToKeep: [],
+                importsToAdd: [],
+                importsToRemove: [],
+                refsToReplace: [{ surface: "triggerRef", value: "#webhooktrigger" }],
+                refsToKeep: [],
+                refsToAdd: [],
+                refsToRemove: [],
+                changedPaths: ["imports"],
+                summaryLines: ["Replace import alias \"webhooktrigger\" in place."],
+                noMutation: true
+              },
+              warnings: [],
+              conflicts: [],
+              diagnostics: [],
+              recommendedNextAction: "Review the update plan before requesting an exact update diff preview.",
+              limitations: ["Planning only."]
+            }
+          }
+        },
+        targetApp: {
+          projectId: "demo",
+          appId: "hello-rest",
+          appPath: "examples/hello-rest/flogo.json"
+        }
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    const diffArtifact = result.artifacts.find((artifact) => artifact.type === "contrib_update_diff_plan");
+    expect(result.ok).toBe(true);
+    expect(diffArtifact).toBeDefined();
+    expect((diffArtifact?.metadata as { result?: { previewAvailable?: boolean; isStale?: boolean; readiness?: string } } | undefined)?.result?.previewAvailable).toBe(true);
+    expect((diffArtifact?.metadata as { result?: { isStale?: boolean } } | undefined)?.result?.isStale).toBe(false);
+    expect((diffArtifact?.metadata as { result?: { readiness?: string } } | undefined)?.result?.readiness).toBe("high");
+  });
+
+  it("marks update diff-preview jobs as failed when the saved update plan is stale", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          contributionKind: "trigger",
+          sourceContribution: {
+            kind: "trigger",
+            modulePath: "example.com/acme/webhook",
+            selectedAlias: "webhooktrigger",
+            source: "package_artifact"
+          },
+          targetApp: {
+            projectId: "demo",
+            appId: "hello-rest",
+            appPath: "examples/hello-rest/flogo.json"
+          },
+          basedOnUpdatePlan: {
+            sourceArtifactId: "update-plan-artifact-2",
+            appFingerprint: "before-sha",
+            planFingerprint: "update-plan-sha"
+          },
+          appFingerprintBefore: "after-sha",
+          updatePlanFingerprint: "update-plan-sha",
+          isStale: true,
+          staleReason: "The target app changed after update planning; regenerate the update plan before reviewing an exact diff.",
+          previewAvailable: false,
+          updateReady: false,
+          readiness: "low",
+          warnings: ["The target app changed after update planning; regenerate the update plan before reviewing an exact diff."],
+          conflicts: [],
+          limitations: ["Diff preview only."],
+          predictedChanges: {
+            importsBefore: [],
+            importsAfter: [],
+            importsToReplace: [],
+            importsToKeep: [],
+            importsToAdd: [],
+            importsToRemove: [],
+            refsToReplace: [],
+            refsToKeep: [],
+            refsToAdd: [],
+            refsToRemove: [],
+            structuralChanges: [],
+            changedPaths: [],
+            diffEntries: [],
+            noMutation: true
+          },
+          diffSummary: ["Update diff preview stopped because flogo.json drifted from the update-plan basis."],
+          canonicalBeforeJson: "{}",
+          recommendedNextAction: "Regenerate the update plan against the current app state before reviewing an exact diff preview."
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-update-contrib-diff-plan-stale",
+      jobKind: "contrib_update_diff_plan",
+      stepType: "update_contrib_diff_plan",
+      analysisKind: "update_contrib_diff_plan",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://update-contrib-diff-plan-stale",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        updatePlanResult: {
+          contributionKind: "trigger",
+          source: "package_artifact",
+          targetApp: { projectId: "demo", appId: "hello-rest", appPath: "examples/hello-rest/flogo.json" },
+          bundle: {
+            kind: "trigger",
+            modulePath: "example.com/acme/webhook",
+            packageName: "webhooktrigger",
+            bundleRoot: "/tmp/flogo-trigger-webhooktrigger",
+            descriptor: {
+              ref: "example.com/acme/webhook",
+              alias: "webhooktrigger",
+              type: "trigger",
+              name: "webhook-trigger",
+              version: "0.2.0",
+              title: "Webhook Trigger",
+              settings: [],
+              handlerSettings: [],
+              outputs: [],
+              reply: [],
+              examples: [],
+              compatibilityNotes: ["Generated scaffold"],
+              source: "trigger_scaffold"
+            },
+            files: []
+          },
+          modulePath: "example.com/acme/webhook",
+          selectedAlias: "webhooktrigger",
+          detectedInstalledContribution: {
+            alias: "webhooktrigger",
+            ref: "example.com/acme/webhook",
+            version: "0.1.0",
+            matchedBy: ["alias+ref"],
+            confidence: "high"
+          },
+          appFingerprint: "before-sha",
+          planFingerprint: "update-plan-sha",
+          matchQuality: "exact",
+          compatibility: "compatible",
+          updateReady: true,
+          readiness: "high",
+          predictedChanges: {
+            importsToReplace: [],
+            importsToKeep: [{ alias: "webhooktrigger", ref: "example.com/acme/webhook", action: "keep_existing" }],
+            importsToAdd: [],
+            importsToRemove: [],
+            refsToReplace: [],
+            refsToKeep: [],
+            refsToAdd: [],
+            refsToRemove: [],
+            changedPaths: [],
+            summaryLines: [],
+            noMutation: true
+          },
+          warnings: [],
+          conflicts: [],
+          diagnostics: [],
+          recommendedNextAction: "Review the update plan before requesting an exact update diff preview.",
+          limitations: ["Planning only."]
+        }
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("failed");
+    expect(result.artifacts.some((artifact) => artifact.type === "contrib_update_diff_plan")).toBe(true);
+  });
+
   it("executes helper-backed contribution install apply and persists apply plus flogo_json artifacts", async () => {
     process.env.FLOGO_HELPER_BIN = await createHelperScript(
       JSON.stringify({
@@ -1859,6 +2180,29 @@ describe("RunnerExecutorService", () => {
         containerArgs: []
       })
     ).rejects.toThrow(/Provide one contribution source/);
+  });
+
+  it("rejects malformed exact update diff-planning input before dispatching the helper", async () => {
+    const service = new RunnerExecutorService();
+
+    await expect(
+      service.execute({
+        taskId: "task-invalid-update-contrib-diff-plan",
+        jobKind: "contrib_update_diff_plan",
+        stepType: "update_contrib_diff_plan",
+        analysisKind: "update_contrib_diff_plan",
+        snapshotUri: ".",
+        appPath: "examples/hello-rest/flogo.json",
+        env: {},
+        envSecretRefs: {},
+        timeoutSeconds: 60,
+        artifactOutputUri: "memory://invalid-update-contrib-diff-plan",
+        jobTemplateName: "flogo-runner",
+        analysisPayload: {},
+        command: [],
+        containerArgs: []
+      })
+    ).rejects.toThrow(/Provide updatePlanArtifactId, updatePlanArtifact, or updatePlanResult/);
   });
 
   it("executes helper-backed timer trace capture and persists timer runtime metadata", async () => {

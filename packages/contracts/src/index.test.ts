@@ -6,6 +6,8 @@ import {
   ContributionInstallApplyResponseSchema,
   ContributionInstallDiffPlanRequestSchema,
   ContributionInstallDiffPlanResponseSchema,
+  ContributionUpdateDiffPlanRequestSchema,
+  ContributionUpdateDiffPlanResponseSchema,
   ContributionUpdatePlanRequestSchema,
   ContributionUpdatePlanResponseSchema,
   ActionScaffoldRequestSchema,
@@ -737,6 +739,191 @@ describe("ContributionUpdatePlanResponseSchema", () => {
     });
 
     expect(parsed.result.matchQuality).toBe("exact");
+    expect(parsed.result.updateReady).toBe(true);
+    expect(parsed.result.predictedChanges.changedPaths).toEqual(["imports"]);
+  });
+});
+
+describe("ContributionUpdateDiffPlanRequestSchema", () => {
+  it("accepts update diff planning input backed by an update-plan artifact id", () => {
+    const parsed = ContributionUpdateDiffPlanRequestSchema.parse({
+      updatePlanArtifactId: "artifact-update-plan-1",
+      targetApp: {
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json"
+      }
+    });
+
+    expect(parsed.updatePlanArtifactId).toBe("artifact-update-plan-1");
+  });
+
+  it("rejects missing update-plan sources", () => {
+    expect(() => ContributionUpdateDiffPlanRequestSchema.parse({})).toThrow(/Provide updatePlanArtifactId, updatePlanArtifact, or updatePlanResult/);
+  });
+
+  it("accepts additive update-plan resolution that carries both an id and a resolved payload", () => {
+    const parsed = ContributionUpdateDiffPlanRequestSchema.parse({
+      updatePlanArtifactId: "artifact-update-plan-1",
+      updatePlanResult: {
+        contributionKind: "trigger",
+        source: "package_artifact",
+        targetApp: {},
+        bundle: {
+          kind: "trigger",
+          modulePath: "example.com/acme/webhook",
+          packageName: "webhooktrigger",
+          bundleRoot: "/tmp/flogo-trigger-webhooktrigger",
+          descriptor: {
+            ref: "example.com/acme/webhook",
+            alias: "webhooktrigger",
+            type: "trigger",
+            name: "webhook-trigger",
+            version: "0.2.0",
+            title: "Webhook Trigger",
+            settings: [],
+            handlerSettings: [],
+            outputs: [],
+            reply: [],
+            examples: [],
+            compatibilityNotes: ["Generated scaffold"],
+            source: "trigger_scaffold"
+          },
+          files: []
+        },
+        modulePath: "example.com/acme/webhook",
+        selectedAlias: "webhooktrigger",
+        matchQuality: "exact",
+        compatibility: "compatible",
+        updateReady: true,
+        readiness: "high",
+        predictedChanges: {
+          importsToReplace: [],
+          importsToKeep: [],
+          importsToAdd: [],
+          importsToRemove: [],
+          refsToReplace: [],
+          refsToKeep: [],
+          refsToAdd: [],
+          refsToRemove: [],
+          changedPaths: [],
+          summaryLines: [],
+          noMutation: true
+        },
+        warnings: [],
+        conflicts: [],
+        diagnostics: [],
+        recommendedNextAction: "Review the update plan.",
+        limitations: []
+      }
+    });
+
+    expect(parsed.updatePlanArtifactId).toBe("artifact-update-plan-1");
+    expect(parsed.updatePlanResult?.selectedAlias).toBe("webhooktrigger");
+  });
+});
+
+describe("ContributionUpdateDiffPlanResponseSchema", () => {
+  it("parses a conservative exact update diff preview result", () => {
+    const parsed = ContributionUpdateDiffPlanResponseSchema.parse({
+      result: {
+        contributionKind: "trigger",
+        sourceContribution: {
+          kind: "trigger",
+          modulePath: "example.com/acme/webhook",
+          packageName: "webhooktrigger",
+          packagePath: "example.com/acme/webhook",
+          descriptorRef: "example.com/acme/webhook",
+          selectedAlias: "webhooktrigger",
+          source: "package_artifact",
+          sourceArtifactId: "artifact-package-9"
+        },
+        detectedInstalledContribution: {
+          alias: "webhooktrigger",
+          ref: "example.com/acme/webhook",
+          version: "0.1.0",
+          matchedBy: ["alias+ref"],
+          confidence: "high"
+        },
+        targetApp: {
+          projectId: "demo",
+          appId: "hello-rest",
+          appPath: "examples/hello-rest/flogo.json",
+          appName: "hello-rest"
+        },
+        basedOnUpdatePlan: {
+          sourceArtifactId: "artifact-update-plan-1",
+          appFingerprint: "app-sha",
+          planFingerprint: "update-plan-sha"
+        },
+        appFingerprintBefore: "app-sha",
+        appFingerprintAfter: "after-sha",
+        updatePlanFingerprint: "update-plan-sha",
+        isStale: false,
+        previewAvailable: true,
+        updateReady: true,
+        readiness: "high",
+        warnings: [],
+        conflicts: [],
+        limitations: ["Diff preview only."],
+        predictedChanges: {
+          importsBefore: [
+            {
+              alias: "webhooktrigger",
+              ref: "example.com/acme/webhook",
+              version: "0.1.0",
+              action: "existing"
+            }
+          ],
+          importsAfter: [
+            {
+              alias: "webhooktrigger",
+              ref: "example.com/acme/webhook",
+              version: "0.2.0",
+              action: "predicted"
+            }
+          ],
+          importsToReplace: [
+            {
+              alias: "webhooktrigger",
+              ref: "example.com/acme/webhook",
+              version: "0.2.0",
+              action: "replace_existing",
+              existingAlias: "webhooktrigger",
+              existingRef: "example.com/acme/webhook"
+            }
+          ],
+          importsToKeep: [],
+          importsToAdd: [],
+          importsToRemove: [],
+          refsToReplace: [
+            {
+              surface: "triggerRef",
+              value: "#webhooktrigger"
+            }
+          ],
+          refsToKeep: [],
+          refsToAdd: [],
+          refsToRemove: [],
+          structuralChanges: ["Replace import alias \"webhooktrigger\" in place."],
+          changedPaths: ["imports"],
+          diffEntries: [
+            {
+              path: "imports",
+              changeType: "update",
+              summary: "Update import alias \"webhooktrigger\" to ref \"example.com/acme/webhook\"."
+            }
+          ],
+          noMutation: true
+        },
+        diffSummary: ["imports: update \"webhooktrigger\" from \"example.com/acme/webhook\" to \"example.com/acme/webhook\""],
+        canonicalBeforeJson: "{\n  \"imports\": [{\"alias\":\"webhooktrigger\",\"version\":\"0.1.0\"}]\n}",
+        canonicalAfterJson: "{\n  \"imports\": [{\"alias\":\"webhooktrigger\",\"version\":\"0.2.0\"}]\n}",
+        recommendedNextAction: "Review the exact canonical update diff."
+      }
+    });
+
+    expect(parsed.result.previewAvailable).toBe(true);
     expect(parsed.result.updateReady).toBe(true);
     expect(parsed.result.predictedChanges.changedPaths).toEqual(["imports"]);
   });

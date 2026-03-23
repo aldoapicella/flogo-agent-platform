@@ -70,15 +70,15 @@ Important analysis-only modes:
 - `inputs.mode = "package_contrib"`
 - `inputs.mode = "install_contrib_plan"`
 - `inputs.mode = "install_contrib_diff_plan"`
-- `inputs.mode = "install_contrib_apply"`
 - `inputs.mode = "update_contrib_plan"`
+- `inputs.mode = "update_contrib_diff_plan"`
 - `inputs.mode = "mapping_preview"`
 - `inputs.mode = "mapping_test"`
 - `inputs.mode = "property_plan"`
 - `inputs.mode = "governance"`
 - `inputs.mode = "composition_compare"`
 
-Most of those modes route the task through analysis-oriented runner steps that avoid patch/build/smoke work. The current explicit exception is `install_contrib_apply`, which routes to one review-gated mutating runner step instead of the generic mutation tail.
+Those modes route the task through analysis-oriented runner steps that avoid patch/build/smoke work. The current explicit mutating exception in the contribution lifecycle is `install_contrib_apply`, which routes to one review-gated runner step instead of the generic mutation tail.
 
 Example:
 
@@ -375,7 +375,30 @@ Important behavior:
 - the helper inspects the current target-app imports, aliases, refs, and installed contribution inventory to distinguish exact, likely, ambiguous, and missing installed matches,
 - the result is conservative and review-oriented: it includes detected installed-contribution evidence, match quality, compatibility, predicted imports/refs to replace or keep, changed canonical paths expected in a later diff workflow, warnings, conflicts, readiness, recommended next action, and explicit limitations,
 - malformed input, missing durable storage, no installed match, or ambiguous installed state fail honestly or lower readiness rather than pretending the update is safe,
-- exact update diff preview and review-gated update apply remain explicitly deferred.
+- review-gated update apply remains explicitly deferred.
+
+### Contribution update-diff-plan task mode
+
+Uses the existing task endpoint with `inputs.mode = "update_contrib_diff_plan"` to consume one previously generated update plan and materialize the exact canonical `flogo.json` preview that would result from that update plan without mutating the target app.
+
+Important input fields:
+
+- `updatePlanArtifactId?`
+- `updatePlanArtifact?`
+- `updatePlanResult?`
+- `targetApp.projectId`
+- `targetApp.appId`
+- `targetApp.appPath?`
+
+Important behavior:
+
+- exact update diff preview is analysis-oriented and does not update or mutate an app in this slice,
+- the planner routes the task to a single runner `update_contrib_diff_plan` step,
+- the task accepts exactly one existing update-plan source through a persisted `contrib_update_plan` artifact id, inline artifact metadata, or inline result payload,
+- the task persists a `contrib_update_diff_plan` artifact through the same Blob/Azurite storage seam used for the rest of the contribution lifecycle,
+- the helper computes the exact predicted canonical import mutation preview against the current `flogo.json`, including before/after fingerprints, changed paths, diff summary, predicted import/ref rewrites, and recommended next action,
+- if the target app drifted from the update-plan basis, the update-plan fingerprint no longer matches, or the saved plan is too weak to support an exact preview safely, the diff preview fails honestly or marks the result stale instead of pretending the preview is safe,
+- review-gated update apply remains explicitly deferred.
 
 ### `GET /v1/tasks`
 
@@ -1248,7 +1271,7 @@ Workflow behavior:
 
 - mutating workflows use build/run/smoke-oriented runner steps,
 - mutating contribution-install workflows now also include the approval-gated `install_contrib_apply` runner step,
-- analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, `preview_mapping`, `infer_flow_contracts`, `extract_subflow`, `inline_subflow`, `add_iterator`, `add_retry_policy`, `add_dowhile`, `add_error_path`, `diagnose_app`, `scaffold_activity`, `scaffold_action`, `scaffold_trigger`, `validate_contrib`, `package_contrib`, `install_contrib_plan`, `install_contrib_diff_plan`, or `update_contrib_plan`.
+- analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, `preview_mapping`, `infer_flow_contracts`, `extract_subflow`, `inline_subflow`, `add_iterator`, `add_retry_policy`, `add_dowhile`, `add_error_path`, `diagnose_app`, `scaffold_activity`, `scaffold_action`, `scaffold_trigger`, `validate_contrib`, `package_contrib`, `install_contrib_plan`, `install_contrib_diff_plan`, `update_contrib_plan`, or `update_contrib_diff_plan`.
 - analysis-only workflows also support `test_mapping` and `plan_properties`.
 
 ## Runner-worker API

@@ -976,6 +976,218 @@ func TestPlanContributionUpdateLowersReadinessWhenProofIsIncomplete(t *testing.T
 	}
 }
 
+func TestPlanContributionUpdateDiffBuildsExactCanonicalPreview(t *testing.T) {
+	app := flogoApp{
+		Name:     "update-diff-app",
+		Type:     "flogo:app",
+		AppModel: "1.1.0",
+		Imports: []flogoImport{
+			{Alias: "webhooktrigger", Ref: "example.com/acme/webhook", Version: "0.1.0"},
+		},
+		Triggers:  []flogoTrigger{},
+		Resources: []flogoFlow{},
+		Raw: map[string]any{
+			"name":     "update-diff-app",
+			"type":     "flogo:app",
+			"appModel": "1.1.0",
+			"imports": []any{
+				map[string]any{
+					"alias":   "webhooktrigger",
+					"ref":     "example.com/acme/webhook",
+					"version": "0.1.0",
+				},
+			},
+		},
+	}
+	response := scaffoldTrigger(triggerScaffoldRequest{
+		TriggerName: "Webhook Trigger",
+		ModulePath:  "example.com/acme/webhook",
+		PackageName: "webhooktrigger",
+		Title:       "Webhook Trigger",
+		Description: "Dispatches an internal webhook event.",
+		Version:     "0.2.0",
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	packaged := packageContribution(contributionPackageRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundleFromTrigger(result.Bundle),
+			Validation: result.Validation,
+			Build:      result.Build,
+			Test:       result.Test,
+		},
+		Source: "inline_result",
+		Format: "zip",
+	})
+
+	plan := planContributionUpdate(app, "examples/hello-rest/flogo.json", contributionUpdatePlanRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     packaged.Result.Bundle,
+			Validation: packaged.Result.Validation,
+			Build:      packaged.Result.Build,
+			Test:       packaged.Result.Test,
+		},
+		Package: &packaged.Result.Package,
+		Source:  "inline_package",
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   "examples/hello-rest/flogo.json",
+		},
+	})
+
+	if plan.Result.AppFingerprint == "" || plan.Result.PlanFingerprint == "" {
+		t.Fatalf("expected update plan fingerprints, got %+v", plan.Result)
+	}
+
+	diff := planContributionUpdateDiff(app, "examples/hello-rest/flogo.json", contributionUpdateDiffPlanRequest{
+		UpdatePlan:         plan.Result,
+		UpdatePlanArtifact: "update-plan-artifact-1",
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   "examples/hello-rest/flogo.json",
+		},
+	})
+
+	if !diff.Result.PreviewAvailable {
+		t.Fatalf("expected canonical update diff preview to be available, got %+v", diff.Result)
+	}
+	if diff.Result.IsStale {
+		t.Fatalf("expected fresh update diff plan, got %+v", diff.Result)
+	}
+	if len(diff.Result.PredictedChanges.ImportsToReplace) != 1 {
+		t.Fatalf("expected one import replacement in diff preview, got %+v", diff.Result.PredictedChanges)
+	}
+	if !containsString(diff.Result.PredictedChanges.ChangedPaths, "imports") {
+		t.Fatalf("expected imports to be marked as changed, got %+v", diff.Result.PredictedChanges)
+	}
+	if diff.Result.CanonicalBeforeJSON == diff.Result.CanonicalAfterJSON {
+		t.Fatalf("expected before/after canonical JSON to differ, got %+v", diff.Result)
+	}
+	if diff.Result.BasedOnUpdatePlan.SourceArtifact != "update-plan-artifact-1" {
+		t.Fatalf("expected diff preview to retain the update-plan artifact id, got %+v", diff.Result.BasedOnUpdatePlan)
+	}
+}
+
+func TestPlanContributionUpdateDiffMarksDriftedAppsAsStale(t *testing.T) {
+	app := bindableTestApp()
+	response := scaffoldTrigger(triggerScaffoldRequest{
+		TriggerName: "Webhook Trigger",
+		ModulePath:  "example.com/acme/webhook",
+		PackageName: "webhooktrigger",
+		Title:       "Webhook Trigger",
+		Description: "Dispatches an internal webhook event.",
+		Version:     "0.2.0",
+	})
+
+	result := response.Result
+	t.Cleanup(func() {
+		if result.Bundle.BundleRoot != "" {
+			_ = os.RemoveAll(result.Bundle.BundleRoot)
+		}
+	})
+
+	plan := planContributionUpdate(app, "examples/hello-rest/flogo.json", contributionUpdatePlanRequest{
+		Result: contributionScaffoldResult{
+			Bundle:     toContributionScaffoldBundleFromTrigger(result.Bundle),
+			Validation: result.Validation,
+			Build:      result.Build,
+			Test:       result.Test,
+		},
+		Source: "inline_result",
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   "examples/hello-rest/flogo.json",
+		},
+	})
+
+	driftedRaw := cloneStringAnyMap(app.Raw)
+	driftedRaw["imports"] = append(buildRawImports(app.Imports), map[string]any{
+		"alias": "drifted",
+		"ref":   "example.com/acme/drifted",
+	})
+	driftedApp := normalizeApp(driftedRaw)
+
+	diff := planContributionUpdateDiff(driftedApp, "examples/hello-rest/flogo.json", contributionUpdateDiffPlanRequest{
+		UpdatePlan: plan.Result,
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   "examples/hello-rest/flogo.json",
+		},
+	})
+
+	if !diff.Result.IsStale {
+		t.Fatalf("expected drifted app to be marked stale, got %+v", diff.Result)
+	}
+	if diff.Result.PreviewAvailable {
+		t.Fatalf("expected stale update diff preview to be unavailable, got %+v", diff.Result)
+	}
+	if !strings.Contains(diff.Result.StaleReason, "changed after update planning") {
+		t.Fatalf("expected stale reason to mention target app drift, got %+v", diff.Result)
+	}
+}
+
+func TestValidateContributionUpdateDiffPlanRequestRequiresSelectedAlias(t *testing.T) {
+	err := validateContributionUpdateDiffPlanRequest(contributionUpdateDiffPlanRequest{
+		UpdatePlan: contributionUpdatePlanResult{
+			ContributionKind: "trigger",
+			Source:           "inline_result",
+			TargetApp:        contributionInstallTarget{},
+			Bundle: contributionScaffoldBundle{
+				Kind:        "trigger",
+				ModulePath:  "example.com/acme/webhook",
+				PackageName: "webhooktrigger",
+				BundleRoot:  t.TempDir(),
+				Descriptor: contribDescriptor{
+					Ref:  "example.com/acme/webhook",
+					Type: "trigger",
+				},
+				Files: []generatedContribFile{{Path: "descriptor.json", Kind: "descriptor", Bytes: 2}},
+			},
+			ModulePath:    "example.com/acme/webhook",
+			SelectedAlias: "",
+			MatchQuality:  "exact",
+			Compatibility: "compatible",
+			UpdateReady:   true,
+			Readiness:     "high",
+			PredictedChanges: contributionUpdatePredictedChanges{
+				ImportsToReplace: []contributionInstallImportEntry{},
+				ImportsToKeep:    []contributionInstallImportEntry{},
+				ImportsToAdd:     []contributionInstallImportEntry{},
+				ImportsToRemove:  []contributionInstallImportEntry{},
+				RefsToReplace:    []contributionInstallRefEntry{},
+				RefsToKeep:       []contributionInstallRefEntry{},
+				RefsToAdd:        []contributionInstallRefEntry{},
+				RefsToRemove:     []contributionInstallRefEntry{},
+				ChangedPaths:     []string{},
+				SummaryLines:     []string{},
+				NoMutation:       true,
+			},
+			Warnings:              []string{},
+			Conflicts:             []contributionInstallConflict{},
+			Diagnostics:           []diagnostic{},
+			RecommendedNextAction: "Review the update plan.",
+			Limitations:           []string{},
+		},
+	})
+
+	if err == nil {
+		t.Fatal("expected missing selectedAlias to fail")
+	}
+	if !strings.Contains(err.Error(), "updatePlan.selectedAlias is required") {
+		t.Fatalf("expected missing selectedAlias error, got %v", err)
+	}
+}
+
 func TestPlanContributionInstallDiffBuildsExactCanonicalPreview(t *testing.T) {
 	app := bindableTestApp()
 	response := scaffoldTrigger(triggerScaffoldRequest{

@@ -18,6 +18,9 @@ import {
   ContributionInstallDiffPlanRequestSchema,
   ContributionInstallDiffPlanResponseSchema,
   type ContributionInstallDiffPlanResponse,
+  ContributionUpdateDiffPlanRequestSchema,
+  ContributionUpdateDiffPlanResponseSchema,
+  type ContributionUpdateDiffPlanResponse,
   ContributionInstallPlanRequestSchema,
   ContributionInstallPlanResponseSchema,
   type ContributionInstallPlanResponse,
@@ -191,6 +194,8 @@ function createCommand(spec: RunnerJobSpec): string[] {
       return createHelperCommand("contrib", "install-plan", "--app", spec.appPath);
     case "update_contrib_plan":
       return createHelperCommand("contrib", "update-plan", "--app", spec.appPath);
+    case "update_contrib_diff_plan":
+      return createHelperCommand("contrib", "update-diff-plan", "--app", spec.appPath);
     case "install_contrib_diff_plan":
       return createHelperCommand("contrib", "install-diff-plan", "--app", spec.appPath);
     case "install_contrib_apply":
@@ -259,6 +264,7 @@ function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
     stepType === "package_contrib" ||
     stepType === "install_contrib_plan" ||
     stepType === "update_contrib_plan" ||
+    stepType === "update_contrib_diff_plan" ||
     stepType === "install_contrib_diff_plan" ||
     stepType === "install_contrib_apply" ||
     stepType === "diagnose_app"
@@ -452,6 +458,60 @@ type ContributionUpdatePlanResultLike = {
   diagnostics: Diagnostic[];
   recommendedNextAction: string;
   limitations: string[];
+};
+
+type ContributionUpdateDiffPlanResultLike = {
+  contributionKind: "activity" | "action" | "trigger";
+  sourceContribution: ContributionInstallDiffPlanResultLike["sourceContribution"];
+  detectedInstalledContribution?: ContributionUpdatePlanResultLike["detectedInstalledContribution"];
+  targetApp: ContributionInstallPlanResultLike["targetApp"];
+  basedOnUpdatePlan: {
+    sourceArtifactId?: string;
+    appFingerprint?: string;
+    planFingerprint?: string;
+    targetApp?: ContributionInstallPlanResultLike["targetApp"];
+  };
+  appFingerprintBefore: string;
+  appFingerprintAfter?: string;
+  updatePlanFingerprint?: string;
+  isStale: boolean;
+  staleReason?: string;
+  previewAvailable: boolean;
+  updateReady: boolean;
+  readiness: "high" | "medium" | "low";
+  warnings: string[];
+  conflicts: ContributionInstallPlanResultLike["conflicts"];
+  limitations: string[];
+  predictedChanges: {
+    importsBefore: Array<{
+      alias: string;
+      ref: string;
+      version?: string;
+      action: "existing" | "predicted" | "keep_existing" | "replace_existing" | "add";
+    }>;
+    importsAfter: Array<{
+      alias: string;
+      ref: string;
+      version?: string;
+      action: "existing" | "predicted" | "keep_existing" | "replace_existing" | "add";
+    }>;
+    importsToReplace: ContributionUpdatePlanResultLike["predictedChanges"]["importsToReplace"];
+    importsToKeep: ContributionUpdatePlanResultLike["predictedChanges"]["importsToKeep"];
+    importsToAdd: ContributionUpdatePlanResultLike["predictedChanges"]["importsToAdd"];
+    importsToRemove: ContributionUpdatePlanResultLike["predictedChanges"]["importsToRemove"];
+    refsToReplace: ContributionUpdatePlanResultLike["predictedChanges"]["refsToReplace"];
+    refsToKeep: ContributionUpdatePlanResultLike["predictedChanges"]["refsToKeep"];
+    refsToAdd: ContributionUpdatePlanResultLike["predictedChanges"]["refsToAdd"];
+    refsToRemove: ContributionUpdatePlanResultLike["predictedChanges"]["refsToRemove"];
+    structuralChanges: string[];
+    changedPaths: string[];
+    diffEntries: ContributionInstallDiffPlanResultLike["predictedChanges"]["diffEntries"];
+    noMutation: true;
+  };
+  diffSummary: string[];
+  canonicalBeforeJson: string;
+  canonicalAfterJson?: string;
+  recommendedNextAction: string;
 };
 
 type ContributionInstallDiffPlanResultLike = {
@@ -724,6 +784,31 @@ function resolveContributionInstallPlanFromPayload(
   throw new Error("Contribution install diff planning requires an installPlanResult or contrib_install_plan artifact metadata.result payload");
 }
 
+function resolveContributionUpdatePlanFromPayload(
+  analysisPayload: Record<string, unknown> | undefined
+): { result: ContributionUpdatePlanResultLike; sourceArtifactId?: string } {
+  const parsedResult = ContributionUpdatePlanResponseSchema.shape.result.safeParse(analysisPayload?.updatePlanResult);
+  if (parsedResult.success) {
+    return {
+      result: parsedResult.data as ContributionUpdatePlanResultLike
+    };
+  }
+
+  const updatePlanArtifact = isRecord(analysisPayload?.updatePlanArtifact) ? analysisPayload.updatePlanArtifact : undefined;
+  if (updatePlanArtifact) {
+    const metadata = isRecord(updatePlanArtifact.metadata) ? updatePlanArtifact.metadata : undefined;
+    const artifactResult = ContributionUpdatePlanResponseSchema.shape.result.safeParse(metadata?.result);
+    if (artifactResult.success) {
+      return {
+        result: artifactResult.data as ContributionUpdatePlanResultLike,
+        sourceArtifactId: typeof updatePlanArtifact.id === "string" ? updatePlanArtifact.id : undefined
+      };
+    }
+  }
+
+  throw new Error("Contribution update diff planning requires an updatePlanResult or contrib_update_plan artifact metadata.result payload");
+}
+
 function resolveContributionInstallDiffPlanFromPayload(
   analysisPayload: Record<string, unknown> | undefined
 ): { result: ContributionInstallDiffPlanResultLike; sourceArtifactId?: string } {
@@ -965,6 +1050,45 @@ function createContributionInstallDiffPlanArtifacts(
         staleReason: result.staleReason,
         previewAvailable: result.previewAvailable,
         installReady: result.installReady,
+        readiness: result.readiness,
+        warnings: result.warnings,
+        conflicts: result.conflicts,
+        limitations: result.limitations,
+        predictedChanges: result.predictedChanges,
+        diffSummary: result.diffSummary,
+        canonicalBeforeJson: result.canonicalBeforeJson,
+        canonicalAfterJson: result.canonicalAfterJson,
+        recommendedNextAction: result.recommendedNextAction,
+        diagnostics
+      }
+    )
+  ];
+}
+
+function createContributionUpdateDiffPlanArtifacts(
+  spec: RunnerJobSpec,
+  result: ContributionUpdateDiffPlanResultLike,
+  diagnostics: Diagnostic[]
+): ArtifactRef[] {
+  return [
+    createAnalysisArtifact(
+      spec,
+      "contrib_update_diff_plan",
+      `${result.contributionKind}-update-diff-plan-${result.sourceContribution.packageName ?? result.sourceContribution.selectedAlias}`,
+      {
+        result,
+        contributionKind: result.contributionKind,
+        sourceContribution: result.sourceContribution,
+        detectedInstalledContribution: result.detectedInstalledContribution,
+        targetApp: result.targetApp,
+        basedOnUpdatePlan: result.basedOnUpdatePlan,
+        appFingerprintBefore: result.appFingerprintBefore,
+        appFingerprintAfter: result.appFingerprintAfter,
+        updatePlanFingerprint: result.updatePlanFingerprint,
+        isStale: result.isStale,
+        staleReason: result.staleReason,
+        previewAvailable: result.previewAvailable,
+        updateReady: result.updateReady,
         readiness: result.readiness,
         warnings: result.warnings,
         conflicts: result.conflicts,
@@ -1439,6 +1563,7 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     && spec.stepType !== "package_contrib"
     && spec.stepType !== "install_contrib_plan"
     && spec.stepType !== "update_contrib_plan"
+    && spec.stepType !== "update_contrib_diff_plan"
     && spec.stepType !== "install_contrib_diff_plan"
     && spec.stepType !== "install_contrib_apply"
   ) {
@@ -1710,6 +1835,23 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     }, null, 2), "utf8");
     return {
       command: createHelperCommand("contrib", "update-plan", "--app", spec.appPath, "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "update_contrib_diff_plan") {
+    const request = ContributionUpdateDiffPlanRequestSchema.parse(spec.analysisPayload ?? {});
+    const resolved = resolveContributionUpdatePlanFromPayload(spec.analysisPayload);
+    const requestPath = path.join(tempDir, "contrib-update-diff-plan-request.json");
+    await fs.writeFile(requestPath, JSON.stringify({
+      updatePlan: resolved.result,
+      updatePlanArtifactId: request.updatePlanArtifactId ?? resolved.sourceArtifactId,
+      targetApp: request.targetApp
+    }, null, 2), "utf8");
+    return {
+      command: createHelperCommand("contrib", "update-diff-plan", "--app", spec.appPath, "--request", requestPath),
       cleanup: async () => {
         await fs.rm(tempDir, { recursive: true, force: true });
       }
@@ -2178,6 +2320,11 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
       return createContributionUpdatePlanArtifacts(spec, response.result as ContributionUpdatePlanResultLike, diagnostics);
     }
 
+    if (spec.stepType === "update_contrib_diff_plan") {
+      const response = ContributionUpdateDiffPlanResponseSchema.parse(JSON.parse(stdout) as ContributionUpdateDiffPlanResponse);
+      return createContributionUpdateDiffPlanArtifacts(spec, response.result as ContributionUpdateDiffPlanResultLike, diagnostics);
+    }
+
     if (spec.stepType === "install_contrib_diff_plan") {
       const response = ContributionInstallDiffPlanResponseSchema.parse(JSON.parse(stdout) as ContributionInstallDiffPlanResponse);
       return createContributionInstallDiffPlanArtifacts(spec, response.result as ContributionInstallDiffPlanResultLike, diagnostics);
@@ -2315,6 +2462,17 @@ function parseContributionUpdatePlanArtifact(artifact?: ArtifactRef) {
   }
 
   const parsed = ContributionUpdatePlanResponseSchema.safeParse({
+    result: artifact.metadata?.["result"]
+  });
+  return parsed.success ? parsed.data : undefined;
+}
+
+function parseContributionUpdateDiffPlanArtifact(artifact?: ArtifactRef) {
+  if (!artifact) {
+    return undefined;
+  }
+
+  const parsed = ContributionUpdateDiffPlanResponseSchema.safeParse({
     result: artifact.metadata?.["result"]
   });
   return parsed.success ? parsed.data : undefined;
@@ -2660,6 +2818,32 @@ export class RunnerExecutorService implements RunnerExecutor {
           message:
             updateResult?.recommendedNextAction ??
             "Contribution update planning was blocked because the installed contribution could not be matched safely.",
+          severity: "error"
+        });
+      }
+    }
+
+    if (spec.stepType === "update_contrib_diff_plan" && executed.ok) {
+      const parsedDiff = parseContributionUpdateDiffPlanArtifact(
+        artifactByType(executed.artifacts, "contrib_update_diff_plan")
+      );
+      const diffResult = parsedDiff?.result;
+      const changedPaths = Array.isArray(diffResult?.predictedChanges?.changedPaths) ? diffResult.predictedChanges.changedPaths : [];
+      const shouldFail =
+        diffResult?.isStale === true ||
+        diffResult?.previewAvailable === false ||
+        diffResult?.updateReady === false ||
+        (changedPaths.length > 0 && typeof diffResult?.canonicalAfterJson !== "string");
+      if (shouldFail) {
+        ok = false;
+        exitCode = 1;
+        summary = "Execution failed for update_contrib_diff_plan";
+        diagnostics.push({
+          code: "runner.update_diff_plan_blocked",
+          message:
+            diffResult?.staleReason ??
+            diffResult?.recommendedNextAction ??
+            "Contribution update diff preview was blocked because the saved update plan is stale or does not support an exact canonical preview safely.",
           severity: "error"
         });
       }
