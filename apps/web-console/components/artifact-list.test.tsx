@@ -456,6 +456,112 @@ describe("ArtifactList", () => {
     expect(html).toContain("blob path: task-artifacts/demo/task-9/contrib_update_plan/artifact-9.json");
   });
 
+  it("renders contribution uninstall-plan summaries with readiness, orphan risk, and next action", () => {
+    const html = renderToStaticMarkup(
+      <ArtifactList
+        artifacts={[
+          {
+            id: "artifact-uninstall-1",
+            type: "contrib_uninstall_plan",
+            name: "trigger-uninstall-plan-webhooktrigger",
+            uri: "memory://task-uninstall/trigger-uninstall-plan-webhooktrigger",
+            metadata: {
+              storage: {
+                kind: "blob",
+                blobPath: "task-artifacts/demo/task-uninstall/contrib_uninstall_plan/artifact-uninstall-1.json",
+                durablePayload: true
+              },
+              result: {
+                targetApp: {
+                  appId: "hello-rest"
+                },
+                selection: {
+                  alias: "webhooktrigger"
+                },
+                detectedInstalledContribution: {
+                  alias: "webhooktrigger",
+                  ref: "example.com/acme/webhook",
+                  version: "0.1.0",
+                  contributionKind: "trigger",
+                  matchedBy: ["alias"],
+                  confidence: "medium"
+                },
+                matchQuality: "likely",
+                contributionKind: "trigger",
+                uninstallReady: false,
+                readiness: "blocked",
+                predictedChanges: {
+                  importsToRemove: [
+                    {
+                      alias: "webhooktrigger",
+                      ref: "example.com/acme/webhook",
+                      action: "remove"
+                    }
+                  ],
+                  affectedRefs: [
+                    {
+                      surface: "triggerRef",
+                      value: "#webhooktrigger"
+                    }
+                  ],
+                  directUsages: [
+                    {
+                      surface: "triggerRef",
+                      path: "triggers.webhook.ref",
+                      ref: "#webhooktrigger",
+                      alias: "webhooktrigger",
+                      summary: "Trigger \"webhook\" still uses the selected contribution."
+                    }
+                  ],
+                  orphanRisks: [
+                    {
+                      surface: "triggerRef",
+                      path: "triggers.webhook.ref",
+                      ref: "#webhooktrigger",
+                      alias: "webhooktrigger",
+                      reason: "Removing import alias \"webhooktrigger\" would orphan the trigger ref.",
+                      severity: "error"
+                    }
+                  ],
+                  changedPaths: ["imports.webhooktrigger", "triggers.webhook.ref"],
+                  summaryLines: ["Trigger \"webhook\" still uses the selected contribution."],
+                  noMutation: true
+                },
+                blockedBy: [
+                  {
+                    code: "flogo.contrib.uninstall_plan.active_usage",
+                    message: "Trigger \"webhook\" still uses the selected contribution.",
+                    path: "triggers.webhook.ref",
+                    severity: "error"
+                  }
+                ],
+                warnings: ["Manual review is required before uninstall diff preview."],
+                conflicts: [],
+                recommendedNextAction: "replacement_required"
+              }
+            }
+          }
+        ]}
+      />
+    );
+
+    expect(html).toContain("contribution type: trigger");
+    expect(html).toContain("target app: hello-rest");
+    expect(html).toContain("detected installed contribution: alias webhooktrigger, ref example.com/acme/webhook, version 0.1.0");
+    expect(html).toContain("match quality: likely");
+    expect(html).toContain("imports to remove: webhooktrigger -&gt; example.com/acme/webhook (remove)");
+    expect(html).toContain("affected refs: triggerRef: #webhooktrigger");
+    expect(html).toContain("uninstall ready: no");
+    expect(html).toContain("readiness: blocked");
+    expect(html).toContain("changed paths: imports.webhooktrigger, triggers.webhook.ref");
+    expect(html).toContain("uninstall summary: Trigger &quot;webhook&quot; still uses the selected contribution.");
+    expect(html).toContain("direct usages: 1");
+    expect(html).toContain("orphan risks: 1");
+    expect(html).toContain("blocked by: 1");
+    expect(html).toContain("next action: replacement_required");
+    expect(html).toContain("blob path: task-artifacts/demo/task-uninstall/contrib_uninstall_plan/artifact-uninstall-1.json");
+  });
+
   it("renders exact update diff-plan summaries with freshness, changed paths, and next action", () => {
     const html = renderToStaticMarkup(
       <ArtifactList

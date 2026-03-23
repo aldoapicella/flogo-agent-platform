@@ -91,6 +91,7 @@ enum ArtifactKind {
   contrib_validation_report
   contrib_package
   contrib_install_plan
+  contrib_uninstall_plan
   contrib_install_diff_plan
   contrib_install_apply_result
   contrib_update_plan

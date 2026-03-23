@@ -164,10 +164,10 @@ Current behavior:
 
 - artifact metadata is persisted,
 - app-analysis payload URIs are Blob-backed,
-- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `contrib_install_apply_result`, `contrib_update_plan`, `contrib_update_diff_plan`, `contrib_update_apply`, `flogo_json`, `build_log`, and `test_report` artifact payload URIs are also Blob-backed,
+- Activity/Trigger/Action `contrib_bundle`, `contrib_validation_report`, `contrib_package`, `contrib_install_plan`, `contrib_install_diff_plan`, `contrib_install_apply_result`, `contrib_update_plan`, `contrib_update_diff_plan`, `contrib_update_apply`, `contrib_uninstall_plan`, `flogo_json`, `build_log`, and `test_report` artifact payload URIs are also Blob-backed,
 - some broader runtime/task artifact URIs are still logical/local.
 
-If a contribution scaffold, validate, package, install-plan, install-diff-plan, install-apply, update-plan, update-diff-plan, or update-apply task fails immediately with a storage-configuration error, verify the same Blob/Azurite connection settings used for app-analysis artifacts.
+If a contribution scaffold, validate, package, install-plan, install-diff-plan, install-apply, update-plan, update-diff-plan, update-apply, or uninstall-plan task fails immediately with a storage-configuration error, verify the same Blob/Azurite connection settings used for app-analysis artifacts.
 
 ### Container Apps Job execution does not complete in production mode
 
@@ -187,7 +187,7 @@ Check:
 - contribution catalog and mapping preview are implemented,
 - deeper Core-native composition is not yet implemented,
 - flow contracts, runtime trace capture, replay, and run comparison are now implemented,
-- narrow Activity, Action, and Trigger contribution scaffolding are implemented with isolated build/test proof, shared validation/package is implemented, reviewable install planning is implemented, exact canonical install diff preview and install apply are implemented, and conservative update planning is implemented; exact update diff/apply workflows remain later work.
+- narrow Activity, Action, and Trigger contribution scaffolding are implemented with isolated build/test proof, shared validation/package is implemented, reviewable install planning plus exact install diff/apply are implemented, conservative update planning plus exact update diff/apply are implemented, and conservative uninstall planning is implemented; uninstall diff/apply and replacement workflows remain later work.
 
 ### Storage
 

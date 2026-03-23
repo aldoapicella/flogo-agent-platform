@@ -566,6 +566,54 @@ describe("orchestrator-http", () => {
     });
   });
 
+  it("routes uninstall_contrib_plan mode to the shared contribution uninstall-planning runner step", () => {
+    const start: OrchestratorStartRequest = {
+      taskId: "task-uninstall-contrib-plan",
+      request: {
+        type: "review",
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json",
+        requestedBy: "operator",
+        summary: "Plan how to uninstall an installed contribution from the target app",
+        inputs: {
+          mode: "uninstall_contrib_plan",
+          selection: {
+            alias: "webhooktrigger",
+            ref: "example.com/acme/webhook"
+          }
+        },
+        constraints: {
+          allowDependencyChanges: false,
+          allowCustomCode: false,
+          targetEnv: "dev",
+          requireApproval: true
+        }
+      },
+      requiredApprovals: [],
+      planSummary: "Plan contribution uninstall",
+      steps: []
+    };
+
+    expect(resolveWorkflowRunnerSteps(start)).toEqual(["uninstall_contrib_plan"]);
+
+    const spec = buildRunnerJobSpec(start, "uninstall_contrib_plan");
+
+    expect(spec.jobKind).toBe("contrib_uninstall_plan");
+    expect(spec.analysisKind).toBe("uninstall_contrib_plan");
+    expect(spec.analysisPayload).toMatchObject({
+      selection: {
+        alias: "webhooktrigger",
+        ref: "example.com/acme/webhook"
+      },
+      targetApp: {
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json"
+      }
+    });
+  });
+
   it("routes update_contrib_diff_plan mode to the exact canonical update diff-preview runner step", () => {
     const start: OrchestratorStartRequest = {
       taskId: "task-update-contrib-diff-plan",

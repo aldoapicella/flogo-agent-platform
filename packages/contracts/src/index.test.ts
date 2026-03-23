@@ -6,6 +6,8 @@ import {
   ContributionInstallApplyResponseSchema,
   ContributionInstallDiffPlanRequestSchema,
   ContributionInstallDiffPlanResponseSchema,
+  ContributionUninstallPlanRequestSchema,
+  ContributionUninstallPlanResponseSchema,
   ContributionUpdateApplyRequestSchema,
   ContributionUpdateApplyResponseSchema,
   ContributionUpdateDiffPlanRequestSchema,
@@ -622,6 +624,134 @@ describe("ContributionInstallDiffPlanRequestSchema", () => {
 
     expect(parsed.installPlanArtifactId).toBe("artifact-install-plan-1");
     expect(parsed.installPlanResult?.selectedAlias).toBe("webhooktrigger");
+  });
+});
+
+describe("ContributionUninstallPlanRequestSchema", () => {
+  it("accepts a selector-backed uninstall planning input", () => {
+    const parsed = ContributionUninstallPlanRequestSchema.parse({
+      targetApp: {
+        projectId: "demo",
+        appId: "hello-rest",
+        appPath: "examples/hello-rest/flogo.json"
+      },
+      selection: {
+        alias: "webhooktrigger",
+        ref: "example.com/acme/webhook"
+      }
+    });
+
+    expect(parsed.selection.alias).toBe("webhooktrigger");
+    expect(parsed.selection.ref).toBe("example.com/acme/webhook");
+  });
+
+  it("rejects missing uninstall selectors", () => {
+    expect(() =>
+      ContributionUninstallPlanRequestSchema.parse({
+        targetApp: {
+          projectId: "demo",
+          appId: "hello-rest"
+        },
+        selection: {}
+      })
+    ).toThrow(/Provide at least one installed contribution selector/);
+  });
+});
+
+describe("ContributionUninstallPlanResponseSchema", () => {
+  it("parses a conservative uninstall plan with orphan-risk and blocked-by metadata", () => {
+    const parsed = ContributionUninstallPlanResponseSchema.parse({
+      result: {
+        targetApp: {
+          projectId: "demo",
+          appId: "hello-rest",
+          appPath: "examples/hello-rest/flogo.json",
+          appName: "hello-rest"
+        },
+        selection: {
+          alias: "webhooktrigger"
+        },
+        detectedInstalledContribution: {
+          alias: "webhooktrigger",
+          ref: "example.com/acme/webhook",
+          version: "0.2.0",
+          contributionKind: "trigger",
+          modulePath: "example.com/acme/webhook",
+          packagePath: "example.com/acme/webhook",
+          packageName: "webhooktrigger",
+          matchedBy: ["alias"],
+          confidence: "medium"
+        },
+        matchQuality: "likely",
+        contributionKind: "trigger",
+        uninstallReady: false,
+        readiness: "blocked",
+        appFingerprint: "app-sha",
+        planFingerprint: "plan-sha",
+        evidence: [
+          {
+            kind: "import",
+            summary: "Import alias \"webhooktrigger\" currently points to the selected trigger.",
+            path: "imports.webhooktrigger",
+            confidence: "high"
+          }
+        ],
+        predictedChanges: {
+          importsToRemove: [
+            {
+              alias: "webhooktrigger",
+              ref: "example.com/acme/webhook",
+              action: "remove"
+            }
+          ],
+          affectedRefs: [
+            {
+              surface: "triggerRef",
+              value: "#webhooktrigger"
+            }
+          ],
+          directUsages: [
+            {
+              surface: "triggerRef",
+              path: "triggers.webhook.ref",
+              ref: "#webhooktrigger",
+              alias: "webhooktrigger",
+              summary: "Trigger \"webhook\" still uses the selected contribution."
+            }
+          ],
+          orphanRisks: [
+            {
+              surface: "triggerRef",
+              path: "triggers.webhook.ref",
+              ref: "#webhooktrigger",
+              alias: "webhooktrigger",
+              reason: "Removing import alias \"webhooktrigger\" would orphan the trigger ref.",
+              severity: "error"
+            }
+          ],
+          changedPaths: ["imports.webhooktrigger", "triggers.webhook.ref"],
+          summaryLines: ["Remove import alias \"webhooktrigger\" only after replacing the trigger ref."],
+          noMutation: true
+        },
+        blockedBy: [
+          {
+            code: "flogo.contrib.uninstall_plan.active_usage",
+            message: "Trigger \"webhook\" still uses this contribution.",
+            path: "triggers.webhook.ref",
+            severity: "error"
+          }
+        ],
+        warnings: ["Manual review is required before uninstall diff preview."],
+        conflicts: [],
+        diagnostics: [],
+        limitations: ["Planning only."],
+        recommendedNextAction: "replacement_required"
+      }
+    });
+
+    expect(parsed.result.predictedChanges.importsToRemove[0]?.action).toBe("remove");
+    expect(parsed.result.predictedChanges.orphanRisks[0]?.severity).toBe("error");
+    expect(parsed.result.recommendedNextAction).toBe("replacement_required");
   });
 });
 

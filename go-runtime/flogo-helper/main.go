@@ -657,6 +657,99 @@ type contributionUpdatePlanResponse struct {
 	Result contributionUpdatePlanResult `json:"result"`
 }
 
+type contributionUninstallSelection struct {
+	Alias            string `json:"alias,omitempty"`
+	Ref              string `json:"ref,omitempty"`
+	ModulePath       string `json:"modulePath,omitempty"`
+	PackagePath      string `json:"packagePath,omitempty"`
+	PackageName      string `json:"packageName,omitempty"`
+	ContributionKind string `json:"contributionKind,omitempty"`
+	SourceArtifact   string `json:"sourceArtifactId,omitempty"`
+}
+
+type contributionUninstallEvidence struct {
+	Kind       string         `json:"kind"`
+	Summary    string         `json:"summary"`
+	Path       string         `json:"path,omitempty"`
+	Confidence string         `json:"confidence,omitempty"`
+	Details    map[string]any `json:"details,omitempty"`
+}
+
+type contributionUninstallUsage struct {
+	Surface string `json:"surface"`
+	Path    string `json:"path"`
+	Ref     string `json:"ref"`
+	Alias   string `json:"alias,omitempty"`
+	Summary string `json:"summary"`
+}
+
+type contributionUninstallOrphanRisk struct {
+	Surface  string `json:"surface"`
+	Path     string `json:"path"`
+	Ref      string `json:"ref"`
+	Alias    string `json:"alias,omitempty"`
+	Reason   string `json:"reason"`
+	Severity string `json:"severity"`
+}
+
+type contributionUninstallBlockedReason struct {
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	Path     string `json:"path,omitempty"`
+	Severity string `json:"severity"`
+}
+
+type contributionUninstallInstalledContribution struct {
+	Alias            string   `json:"alias,omitempty"`
+	Ref              string   `json:"ref,omitempty"`
+	Version          string   `json:"version,omitempty"`
+	ContributionKind string   `json:"contributionKind"`
+	ModulePath       string   `json:"modulePath,omitempty"`
+	PackagePath      string   `json:"packagePath,omitempty"`
+	PackageName      string   `json:"packageName,omitempty"`
+	MatchedBy        []string `json:"matchedBy"`
+	Confidence       string   `json:"confidence"`
+}
+
+type contributionUninstallPredictedChanges struct {
+	ImportsToRemove []contributionInstallImportEntry  `json:"importsToRemove"`
+	AffectedRefs    []contributionInstallRefEntry     `json:"affectedRefs"`
+	DirectUsages    []contributionUninstallUsage      `json:"directUsages"`
+	OrphanRisks     []contributionUninstallOrphanRisk `json:"orphanRisks"`
+	ChangedPaths    []string                          `json:"changedPaths"`
+	SummaryLines    []string                          `json:"summaryLines"`
+	NoMutation      bool                              `json:"noMutation"`
+}
+
+type contributionUninstallPlanRequest struct {
+	Selection contributionUninstallSelection `json:"selection"`
+	TargetApp contributionInstallTarget      `json:"targetApp,omitempty"`
+}
+
+type contributionUninstallPlanResult struct {
+	TargetApp                     contributionInstallTarget                   `json:"targetApp"`
+	Selection                     contributionUninstallSelection              `json:"selection"`
+	DetectedInstalledContribution *contributionUninstallInstalledContribution `json:"detectedInstalledContribution,omitempty"`
+	MatchQuality                  string                                      `json:"matchQuality"`
+	ContributionKind              string                                      `json:"contributionKind"`
+	UninstallReady                bool                                        `json:"uninstallReady"`
+	Readiness                     string                                      `json:"readiness"`
+	AppFingerprint                string                                      `json:"appFingerprint,omitempty"`
+	PlanFingerprint               string                                      `json:"planFingerprint,omitempty"`
+	Evidence                      []contributionUninstallEvidence             `json:"evidence"`
+	PredictedChanges              contributionUninstallPredictedChanges       `json:"predictedChanges"`
+	BlockedBy                     []contributionUninstallBlockedReason        `json:"blockedBy"`
+	Warnings                      []string                                    `json:"warnings"`
+	Conflicts                     []contributionInstallConflict               `json:"conflicts"`
+	Diagnostics                   []diagnostic                                `json:"diagnostics"`
+	Limitations                   []string                                    `json:"limitations"`
+	RecommendedNextAction         string                                      `json:"recommendedNextAction"`
+}
+
+type contributionUninstallPlanResponse struct {
+	Result contributionUninstallPlanResult `json:"result"`
+}
+
 type contributionUpdateDiffPlanRequest struct {
 	UpdatePlan         contributionUpdatePlanResult `json:"updatePlan"`
 	UpdatePlanArtifact string                       `json:"updatePlanArtifactId,omitempty"`
@@ -3202,7 +3295,7 @@ var supportedRuntimeActivityRefs = map[string]bool{
 
 func main() {
 	if len(os.Args) < 3 {
-		fail("expected a command such as 'catalog contribs', 'inspect descriptor', 'preview mapping', 'contrib scaffold-activity', 'contrib scaffold-action', 'contrib scaffold-trigger', 'contrib validate', 'contrib package', 'contrib install-plan', 'contrib update-plan', 'contrib update-diff-plan', 'contrib install-diff-plan', 'contrib install-apply', or 'contrib update-apply'")
+		fail("expected a command such as 'catalog contribs', 'inspect descriptor', 'preview mapping', 'contrib scaffold-activity', 'contrib scaffold-action', 'contrib scaffold-trigger', 'contrib validate', 'contrib package', 'contrib install-plan', 'contrib update-plan', 'contrib uninstall-plan', 'contrib update-diff-plan', 'contrib install-diff-plan', 'contrib install-apply', or 'contrib update-apply'")
 	}
 
 	command := strings.Join(os.Args[1:3], " ")
@@ -3268,6 +3361,18 @@ func main() {
 			fail("missing required --request flag")
 		}
 		encode(planContributionUpdate(loadApp(appPath), appPath, loadContributionUpdatePlanRequest(requestPath)))
+		return
+	}
+	if command == "contrib uninstall-plan" {
+		appPath := lookupFlag("--app")
+		if appPath == "" {
+			fail("missing required --app flag")
+		}
+		requestPath := lookupFlag("--request")
+		if requestPath == "" {
+			fail("missing required --request flag")
+		}
+		encode(planContributionUninstall(loadApp(appPath), appPath, loadContributionUninstallPlanRequest(requestPath)))
 		return
 	}
 	if command == "contrib update-diff-plan" {
@@ -3694,6 +3799,20 @@ func loadContributionUpdatePlanRequest(inputPath string) contributionUpdatePlanR
 	return loadContributionInstallPlanRequest(inputPath)
 }
 
+func loadContributionUninstallPlanRequest(inputPath string) contributionUninstallPlanRequest {
+	contents, err := os.ReadFile(inputPath)
+	if err != nil {
+		fail(err.Error())
+	}
+
+	var request contributionUninstallPlanRequest
+	if err := json.Unmarshal(contents, &request); err != nil {
+		fail(err.Error())
+	}
+
+	return request
+}
+
 func loadContributionUpdateDiffPlanRequest(inputPath string) contributionUpdateDiffPlanRequest {
 	contents, err := os.ReadFile(inputPath)
 	if err != nil {
@@ -4059,6 +4178,19 @@ func validateContributionUpdatePlanRequest(request contributionUpdatePlanRequest
 	return validateContributionInstallPlanRequest(request)
 }
 
+func validateContributionUninstallPlanRequest(request contributionUninstallPlanRequest) error {
+	selection := request.Selection
+	if strings.TrimSpace(selection.Alias) == "" &&
+		strings.TrimSpace(selection.Ref) == "" &&
+		strings.TrimSpace(selection.ModulePath) == "" &&
+		strings.TrimSpace(selection.PackagePath) == "" &&
+		strings.TrimSpace(selection.PackageName) == "" &&
+		strings.TrimSpace(selection.SourceArtifact) == "" {
+		return fmt.Errorf("selection must include at least one of alias, ref, modulePath, packagePath, packageName, or sourceArtifactId")
+	}
+	return nil
+}
+
 func validateContributionUpdateDiffPlanRequest(request contributionUpdateDiffPlanRequest) error {
 	if err := validateContributionScaffoldResult(contributionScaffoldResult{Bundle: request.UpdatePlan.Bundle}); err != nil {
 		return err
@@ -4208,6 +4340,28 @@ func contributionUpdatePlanFingerprint(result contributionUpdatePlanResult) stri
 		"updateReady":                   result.UpdateReady,
 		"readiness":                     result.Readiness,
 		"predictedChanges":              result.PredictedChanges,
+		"warnings":                      result.Warnings,
+		"conflicts":                     result.Conflicts,
+		"limitations":                   result.Limitations,
+	})
+}
+
+func contributionUninstallPlanFingerprint(result contributionUninstallPlanResult) string {
+	return hashProjection(map[string]any{
+		"targetApp": map[string]any{
+			"projectId": result.TargetApp.ProjectID,
+			"appId":     result.TargetApp.AppID,
+			"appPath":   result.TargetApp.AppPath,
+			"appName":   result.TargetApp.AppName,
+		},
+		"selection":                     result.Selection,
+		"detectedInstalledContribution": result.DetectedInstalledContribution,
+		"matchQuality":                  result.MatchQuality,
+		"contributionKind":              result.ContributionKind,
+		"uninstallReady":                result.UninstallReady,
+		"readiness":                     result.Readiness,
+		"predictedChanges":              result.PredictedChanges,
+		"blockedBy":                     result.BlockedBy,
 		"warnings":                      result.Warnings,
 		"conflicts":                     result.Conflicts,
 		"limitations":                   result.Limitations,
@@ -6252,6 +6406,447 @@ func planContributionUpdate(app flogoApp, appPath string, request contributionUp
 	result.PlanFingerprint = contributionUpdatePlanFingerprint(result)
 
 	return contributionUpdatePlanResponse{
+		Result: result,
+	}
+}
+
+func planContributionUninstall(app flogoApp, appPath string, request contributionUninstallPlanRequest) contributionUninstallPlanResponse {
+	if err := validateContributionUninstallPlanRequest(request); err != nil {
+		fail(err.Error())
+	}
+
+	targetApp := copyInstallTarget(request.TargetApp)
+	if targetApp.AppPath == "" {
+		targetApp.AppPath = appPath
+	}
+	if targetApp.AppName == "" {
+		targetApp.AppName = app.Name
+	}
+
+	selection := request.Selection
+	inventory := buildContributionInventory(app, appPath)
+	evidence := []contributionUninstallEvidence{}
+	warnings := []string{}
+	conflicts := []contributionInstallConflict{}
+	diagnostics := []diagnostic{}
+	blockedBy := []contributionUninstallBlockedReason{}
+
+	selectorSummaryParts := []string{}
+	if strings.TrimSpace(selection.Alias) != "" {
+		selectorSummaryParts = append(selectorSummaryParts, fmt.Sprintf("alias=%q", selection.Alias))
+	}
+	if strings.TrimSpace(selection.Ref) != "" {
+		selectorSummaryParts = append(selectorSummaryParts, fmt.Sprintf("ref=%q", selection.Ref))
+	}
+	if strings.TrimSpace(selection.ModulePath) != "" {
+		selectorSummaryParts = append(selectorSummaryParts, fmt.Sprintf("modulePath=%q", selection.ModulePath))
+	}
+	if strings.TrimSpace(selection.PackagePath) != "" {
+		selectorSummaryParts = append(selectorSummaryParts, fmt.Sprintf("packagePath=%q", selection.PackagePath))
+	}
+	if strings.TrimSpace(selection.PackageName) != "" {
+		selectorSummaryParts = append(selectorSummaryParts, fmt.Sprintf("packageName=%q", selection.PackageName))
+	}
+	if strings.TrimSpace(selection.ContributionKind) != "" {
+		selectorSummaryParts = append(selectorSummaryParts, fmt.Sprintf("contributionKind=%q", selection.ContributionKind))
+	}
+	if strings.TrimSpace(selection.SourceArtifact) != "" {
+		selectorSummaryParts = append(selectorSummaryParts, fmt.Sprintf("sourceArtifactId=%q", selection.SourceArtifact))
+	}
+	if len(selectorSummaryParts) > 0 {
+		evidence = append(evidence, contributionUninstallEvidence{
+			Kind:       "selector",
+			Summary:    "Requested uninstall selection: " + strings.Join(selectorSummaryParts, ", "),
+			Confidence: "high",
+			Details: map[string]any{
+				"selection": request.Selection,
+			},
+		})
+	}
+
+	normalizeInstalledKind := func(kind string, ref string) string {
+		switch strings.TrimSpace(kind) {
+		case "activity", "action", "trigger", "model", "function":
+			return strings.TrimSpace(kind)
+		case "flow":
+			return "unknown"
+		}
+		switch {
+		case strings.Contains(ref, "/model/"):
+			return "model"
+		case strings.Contains(ref, "/function/"):
+			return "function"
+		case strings.TrimSpace(ref) == "":
+			return "unknown"
+		default:
+			inferred := inferContribType(ref)
+			if inferred == "" {
+				return "unknown"
+			}
+			return inferred
+		}
+	}
+
+	type uninstallCandidate struct {
+		importEntry flogoImport
+		installed   contributionUninstallInstalledContribution
+		evidence    []contributionUninstallEvidence
+	}
+
+	matchesSelection := func(candidate uninstallCandidate) (bool, []string) {
+		matchedBy := []string{}
+		selectorCount := 0
+
+		if alias := strings.TrimSpace(selection.Alias); alias != "" {
+			selectorCount++
+			if normalizeAlias(candidate.importEntry.Alias) != normalizeAlias(alias) {
+				return false, nil
+			}
+			matchedBy = append(matchedBy, "alias")
+		}
+		if ref := strings.TrimSpace(selection.Ref); ref != "" {
+			selectorCount++
+			if strings.TrimSpace(candidate.importEntry.Ref) != ref {
+				return false, nil
+			}
+			matchedBy = append(matchedBy, "ref")
+		}
+		if modulePath := strings.TrimSpace(selection.ModulePath); modulePath != "" {
+			selectorCount++
+			if strings.TrimSpace(candidate.installed.ModulePath) != modulePath && strings.TrimSpace(candidate.installed.PackagePath) != modulePath {
+				return false, nil
+			}
+			matchedBy = append(matchedBy, "modulePath")
+		}
+		if packagePath := strings.TrimSpace(selection.PackagePath); packagePath != "" {
+			selectorCount++
+			if strings.TrimSpace(candidate.installed.PackagePath) != packagePath && strings.TrimSpace(candidate.installed.ModulePath) != packagePath {
+				return false, nil
+			}
+			matchedBy = append(matchedBy, "packagePath")
+		}
+		if packageName := strings.TrimSpace(selection.PackageName); packageName != "" {
+			selectorCount++
+			if normalizeAlias(candidate.installed.PackageName) != normalizeAlias(packageName) &&
+				normalizeAlias(candidate.importEntry.Alias) != normalizeAlias(packageName) {
+				return false, nil
+			}
+			matchedBy = append(matchedBy, "packageName")
+		}
+		if contributionKind := strings.TrimSpace(selection.ContributionKind); contributionKind != "" {
+			selectorCount++
+			if strings.TrimSpace(candidate.installed.ContributionKind) != contributionKind {
+				return false, nil
+			}
+			matchedBy = append(matchedBy, "contributionKind")
+		}
+
+		return selectorCount > 0, matchedBy
+	}
+
+	candidates := []uninstallCandidate{}
+	for _, entry := range app.Imports {
+		inventoryEntry, ok := findInventoryEntry(inventory, app, entry.Alias)
+		if !ok {
+			inventoryEntry, ok = findInventoryEntry(inventory, app, entry.Ref)
+		}
+
+		candidate := uninstallCandidate{
+			importEntry: entry,
+			installed: contributionUninstallInstalledContribution{
+				Alias:            strings.TrimSpace(entry.Alias),
+				Ref:              strings.TrimSpace(entry.Ref),
+				Version:          strings.TrimSpace(entry.Version),
+				ContributionKind: "unknown",
+				MatchedBy:        []string{},
+				Confidence:       "medium",
+			},
+			evidence: []contributionUninstallEvidence{
+				{
+					Kind:       "import",
+					Summary:    fmt.Sprintf("Import alias %q currently points to %q.", entry.Alias, entry.Ref),
+					Path:       "imports." + entry.Alias,
+					Confidence: "high",
+				},
+			},
+		}
+
+		if ok {
+			candidate.installed.ContributionKind = normalizeInstalledKind(inventoryEntry.Type, inventoryEntry.Ref)
+			candidate.installed.ModulePath = strings.TrimSpace(inventoryEntry.ModulePath)
+			candidate.installed.PackagePath = strings.TrimSpace(inventoryEntry.GoPackagePath)
+			candidate.installed.PackageName = strings.TrimSpace(inventoryEntry.Name)
+			if strings.TrimSpace(inventoryEntry.Version) != "" {
+				candidate.installed.Version = strings.TrimSpace(inventoryEntry.Version)
+			}
+			candidate.installed.Confidence = strings.TrimSpace(inventoryEntry.Confidence)
+			if candidate.installed.Confidence == "" {
+				candidate.installed.Confidence = "medium"
+			}
+			candidate.evidence = append(candidate.evidence, contributionUninstallEvidence{
+				Kind:       "inventory",
+				Summary:    fmt.Sprintf("Inventory metadata resolves alias %q as %s evidence for %q.", entry.Alias, candidate.installed.ContributionKind, inventoryEntry.Ref),
+				Path:       "imports." + entry.Alias,
+				Confidence: candidate.installed.Confidence,
+				Details: map[string]any{
+					"source":        inventoryEntry.Source,
+					"modulePath":    inventoryEntry.ModulePath,
+					"packagePath":   inventoryEntry.GoPackagePath,
+					"packageName":   inventoryEntry.Name,
+					"resolvedRef":   inventoryEntry.Ref,
+					"descriptorRef": valueOrFallback(inventoryEntry.Ref, entry.Ref),
+				},
+			})
+		} else {
+			candidate.installed.ContributionKind = normalizeInstalledKind("", entry.Ref)
+			candidate.installed.ModulePath = strings.TrimSpace(entry.Ref)
+			candidate.installed.PackagePath = strings.TrimSpace(entry.Ref)
+			candidate.installed.PackageName = normalizeAlias(entry.Alias)
+			candidate.installed.Confidence = "low"
+			candidate.evidence = append(candidate.evidence, contributionUninstallEvidence{
+				Kind:       "inventory",
+				Summary:    fmt.Sprintf("No package-backed inventory metadata was found for import alias %q; uninstall planning is falling back to import evidence only.", entry.Alias),
+				Path:       "imports." + entry.Alias,
+				Confidence: "low",
+			})
+		}
+
+		matches, matchedBy := matchesSelection(candidate)
+		if !matches {
+			continue
+		}
+		candidate.installed.MatchedBy = dedupeStrings(append(candidate.installed.MatchedBy, matchedBy...))
+		candidates = append(candidates, candidate)
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		left := candidates[i].importEntry
+		right := candidates[j].importEntry
+		return left.Alias+"|"+left.Ref < right.Alias+"|"+right.Ref
+	})
+
+	matchQuality := "none"
+	readiness := "blocked"
+	contributionKind := "unknown"
+	uninstallReady := false
+	var detected *contributionUninstallInstalledContribution
+	predictedChanges := contributionUninstallPredictedChanges{
+		ImportsToRemove: []contributionInstallImportEntry{},
+		AffectedRefs:    []contributionInstallRefEntry{},
+		DirectUsages:    []contributionUninstallUsage{},
+		OrphanRisks:     []contributionUninstallOrphanRisk{},
+		ChangedPaths:    []string{},
+		SummaryLines:    []string{},
+		NoMutation:      true,
+	}
+	recommendedNextAction := "cannot_uninstall"
+
+	if len(candidates) > 1 {
+		matchQuality = "ambiguous"
+		readiness = "ambiguous"
+		recommendedNextAction = "manual_review"
+		conflicts = append(conflicts, contributionInstallConflict{
+			Kind:     "ambiguous_match",
+			Severity: "error",
+			Message:  fmt.Sprintf("Found %d installed contribution candidates that match the uninstall selector.", len(candidates)),
+		})
+		blockedBy = append(blockedBy, contributionUninstallBlockedReason{
+			Code:     "flogo.contrib.uninstall_plan.ambiguous_match",
+			Message:  fmt.Sprintf("Found %d installed contribution candidates for the requested uninstall selector.", len(candidates)),
+			Severity: "error",
+		})
+		warnings = append(warnings, "Multiple installed contribution imports match the selector; manual review is required before generating an uninstall diff preview.")
+		predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, "Uninstall planning stopped because the installed contribution match is ambiguous.")
+	} else if len(candidates) == 0 {
+		blockedBy = append(blockedBy, contributionUninstallBlockedReason{
+			Code:     "flogo.contrib.uninstall_plan.not_installed",
+			Message:  "The target app does not currently expose a uniquely matching installed contribution import for this uninstall request.",
+			Severity: "error",
+		})
+		warnings = append(warnings, "No installed contribution import matched the uninstall selector in the target app.")
+		predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, "No installed contribution import matched the uninstall selector.")
+	} else {
+		candidate := candidates[0]
+		detected = &candidate.installed
+		contributionKind = candidate.installed.ContributionKind
+		if contributionKind == "" {
+			contributionKind = "unknown"
+		}
+		evidence = append(evidence, candidate.evidence...)
+
+		importsToRemove := contributionInstallImportEntry{
+			Alias:   candidate.importEntry.Alias,
+			Ref:     candidate.importEntry.Ref,
+			Version: candidate.importEntry.Version,
+			Action:  "remove",
+			Note:    "Remove this import only after confirming there are no remaining live refs/usages or after planning a replacement.",
+		}
+		predictedChanges.ImportsToRemove = append(predictedChanges.ImportsToRemove, importsToRemove)
+		predictedChanges.ChangedPaths = appendUniqueString(predictedChanges.ChangedPaths, "imports."+candidate.importEntry.Alias)
+		predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, fmt.Sprintf("Remove import alias %q for ref %q.", candidate.importEntry.Alias, candidate.importEntry.Ref))
+
+		hasMatch := func(name string) bool {
+			for _, value := range candidate.installed.MatchedBy {
+				if value == name {
+					return true
+				}
+			}
+			return false
+		}
+		if hasMatch("ref") && (hasMatch("alias") || hasMatch("modulePath") || hasMatch("packagePath") || hasMatch("packageName")) {
+			matchQuality = "exact"
+		} else if len(candidate.installed.MatchedBy) > 0 {
+			matchQuality = "likely"
+		}
+		if matchQuality == "none" {
+			matchQuality = "likely"
+		}
+
+		recordUsage := func(surface string, path string, ref string, summary string) {
+			usage := contributionUninstallUsage{
+				Surface: surface,
+				Path:    path,
+				Ref:     ref,
+				Alias:   candidate.installed.Alias,
+				Summary: summary,
+			}
+			predictedChanges.DirectUsages = append(predictedChanges.DirectUsages, usage)
+			predictedChanges.AffectedRefs = append(predictedChanges.AffectedRefs, contributionInstallRefEntry{
+				Surface: surface,
+				Value:   ref,
+				Note:    path,
+			})
+			predictedChanges.ChangedPaths = appendUniqueString(predictedChanges.ChangedPaths, path)
+			predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, summary)
+			evidence = append(evidence, contributionUninstallEvidence{
+				Kind:       "usage",
+				Summary:    summary,
+				Path:       path,
+				Confidence: "high",
+			})
+
+			reason := fmt.Sprintf("Removing import alias %q would orphan active usage %q at %s.", candidate.installed.Alias, ref, path)
+			predictedChanges.OrphanRisks = append(predictedChanges.OrphanRisks, contributionUninstallOrphanRisk{
+				Surface:  surface,
+				Path:     path,
+				Ref:      ref,
+				Alias:    candidate.installed.Alias,
+				Reason:   reason,
+				Severity: "error",
+			})
+			blockedBy = append(blockedBy, contributionUninstallBlockedReason{
+				Code:     "flogo.contrib.uninstall_plan.active_usage",
+				Message:  reason,
+				Path:     path,
+				Severity: "error",
+			})
+		}
+
+		matchesUsageRef := func(ref string) bool {
+			trimmed := strings.TrimSpace(ref)
+			if trimmed == "" {
+				return false
+			}
+			if trimmed == strings.TrimSpace(candidate.installed.Ref) {
+				return true
+			}
+			if strings.HasPrefix(trimmed, "#") && candidate.installed.Alias != "" && normalizeAlias(inferAlias(trimmed)) == normalizeAlias(candidate.installed.Alias) {
+				return true
+			}
+			return false
+		}
+
+		for _, trigger := range app.Triggers {
+			if matchesUsageRef(trigger.Ref) {
+				recordUsage("triggerRef", "triggers."+trigger.ID+".ref", trigger.Ref, fmt.Sprintf("Trigger %q currently uses this contribution ref.", trigger.ID))
+			}
+			for handlerIndex, handler := range trigger.Handlers {
+				if strings.TrimSpace(handler.ActionRef) == "" || strings.HasPrefix(strings.TrimSpace(handler.ActionRef), "#flow:") {
+					continue
+				}
+				if matchesUsageRef(handler.ActionRef) {
+					recordUsage(
+						"actionRef",
+						fmt.Sprintf("triggers.%s.handlers.%d.action", trigger.ID, handlerIndex),
+						handler.ActionRef,
+						fmt.Sprintf("Trigger handler %d on %q currently invokes this contribution ref.", handlerIndex, trigger.ID),
+					)
+				}
+			}
+		}
+
+		for _, flow := range app.Resources {
+			for _, task := range flow.Tasks {
+				if strings.TrimSpace(task.ActivityRef) == "" {
+					continue
+				}
+				if matchesUsageRef(task.ActivityRef) {
+					recordUsage(
+						"activityRef",
+						"resources."+flow.ID+".tasks."+task.ID+".activityRef",
+						task.ActivityRef,
+						fmt.Sprintf("Flow task %q in resource %q currently references this contribution.", task.ID, flow.ID),
+					)
+				}
+			}
+		}
+
+		predictedChanges.AffectedRefs = dedupeContributionInstallRefEntries(predictedChanges.AffectedRefs)
+		predictedChanges.ChangedPaths = dedupeStrings(predictedChanges.ChangedPaths)
+
+		if contributionKind == "unknown" {
+			warnings = append(warnings, "Contribution kind could not be proven from package-backed metadata; uninstall planning is using import and inventory evidence conservatively.")
+		}
+		if candidate.installed.Confidence == "low" {
+			warnings = append(warnings, "Installed contribution evidence is weak because only import-level metadata could be confirmed.")
+		}
+
+		switch {
+		case len(predictedChanges.DirectUsages) > 0:
+			readiness = "blocked"
+			recommendedNextAction = "replacement_required"
+			uninstallReady = false
+		case matchQuality == "exact":
+			readiness = "ready"
+			recommendedNextAction = "preview_uninstall_diff"
+			uninstallReady = true
+			predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, fmt.Sprintf("No live trigger, handler, or task refs were found for alias %q; this import is a conservative uninstall candidate.", candidate.importEntry.Alias))
+		default:
+			readiness = "ambiguous"
+			recommendedNextAction = "manual_review"
+			uninstallReady = false
+			warnings = append(warnings, "Installed contribution selection matched only likely evidence; review the uninstall target before generating a canonical diff preview.")
+			predictedChanges.SummaryLines = append(predictedChanges.SummaryLines, "Installed contribution match is likely but not exact; manual review is required before any uninstall diff preview.")
+		}
+	}
+
+	limitations := []string{
+		"Planning only; this slice does not mutate flogo.json or uninstall the contribution from the target app.",
+		"Import presence is necessary but not sufficient for safe removal; direct trigger, handler, and task refs can still block uninstall.",
+		"Exact canonical uninstall diff preview and uninstall apply remain separate later lifecycle slices.",
+	}
+
+	result := contributionUninstallPlanResult{
+		TargetApp:                     targetApp,
+		Selection:                     selection,
+		DetectedInstalledContribution: detected,
+		MatchQuality:                  matchQuality,
+		ContributionKind:              contributionKind,
+		UninstallReady:                uninstallReady,
+		Readiness:                     readiness,
+		AppFingerprint:                appCanonicalFingerprint(app),
+		Evidence:                      evidence,
+		PredictedChanges:              predictedChanges,
+		BlockedBy:                     blockedBy,
+		Warnings:                      dedupeStrings(warnings),
+		Conflicts:                     conflicts,
+		Diagnostics:                   dedupeDiagnostics(diagnostics),
+		Limitations:                   dedupeStrings(limitations),
+		RecommendedNextAction:         recommendedNextAction,
+	}
+	result.PlanFingerprint = contributionUninstallPlanFingerprint(result)
+
+	return contributionUninstallPlanResponse{
 		Result: result,
 	}
 }

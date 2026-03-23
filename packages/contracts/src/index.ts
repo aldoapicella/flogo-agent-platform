@@ -74,6 +74,7 @@ export const ArtifactTypeSchema = z.enum([
   "contrib_package",
   "contrib_install_plan",
   "contrib_update_plan",
+  "contrib_uninstall_plan",
   "contrib_update_diff_plan",
   "contrib_install_diff_plan",
   "contrib_install_apply_result",
@@ -711,6 +712,12 @@ export const ContributionUpdatePlanArtifactSchema = ArtifactRefSchema.extend({
 });
 export type ContributionUpdatePlanArtifact = z.infer<typeof ContributionUpdatePlanArtifactSchema>;
 
+export const ContributionUninstallPlanArtifactSchema = ArtifactRefSchema.extend({
+  type: z.literal("contrib_uninstall_plan"),
+  metadata: z.record(z.string(), z.unknown())
+});
+export type ContributionUninstallPlanArtifact = z.infer<typeof ContributionUninstallPlanArtifactSchema>;
+
 export const ContributionInstallDiffPlanArtifactSchema = ArtifactRefSchema.extend({
   type: z.literal("contrib_install_diff_plan"),
   metadata: z.record(z.string(), z.unknown())
@@ -830,6 +837,7 @@ export const ContributionInstallImportActionSchema = z.enum([
   "keep_existing",
   "replace_existing",
   "update_existing",
+  "remove",
   "conflict"
 ]);
 export type ContributionInstallImportAction = z.infer<typeof ContributionInstallImportActionSchema>;
@@ -1056,6 +1064,131 @@ export const ContributionUpdatePlanResponseSchema = z.object({
   result: ContributionUpdatePlanResultSchema
 });
 export type ContributionUpdatePlanResponse = z.infer<typeof ContributionUpdatePlanResponseSchema>;
+
+export const ContributionInstalledKindSchema = z.enum(["activity", "action", "trigger", "model", "function", "unknown"]);
+export type ContributionInstalledKind = z.infer<typeof ContributionInstalledKindSchema>;
+
+export const ContributionUninstallReadinessSchema = z.enum(["ready", "blocked", "ambiguous"]);
+export type ContributionUninstallReadiness = z.infer<typeof ContributionUninstallReadinessSchema>;
+
+export const ContributionUninstallSelectionSchema = z.object({
+  alias: z.string().min(1).optional(),
+  ref: z.string().min(1).optional(),
+  modulePath: z.string().min(1).optional(),
+  packagePath: z.string().min(1).optional(),
+  packageName: z.string().min(1).optional(),
+  contributionKind: ContributionInstalledKindSchema.optional(),
+  sourceArtifactId: z.string().min(1).optional()
+}).superRefine((value, ctx) => {
+  if (!value.alias && !value.ref && !value.modulePath && !value.packagePath && !value.packageName && !value.sourceArtifactId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide at least one installed contribution selector via alias, ref, modulePath, packagePath, packageName, or sourceArtifactId.",
+      path: ["alias"]
+    });
+  }
+});
+export type ContributionUninstallSelection = z.infer<typeof ContributionUninstallSelectionSchema>;
+
+export const ContributionUninstallEvidenceSchema = z.object({
+  kind: z.enum(["selector", "inventory", "import", "usage", "artifact"]),
+  summary: z.string(),
+  path: z.string().optional(),
+  confidence: z.enum(["high", "medium", "low"]).optional(),
+  details: z.record(z.string(), z.unknown()).optional()
+});
+export type ContributionUninstallEvidence = z.infer<typeof ContributionUninstallEvidenceSchema>;
+
+export const ContributionUninstallUsageSchema = z.object({
+  surface: z.string(),
+  path: z.string(),
+  ref: z.string(),
+  alias: z.string().optional(),
+  summary: z.string()
+});
+export type ContributionUninstallUsage = z.infer<typeof ContributionUninstallUsageSchema>;
+
+export const ContributionUninstallOrphanRiskSchema = z.object({
+  surface: z.string(),
+  path: z.string(),
+  ref: z.string(),
+  alias: z.string().optional(),
+  reason: z.string(),
+  severity: DiagnosticSeveritySchema
+});
+export type ContributionUninstallOrphanRisk = z.infer<typeof ContributionUninstallOrphanRiskSchema>;
+
+export const ContributionUninstallBlockedReasonSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  path: z.string().optional(),
+  severity: DiagnosticSeveritySchema.default("error")
+});
+export type ContributionUninstallBlockedReason = z.infer<typeof ContributionUninstallBlockedReasonSchema>;
+
+export const ContributionUninstallInstalledContributionSchema = z.object({
+  alias: z.string().optional(),
+  ref: z.string().optional(),
+  version: z.string().optional(),
+  contributionKind: ContributionInstalledKindSchema.default("unknown"),
+  modulePath: z.string().optional(),
+  packagePath: z.string().optional(),
+  packageName: z.string().optional(),
+  matchedBy: z.array(z.string()).default([]),
+  confidence: z.enum(["high", "medium", "low"]).default("low")
+});
+export type ContributionUninstallInstalledContribution = z.infer<typeof ContributionUninstallInstalledContributionSchema>;
+
+export const ContributionUninstallPredictedChangesSchema = z.object({
+  importsToRemove: z.array(ContributionInstallImportEntrySchema).default([]),
+  affectedRefs: z.array(ContributionInstallRefEntrySchema).default([]),
+  directUsages: z.array(ContributionUninstallUsageSchema).default([]),
+  orphanRisks: z.array(ContributionUninstallOrphanRiskSchema).default([]),
+  changedPaths: z.array(z.string()).default([]),
+  summaryLines: z.array(z.string()).default([]),
+  noMutation: z.literal(true).default(true)
+});
+export type ContributionUninstallPredictedChanges = z.infer<typeof ContributionUninstallPredictedChangesSchema>;
+
+export const ContributionUninstallPlanRequestSchema = z.object({
+  targetApp: ContributionInstallTargetSchema.default({}),
+  selection: ContributionUninstallSelectionSchema
+});
+export type ContributionUninstallPlanRequest = z.infer<typeof ContributionUninstallPlanRequestSchema>;
+
+export const ContributionUninstallPlanResultSchema = z.object({
+  targetApp: ContributionInstallTargetSchema,
+  selection: ContributionUninstallSelectionSchema,
+  detectedInstalledContribution: ContributionUninstallInstalledContributionSchema.optional(),
+  matchQuality: ContributionUpdateMatchQualitySchema,
+  contributionKind: ContributionInstalledKindSchema,
+  uninstallReady: z.boolean(),
+  readiness: ContributionUninstallReadinessSchema,
+  appFingerprint: z.string().optional(),
+  planFingerprint: z.string().optional(),
+  evidence: z.array(ContributionUninstallEvidenceSchema).default([]),
+  predictedChanges: ContributionUninstallPredictedChangesSchema.default({
+    importsToRemove: [],
+    affectedRefs: [],
+    directUsages: [],
+    orphanRisks: [],
+    changedPaths: [],
+    summaryLines: [],
+    noMutation: true
+  }),
+  blockedBy: z.array(ContributionUninstallBlockedReasonSchema).default([]),
+  warnings: z.array(z.string()).default([]),
+  conflicts: z.array(ContributionInstallConflictSchema).default([]),
+  diagnostics: z.array(DiagnosticSchema).default([]),
+  limitations: z.array(z.string()).default([]),
+  recommendedNextAction: z.string()
+});
+export type ContributionUninstallPlanResult = z.infer<typeof ContributionUninstallPlanResultSchema>;
+
+export const ContributionUninstallPlanResponseSchema = z.object({
+  result: ContributionUninstallPlanResultSchema
+});
+export type ContributionUninstallPlanResponse = z.infer<typeof ContributionUninstallPlanResponseSchema>;
 
 const contributionInstallDiffPlanInputShape = {
   installPlanArtifactId: z.string().min(1).optional(),
@@ -2793,6 +2926,7 @@ export const RunnerStepTypeSchema = z.enum([
   "package_contrib",
   "install_contrib_plan",
   "update_contrib_plan",
+  "uninstall_contrib_plan",
   "update_contrib_diff_plan",
   "install_contrib_diff_plan",
   "install_contrib_apply",
@@ -2832,6 +2966,7 @@ export const RunnerJobKindSchema = z.enum([
   "contrib_package",
   "contrib_install_plan",
   "contrib_update_plan",
+  "contrib_uninstall_plan",
   "contrib_update_diff_plan",
   "contrib_install_diff_plan",
   "contrib_install_apply",
@@ -2870,6 +3005,7 @@ export const AnalysisKindSchema = z.enum([
   "package_contrib",
   "install_contrib_plan",
   "update_contrib_plan",
+  "uninstall_contrib_plan",
   "update_contrib_diff_plan",
   "install_contrib_diff_plan",
   "install_contrib_apply",

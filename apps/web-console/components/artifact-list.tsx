@@ -11,6 +11,7 @@ function artifactSummary(artifact: ArtifactRef) {
       artifact.type !== "contrib_package" &&
       artifact.type !== "contrib_install_plan" &&
       artifact.type !== "contrib_update_plan" &&
+      artifact.type !== "contrib_uninstall_plan" &&
       artifact.type !== "contrib_update_diff_plan" &&
       artifact.type !== "contrib_install_diff_plan" &&
       artifact.type !== "contrib_install_apply_result" &&
@@ -71,18 +72,23 @@ function artifactSummary(artifact: ArtifactRef) {
       : typeof targetApp?.appName === "string"
         ? targetApp.appName
         : undefined;
+  const detectedInstalledContribution =
+    result && isRecord(result.detectedInstalledContribution) ? result.detectedInstalledContribution : undefined;
   const selectedAlias =
     typeof result?.selectedAlias === "string"
       ? result.selectedAlias
       : typeof sourceContribution?.selectedAlias === "string"
         ? sourceContribution.selectedAlias
-        : undefined;
+        : detectedInstalledContribution && typeof detectedInstalledContribution.alias === "string"
+          ? detectedInstalledContribution.alias
+          : isRecord(result?.selection) && typeof result.selection.alias === "string"
+            ? result.selection.alias
+          : undefined;
   const installReady = typeof result?.installReady === "boolean" ? result.installReady : undefined;
   const updateReady = typeof result?.updateReady === "boolean" ? result.updateReady : undefined;
+  const uninstallReady = typeof result?.uninstallReady === "boolean" ? result.uninstallReady : undefined;
   const matchQuality = typeof result?.matchQuality === "string" ? result.matchQuality : undefined;
   const compatibility = typeof result?.compatibility === "string" ? result.compatibility : undefined;
-  const detectedInstalledContribution =
-    result && isRecord(result.detectedInstalledContribution) ? result.detectedInstalledContribution : undefined;
   const detectedInstalledSummary = detectedInstalledContribution
     ? [
         typeof detectedInstalledContribution.alias === "string" ? `alias ${detectedInstalledContribution.alias}` : null,
@@ -114,6 +120,7 @@ function artifactSummary(artifact: ArtifactRef) {
   const recommendedNextAction = typeof result?.recommendedNextAction === "string" ? result.recommendedNextAction : undefined;
   const warnings = Array.isArray(result?.warnings) ? result.warnings.filter((value): value is string => typeof value === "string") : [];
   const conflicts = Array.isArray(result?.conflicts) ? result.conflicts.filter(isRecord) : [];
+  const blockedBy = Array.isArray(result?.blockedBy) ? result.blockedBy.filter(isRecord) : [];
   const predictedChanges = result && isRecord(result.predictedChanges) ? result.predictedChanges : undefined;
   const proposedImports =
     Array.isArray(result?.proposedImports)
@@ -130,6 +137,8 @@ function artifactSummary(artifact: ArtifactRef) {
       ? result.appliedRefs.filter(isRecord)
       : Array.isArray(result?.proposedRefs)
       ? result.proposedRefs.filter(isRecord)
+      : artifact.type === "contrib_uninstall_plan" && Array.isArray(predictedChanges?.affectedRefs)
+        ? predictedChanges.affectedRefs.filter(isRecord)
       : [
             ...(Array.isArray(predictedChanges?.refsToAdd) ? predictedChanges.refsToAdd.filter(isRecord) : []),
             ...(Array.isArray(predictedChanges?.refsToReuse) ? predictedChanges.refsToReuse.filter(isRecord) : []),
@@ -146,7 +155,11 @@ function artifactSummary(artifact: ArtifactRef) {
     ? result.applySummary.filter((value): value is string => typeof value === "string")
     : Array.isArray(result?.diffSummary)
       ? result.diffSummary.filter((value): value is string => typeof value === "string")
+      : Array.isArray(predictedChanges?.summaryLines)
+        ? predictedChanges.summaryLines.filter((value): value is string => typeof value === "string")
     : [];
+  const directUsages = Array.isArray(predictedChanges?.directUsages) ? predictedChanges.directUsages.filter(isRecord) : [];
+  const orphanRisks = Array.isArray(predictedChanges?.orphanRisks) ? predictedChanges.orphanRisks.filter(isRecord) : [];
   const proposedImportSummary =
     Array.isArray(result?.appliedImports)
       ? result.appliedImports.filter(isRecord)
@@ -167,9 +180,24 @@ function artifactSummary(artifact: ArtifactRef) {
           })
           .join("; ")
       : undefined;
-  const importSummaryLabel = Array.isArray(result?.appliedImports) ? "applied imports" : "proposed imports";
-  const refSummaryLabel = Array.isArray(result?.appliedRefs) ? "applied refs" : "proposed refs";
-  const summaryLabel = Array.isArray(result?.applySummary) ? "apply summary" : "diff summary";
+  const importSummaryLabel =
+    artifact.type === "contrib_uninstall_plan"
+      ? "imports to remove"
+      : Array.isArray(result?.appliedImports)
+        ? "applied imports"
+        : "proposed imports";
+  const refSummaryLabel =
+    artifact.type === "contrib_uninstall_plan"
+      ? "affected refs"
+      : Array.isArray(result?.appliedRefs)
+        ? "applied refs"
+        : "proposed refs";
+  const summaryLabel =
+    artifact.type === "contrib_uninstall_plan"
+      ? "uninstall summary"
+      : Array.isArray(result?.applySummary)
+        ? "apply summary"
+        : "diff summary";
   const proposedRefSummary =
     proposedRefs.length > 0
       ? proposedRefs
@@ -197,6 +225,7 @@ function artifactSummary(artifact: ArtifactRef) {
     !selectedAlias &&
     installReady === undefined &&
     updateReady === undefined &&
+    uninstallReady === undefined &&
     !matchQuality &&
     !compatibility &&
     !detectedInstalledSummary &&
@@ -212,10 +241,13 @@ function artifactSummary(artifact: ArtifactRef) {
     !staleReason &&
     warnings.length === 0 &&
     conflicts.length === 0 &&
+    blockedBy.length === 0 &&
     !proposedImportSummary &&
     !proposedRefSummary &&
     changedPaths.length === 0 &&
     diffSummary.length === 0 &&
+    directUsages.length === 0 &&
+    orphanRisks.length === 0 &&
     !packageFormat &&
     !packageFileName &&
     packageBytes === undefined
@@ -247,15 +279,19 @@ function artifactSummary(artifact: ArtifactRef) {
       {approvalRequired !== undefined ? <div>approval required: {approvalRequired ? "yes" : "no"}</div> : null}
       {applyReady !== undefined ? <div>apply ready: {applyReady ? "yes" : "no"}</div> : null}
       {applied !== undefined ? <div>applied: {applied ? "yes" : "no"}</div> : null}
+      {uninstallReady !== undefined ? <div>uninstall ready: {uninstallReady ? "yes" : "no"}</div> : null}
       {isStale !== undefined ? <div>stale: {isStale ? "yes" : "no"}</div> : null}
       {staleReason ? <div>stale reason: {staleReason}</div> : null}
       {changedPaths.length > 0 ? <div>changed paths: {changedPaths.join(", ")}</div> : null}
       {diffSummary.length > 0 ? <div>{summaryLabel}: {diffSummary.join("; ")}</div> : null}
+      {directUsages.length > 0 ? <div>direct usages: {directUsages.length}</div> : null}
+      {orphanRisks.length > 0 ? <div>orphan risks: {orphanRisks.length}</div> : null}
       {installReady !== undefined ? <div>install ready: {installReady ? "yes" : "no"}</div> : null}
       {updateReady !== undefined ? <div>update ready: {updateReady ? "yes" : "no"}</div> : null}
       {readiness ? <div>readiness: {readiness}</div> : null}
       {warnings.length > 0 ? <div>warnings: {warnings.length}</div> : null}
       {conflicts.length > 0 ? <div>conflicts: {conflicts.length}</div> : null}
+      {blockedBy.length > 0 ? <div>blocked by: {blockedBy.length}</div> : null}
       {recommendedNextAction ? <div>next action: {recommendedNextAction}</div> : null}
       {validationOk !== undefined ? <div>validation: {validationOk ? "passed" : "failed"}</div> : null}
       {testOk !== undefined ? <div>test proof: {testOk ? "passed" : "failed"}</div> : null}

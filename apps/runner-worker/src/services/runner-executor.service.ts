@@ -27,6 +27,9 @@ import {
   ContributionInstallPlanRequestSchema,
   ContributionInstallPlanResponseSchema,
   type ContributionInstallPlanResponse,
+  ContributionUninstallPlanRequestSchema,
+  ContributionUninstallPlanResponseSchema,
+  type ContributionUninstallPlanResponse,
   ContributionUpdatePlanRequestSchema,
   ContributionUpdatePlanResponseSchema,
   type ContributionUpdatePlanResponse,
@@ -197,6 +200,8 @@ function createCommand(spec: RunnerJobSpec): string[] {
       return createHelperCommand("contrib", "install-plan", "--app", spec.appPath);
     case "update_contrib_plan":
       return createHelperCommand("contrib", "update-plan", "--app", spec.appPath);
+    case "uninstall_contrib_plan":
+      return createHelperCommand("contrib", "uninstall-plan", "--app", spec.appPath);
     case "update_contrib_diff_plan":
       return createHelperCommand("contrib", "update-diff-plan", "--app", spec.appPath);
     case "install_contrib_diff_plan":
@@ -269,6 +274,7 @@ function isAnalysisStep(stepType: RunnerJobSpec["stepType"]) {
     stepType === "package_contrib" ||
     stepType === "install_contrib_plan" ||
     stepType === "update_contrib_plan" ||
+    stepType === "uninstall_contrib_plan" ||
     stepType === "update_contrib_diff_plan" ||
     stepType === "install_contrib_diff_plan" ||
     stepType === "install_contrib_apply" ||
@@ -371,7 +377,7 @@ type ContributionInstallPlanResultLike = {
     alias: string;
     ref: string;
     version?: string;
-    action: "add" | "reuse_existing" | "update_existing" | "conflict";
+    action: "add" | "reuse_existing" | "update_existing" | "remove" | "conflict";
     existingAlias?: string;
     existingRef?: string;
     note?: string;
@@ -386,13 +392,13 @@ type ContributionInstallPlanResultLike = {
       alias: string;
       ref: string;
       version?: string;
-      action: "add" | "reuse_existing" | "update_existing" | "conflict";
+      action: "add" | "reuse_existing" | "update_existing" | "remove" | "conflict";
     }>;
     importsToUpdate: Array<{
       alias: string;
       ref: string;
       version?: string;
-      action: "add" | "reuse_existing" | "update_existing" | "conflict";
+      action: "add" | "reuse_existing" | "update_existing" | "remove" | "conflict";
     }>;
     reusableRefs: Array<{
       surface: "activityRef" | "actionRef" | "triggerRef";
@@ -464,6 +470,76 @@ type ContributionUpdatePlanResultLike = {
   diagnostics: Diagnostic[];
   recommendedNextAction: string;
   limitations: string[];
+};
+
+type ContributionUninstallPlanResultLike = {
+  targetApp: ContributionInstallPlanResultLike["targetApp"];
+  selection: {
+    alias?: string;
+    ref?: string;
+    modulePath?: string;
+    packagePath?: string;
+    packageName?: string;
+    contributionKind?: "activity" | "action" | "trigger" | "model" | "function" | "unknown";
+    sourceArtifactId?: string;
+  };
+  detectedInstalledContribution?: {
+    alias?: string;
+    ref?: string;
+    version?: string;
+    contributionKind: "activity" | "action" | "trigger" | "model" | "function" | "unknown";
+    modulePath?: string;
+    packagePath?: string;
+    packageName?: string;
+    matchedBy: string[];
+    confidence: "high" | "medium" | "low";
+  };
+  matchQuality: "exact" | "likely" | "ambiguous" | "none";
+  contributionKind: "activity" | "action" | "trigger" | "model" | "function" | "unknown";
+  uninstallReady: boolean;
+  readiness: "ready" | "blocked" | "ambiguous";
+  appFingerprint?: string;
+  planFingerprint?: string;
+  evidence: Array<{
+    kind: "selector" | "inventory" | "import" | "usage" | "artifact";
+    summary: string;
+    path?: string;
+    confidence?: "high" | "medium" | "low";
+    details?: Record<string, unknown>;
+  }>;
+  predictedChanges: {
+    importsToRemove: ContributionInstallPlanResultLike["proposedImports"];
+    affectedRefs: ContributionInstallPlanResultLike["proposedRefs"];
+    directUsages: Array<{
+      surface: string;
+      path: string;
+      ref: string;
+      alias?: string;
+      summary: string;
+    }>;
+    orphanRisks: Array<{
+      surface: string;
+      path: string;
+      ref: string;
+      alias?: string;
+      reason: string;
+      severity: "info" | "warning" | "error";
+    }>;
+    changedPaths: string[];
+    summaryLines: string[];
+    noMutation: true;
+  };
+  blockedBy: Array<{
+    code: string;
+    message: string;
+    path?: string;
+    severity: "info" | "warning" | "error";
+  }>;
+  warnings: string[];
+  conflicts: ContributionInstallPlanResultLike["conflicts"];
+  diagnostics: Diagnostic[];
+  limitations: string[];
+  recommendedNextAction: string;
 };
 
 type ContributionUpdateDiffPlanResultLike = {
@@ -573,19 +649,19 @@ type ContributionInstallDiffPlanResultLike = {
       alias: string;
       ref: string;
       version?: string;
-      action: "add" | "reuse_existing" | "update_existing" | "conflict";
+      action: "add" | "reuse_existing" | "update_existing" | "remove" | "conflict";
     }>;
     importsAfter: Array<{
       alias: string;
       ref: string;
       version?: string;
-      action: "add" | "reuse_existing" | "update_existing" | "conflict";
+      action: "add" | "reuse_existing" | "update_existing" | "remove" | "conflict";
     }>;
     importsToAdd: Array<{
       alias: string;
       ref: string;
       version?: string;
-      action: "add" | "reuse_existing" | "update_existing" | "conflict";
+      action: "add" | "reuse_existing" | "update_existing" | "remove" | "conflict";
     }>;
     importsToUpdate: Array<{
       alias: string;
@@ -1057,6 +1133,49 @@ function createContributionUpdatePlanArtifacts(
         conflicts: result.conflicts,
         recommendedNextAction: result.recommendedNextAction,
         limitations: result.limitations,
+        diagnostics
+      }
+    )
+  ];
+}
+
+function createContributionUninstallPlanArtifacts(
+  spec: RunnerJobSpec,
+  result: ContributionUninstallPlanResultLike,
+  diagnostics: Diagnostic[]
+): ArtifactRef[] {
+  const artifactLabel =
+    result.detectedInstalledContribution?.alias ??
+    result.detectedInstalledContribution?.packageName ??
+    result.detectedInstalledContribution?.ref ??
+    result.selection.alias ??
+    result.selection.packageName ??
+    result.selection.ref ??
+    "selected";
+
+  return [
+    createAnalysisArtifact(
+      spec,
+      "contrib_uninstall_plan",
+      `${result.contributionKind}-uninstall-plan-${artifactLabel}`,
+      {
+        result,
+        targetApp: result.targetApp,
+        selection: result.selection,
+        detectedInstalledContribution: result.detectedInstalledContribution,
+        matchQuality: result.matchQuality,
+        contributionKind: result.contributionKind,
+        uninstallReady: result.uninstallReady,
+        readiness: result.readiness,
+        appFingerprint: result.appFingerprint,
+        planFingerprint: result.planFingerprint,
+        evidence: result.evidence,
+        predictedChanges: result.predictedChanges,
+        blockedBy: result.blockedBy,
+        warnings: result.warnings,
+        conflicts: result.conflicts,
+        limitations: result.limitations,
+        recommendedNextAction: result.recommendedNextAction,
         diagnostics
       }
     )
@@ -1697,6 +1816,7 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     && spec.stepType !== "package_contrib"
     && spec.stepType !== "install_contrib_plan"
     && spec.stepType !== "update_contrib_plan"
+    && spec.stepType !== "uninstall_contrib_plan"
     && spec.stepType !== "update_contrib_diff_plan"
     && spec.stepType !== "install_contrib_diff_plan"
     && spec.stepType !== "install_contrib_apply"
@@ -1970,6 +2090,21 @@ async function prepareCommand(spec: RunnerJobSpec): Promise<PreparedCommand> {
     }, null, 2), "utf8");
     return {
       command: createHelperCommand("contrib", "update-plan", "--app", spec.appPath, "--request", requestPath),
+      cleanup: async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  if (spec.stepType === "uninstall_contrib_plan") {
+    const request = ContributionUninstallPlanRequestSchema.parse(spec.analysisPayload ?? {});
+    const requestPath = path.join(tempDir, "contrib-uninstall-plan-request.json");
+    await fs.writeFile(requestPath, JSON.stringify({
+      selection: request.selection,
+      targetApp: request.targetApp
+    }, null, 2), "utf8");
+    return {
+      command: createHelperCommand("contrib", "uninstall-plan", "--app", spec.appPath, "--request", requestPath),
       cleanup: async () => {
         await fs.rm(tempDir, { recursive: true, force: true });
       }
@@ -2471,6 +2606,11 @@ function createAnalysisArtifacts(spec: RunnerJobSpec, stdout: string, diagnostic
       return createContributionInstallPlanArtifacts(spec, response.result as ContributionInstallPlanResultLike, diagnostics);
     }
 
+    if (spec.stepType === "uninstall_contrib_plan") {
+      const response = ContributionUninstallPlanResponseSchema.parse(JSON.parse(stdout) as ContributionUninstallPlanResponse);
+      return createContributionUninstallPlanArtifacts(spec, response.result as ContributionUninstallPlanResultLike, diagnostics);
+    }
+
     if (spec.stepType === "update_contrib_plan") {
       const response = ContributionUpdatePlanResponseSchema.parse(JSON.parse(stdout) as ContributionUpdatePlanResponse);
       return createContributionUpdatePlanArtifacts(spec, response.result as ContributionUpdatePlanResultLike, diagnostics);
@@ -2634,6 +2774,17 @@ function parseContributionUpdatePlanArtifact(artifact?: ArtifactRef) {
   }
 
   const parsed = ContributionUpdatePlanResponseSchema.safeParse({
+    result: artifact.metadata?.["result"]
+  });
+  return parsed.success ? parsed.data : undefined;
+}
+
+function parseContributionUninstallPlanArtifact(artifact?: ArtifactRef) {
+  if (!artifact) {
+    return undefined;
+  }
+
+  const parsed = ContributionUninstallPlanResponseSchema.safeParse({
     result: artifact.metadata?.["result"]
   });
   return parsed.success ? parsed.data : undefined;
@@ -3015,6 +3166,31 @@ export class RunnerExecutorService implements RunnerExecutor {
           message:
             updateResult?.recommendedNextAction ??
             "Contribution update planning was blocked because the installed contribution could not be matched safely.",
+          severity: "error"
+        });
+      }
+    }
+
+    if (spec.stepType === "uninstall_contrib_plan" && executed.ok) {
+      const parsedUninstall = parseContributionUninstallPlanArtifact(
+        artifactByType(executed.artifacts, "contrib_uninstall_plan")
+      );
+      const uninstallResult = parsedUninstall?.result;
+      const shouldFail =
+        uninstallResult?.uninstallReady === false ||
+        uninstallResult?.matchQuality === "ambiguous" ||
+        uninstallResult?.matchQuality === "none" ||
+        uninstallResult?.readiness !== "ready" ||
+        uninstallResult?.detectedInstalledContribution == null;
+      if (shouldFail) {
+        ok = false;
+        exitCode = 1;
+        summary = "Execution failed for uninstall_contrib_plan";
+        diagnostics.push({
+          code: "runner.uninstall_plan_blocked",
+          message:
+            uninstallResult?.recommendedNextAction ??
+            "Contribution uninstall planning was blocked because the installed contribution could not be matched safely or is still in active use.",
           severity: "error"
         });
       }

@@ -496,6 +496,24 @@ export class RunnerTools {
     });
   }
 
+  async uninstallContribPlan(spec: unknown): Promise<ToolResponse> {
+    const parsed = RunnerJobSpecSchema.parse(spec);
+    const result = await this.dispatcher.dispatch({
+      ...parsed,
+      stepType: "uninstall_contrib_plan",
+      jobKind: "contrib_uninstall_plan",
+      analysisKind: "uninstall_contrib_plan"
+    });
+    return toolResponse({
+      ok: result.ok,
+      summary: `Queued contribution uninstall planning job ${result.jobId}`,
+      data: { spec: parsed, result },
+      diagnostics: result.diagnostics,
+      artifacts: result.artifacts,
+      retryable: false
+    });
+  }
+
   async installContribDiffPlan(spec: unknown): Promise<ToolResponse> {
     const parsed = RunnerJobSpecSchema.parse(spec);
     const result = await this.dispatcher.dispatch({

@@ -429,6 +429,36 @@ describe("TaskPlanner shared contribution lifecycle modes", () => {
     ]);
   });
 
+  it("treats explicit contribution uninstall planning mode as analysis-only authoring work", () => {
+    const planner = new TaskPlanner();
+    const plan = planner.plan({
+      type: "review",
+      projectId: "demo",
+      appId: "hello-rest",
+      requestedBy: "operator",
+      summary: "Plan how to uninstall an installed contribution from the target app",
+      inputs: {
+        mode: "uninstall_contrib_plan",
+        selection: {
+          alias: "webhooktrigger"
+        }
+      },
+      constraints: {
+        allowDependencyChanges: false,
+        allowCustomCode: false,
+        targetEnv: "dev",
+        requireApproval: true
+      }
+    });
+
+    expect(plan.requiredApprovals).toEqual([]);
+    expect(plan.steps.map((step) => step.tool)).toEqual([
+      "flogo.parseApp",
+      "flogo.validateApp",
+      "runner.uninstallContribPlan"
+    ]);
+  });
+
   it("treats explicit contribution update diff planning mode as analysis-only authoring work", () => {
     const planner = new TaskPlanner();
     const plan = planner.plan({

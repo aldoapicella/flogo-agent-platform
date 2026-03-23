@@ -696,6 +696,152 @@ func TestValidateContributionInstallPlanRequestRejectsUnsupportedFormats(t *test
 	}
 }
 
+func TestValidateContributionUninstallPlanRequestRequiresSelector(t *testing.T) {
+	err := validateContributionUninstallPlanRequest(contributionUninstallPlanRequest{})
+	if err == nil {
+		t.Fatal("expected missing uninstall selector to fail")
+	}
+	if !strings.Contains(err.Error(), "selection must include at least one") {
+		t.Fatalf("expected missing selector error, got %v", err)
+	}
+}
+
+func TestPlanContributionUninstallMarksUnusedImportReady(t *testing.T) {
+	app := flogoApp{
+		Name:     "uninstall-ready-app",
+		Type:     "flogo:app",
+		AppModel: "1.1.0",
+		Imports: []flogoImport{
+			{Alias: "unusedtrigger", Ref: "example.com/acme/unusedtrigger", Version: "0.1.0"},
+		},
+		Triggers:  []flogoTrigger{},
+		Resources: []flogoFlow{},
+		Raw: map[string]any{
+			"name": "uninstall-ready-app",
+			"type": "flogo:app",
+			"imports": []any{
+				map[string]any{"alias": "unusedtrigger", "ref": "example.com/acme/unusedtrigger", "version": "0.1.0"},
+			},
+		},
+	}
+
+	plan := planContributionUninstall(app, "examples/hello-rest/flogo.json", contributionUninstallPlanRequest{
+		Selection: contributionUninstallSelection{
+			Alias: "unusedtrigger",
+			Ref:   "example.com/acme/unusedtrigger",
+		},
+		TargetApp: contributionInstallTarget{
+			ProjectID: "demo",
+			AppID:     "hello-rest",
+			AppPath:   "examples/hello-rest/flogo.json",
+		},
+	})
+
+	if !plan.Result.UninstallReady {
+		t.Fatalf("expected exact unused import to be uninstall-ready, got %+v", plan.Result)
+	}
+	if plan.Result.Readiness != "ready" {
+		t.Fatalf("expected ready uninstall readiness, got %+v", plan.Result)
+	}
+	if plan.Result.MatchQuality != "exact" {
+		t.Fatalf("expected exact match quality, got %+v", plan.Result)
+	}
+	if len(plan.Result.PredictedChanges.ImportsToRemove) != 1 || plan.Result.PredictedChanges.ImportsToRemove[0].Action != "remove" {
+		t.Fatalf("expected one remove import entry, got %+v", plan.Result.PredictedChanges.ImportsToRemove)
+	}
+	if plan.Result.RecommendedNextAction != "preview_uninstall_diff" {
+		t.Fatalf("expected preview_uninstall_diff next action, got %+v", plan.Result)
+	}
+}
+
+func TestPlanContributionUninstallBlocksActiveUsage(t *testing.T) {
+	app := flogoApp{
+		Name:     "uninstall-blocked-app",
+		Type:     "flogo:app",
+		AppModel: "1.1.0",
+		Imports: []flogoImport{
+			{Alias: "webhooktrigger", Ref: "example.com/acme/webhook", Version: "0.1.0"},
+		},
+		Triggers: []flogoTrigger{
+			{
+				ID:  "webhook",
+				Ref: "#webhooktrigger",
+			},
+		},
+		Resources: []flogoFlow{},
+		Raw: map[string]any{
+			"name": "uninstall-blocked-app",
+			"type": "flogo:app",
+			"imports": []any{
+				map[string]any{"alias": "webhooktrigger", "ref": "example.com/acme/webhook", "version": "0.1.0"},
+			},
+			"triggers": []any{
+				map[string]any{"id": "webhook", "ref": "#webhooktrigger"},
+			},
+		},
+	}
+
+	plan := planContributionUninstall(app, "examples/hello-rest/flogo.json", contributionUninstallPlanRequest{
+		Selection: contributionUninstallSelection{
+			Alias: "webhooktrigger",
+		},
+	})
+
+	if plan.Result.UninstallReady {
+		t.Fatalf("expected active usage to block uninstall, got %+v", plan.Result)
+	}
+	if plan.Result.Readiness != "blocked" {
+		t.Fatalf("expected blocked uninstall readiness, got %+v", plan.Result)
+	}
+	if len(plan.Result.PredictedChanges.DirectUsages) != 1 {
+		t.Fatalf("expected one direct usage, got %+v", plan.Result.PredictedChanges.DirectUsages)
+	}
+	if len(plan.Result.PredictedChanges.OrphanRisks) != 1 {
+		t.Fatalf("expected one orphan risk, got %+v", plan.Result.PredictedChanges.OrphanRisks)
+	}
+	if plan.Result.RecommendedNextAction != "replacement_required" {
+		t.Fatalf("expected replacement_required next action, got %+v", plan.Result)
+	}
+}
+
+func TestPlanContributionUninstallMarksAmbiguousInstalledMatches(t *testing.T) {
+	app := flogoApp{
+		Name:     "uninstall-ambiguous-app",
+		Type:     "flogo:app",
+		AppModel: "1.1.0",
+		Imports: []flogoImport{
+			{Alias: "webhooktrigger", Ref: "example.com/acme/webhook", Version: "0.1.0"},
+			{Alias: "webhooktriggercopy", Ref: "example.com/acme/webhook", Version: "0.1.1"},
+		},
+		Triggers:  []flogoTrigger{},
+		Resources: []flogoFlow{},
+		Raw: map[string]any{
+			"name": "uninstall-ambiguous-app",
+			"type": "flogo:app",
+			"imports": []any{
+				map[string]any{"alias": "webhooktrigger", "ref": "example.com/acme/webhook", "version": "0.1.0"},
+				map[string]any{"alias": "webhooktriggercopy", "ref": "example.com/acme/webhook", "version": "0.1.1"},
+			},
+		},
+	}
+
+	plan := planContributionUninstall(app, "examples/hello-rest/flogo.json", contributionUninstallPlanRequest{
+		Selection: contributionUninstallSelection{
+			Ref: "example.com/acme/webhook",
+		},
+	})
+
+	if plan.Result.MatchQuality != "ambiguous" {
+		t.Fatalf("expected ambiguous uninstall match quality, got %+v", plan.Result)
+	}
+	if plan.Result.Readiness != "ambiguous" {
+		t.Fatalf("expected ambiguous uninstall readiness, got %+v", plan.Result)
+	}
+	if plan.Result.RecommendedNextAction != "manual_review" {
+		t.Fatalf("expected manual_review next action, got %+v", plan.Result)
+	}
+}
+
 func TestPlanContributionUpdateBuildsConservativeExactMatchPlan(t *testing.T) {
 	app := flogoApp{
 		Name:     "update-app",

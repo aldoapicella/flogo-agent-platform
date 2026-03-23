@@ -134,6 +134,7 @@ class FakeAppAnalysisStorageService {
       | "contrib_validation_report"
       | "contrib_package"
       | "contrib_install_plan"
+      | "contrib_uninstall_plan"
       | "contrib_install_diff_plan"
       | "contrib_install_apply_result"
       | "contrib_update_apply"
@@ -1335,6 +1336,113 @@ describe("OrchestrationService", () => {
     });
   });
 
+  it("fills the target app path for uninstall planning from the submitted appId", async () => {
+    const storage = new FakeAppAnalysisStorageService();
+    const service = new OrchestrationService(
+      new ToolsetService(),
+      new OrchestratorClientService(),
+      new TaskEventsService(),
+      new FakeTaskStoreService() as any,
+      {
+        prepareRunComparisonTaskInputs: async (_projectId: string, _appId: string, inputs: Record<string, unknown>) => inputs,
+        resolveTaskAppPath: async () => "examples/hello-rest/flogo.json"
+      } as any,
+      storage as AppAnalysisStorageService
+    );
+
+    const task = await service.submitTask({
+      type: "review",
+      projectId: "demo",
+      appId: "hello-rest",
+      summary: "Plan how to uninstall an installed trigger contribution",
+      inputs: {
+        mode: "uninstall_contrib_plan",
+        selection: {
+          alias: "webhooktrigger"
+        }
+      }
+    });
+
+    expect(task.request.appPath).toBe("examples/hello-rest/flogo.json");
+    expect(task.request.inputs["targetApp"]).toMatchObject({
+      projectId: "demo",
+      appId: "hello-rest",
+      appPath: "examples/hello-rest/flogo.json"
+    });
+  });
+
+  it("persists contribution uninstall-plan artifacts through blob-backed task artifact storage", async () => {
+    const storage = new FakeAppAnalysisStorageService();
+    const service = new OrchestrationService(
+      new ToolsetService(),
+      new OrchestratorClientService(),
+      new TaskEventsService(),
+      new FakeTaskStoreService() as any,
+      {
+        prepareRunComparisonTaskInputs: async (_projectId: string, _appId: string, inputs: Record<string, unknown>) => inputs,
+        resolveTaskAppPath: async () => "examples/hello-rest/flogo.json"
+      } as any,
+      storage as AppAnalysisStorageService
+    );
+
+    const task = await service.submitTask({
+      type: "review",
+      projectId: "demo",
+      appId: "hello-rest",
+      summary: "Plan how to uninstall a contribution from hello-rest"
+    });
+
+    await service.syncTaskState(task.id, {
+      artifact: {
+        id: "artifact-uninstall-plan-1",
+        type: "contrib_uninstall_plan",
+        name: "trigger-uninstall-plan-webhooktrigger",
+        uri: "memory://task/trigger-uninstall-plan-webhooktrigger.json",
+        metadata: {
+          result: {
+            targetApp: { appId: "hello-rest", appPath: "examples/hello-rest/flogo.json" },
+            selection: { alias: "webhooktrigger" },
+            detectedInstalledContribution: {
+              alias: "webhooktrigger",
+              ref: "example.com/acme/webhook",
+              contributionKind: "trigger",
+              matchedBy: ["alias"],
+              confidence: "medium"
+            },
+            matchQuality: "likely",
+            contributionKind: "trigger",
+            uninstallReady: false,
+            readiness: "blocked",
+            evidence: [],
+            predictedChanges: {
+              importsToRemove: [],
+              affectedRefs: [],
+              directUsages: [],
+              orphanRisks: [],
+              changedPaths: ["imports.webhooktrigger"],
+              summaryLines: ["Remove import alias \"webhooktrigger\" after reviewing live refs."],
+              noMutation: true
+            },
+            blockedBy: [],
+            warnings: [],
+            conflicts: [],
+            diagnostics: [],
+            recommendedNextAction: "manual_review",
+            limitations: ["Planning only."]
+          }
+        }
+      }
+    });
+
+    expect(storage.uploads).toHaveLength(1);
+    expect(storage.uploads[0]).toMatchObject({
+      projectId: "demo",
+      taskId: task.id,
+      artifactId: "artifact-uninstall-plan-1",
+      kind: "contrib_uninstall_plan"
+    });
+  });
+
   it("resolves update-plan artifacts for exact update diff preview and fills the target app path from appId", async () => {
     const storage = new FakeAppAnalysisStorageService();
     const taskStore = new FakeTaskStoreService();
@@ -1570,6 +1678,6 @@ describe("OrchestrationService", () => {
           }
         }
       })
-    ).rejects.toThrow(/contribution scaffold, validate, package, install-plan, update-plan, update-diff-plan, install-diff-plan, install-apply, or update-apply tasks/i);
+    ).rejects.toThrow(/contribution scaffold, validate, package, install-plan, update-plan, uninstall-plan, update-diff-plan, install-diff-plan, install-apply, or update-apply tasks/i);
   });
 });

@@ -81,6 +81,7 @@ export class AppAnalysisStorageService {
       | "contrib_package"
       | "contrib_install_plan"
       | "contrib_update_plan"
+      | "contrib_uninstall_plan"
       | "contrib_update_diff_plan"
       | "contrib_install_diff_plan"
       | "contrib_install_apply_result"

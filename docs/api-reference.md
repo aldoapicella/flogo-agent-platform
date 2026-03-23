@@ -72,6 +72,7 @@ Important analysis-only modes:
 - `inputs.mode = "install_contrib_diff_plan"`
 - `inputs.mode = "update_contrib_plan"`
 - `inputs.mode = "update_contrib_diff_plan"`
+- `inputs.mode = "uninstall_contrib_plan"`
 - `inputs.mode = "mapping_preview"`
 - `inputs.mode = "mapping_test"`
 - `inputs.mode = "property_plan"`
@@ -178,7 +179,7 @@ Important behavior:
 - the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path, and those artifact payloads are uploaded through the control-plane Blob/Azurite storage seam while remaining visible in task detail metadata,
 - if the shared Blob/Azurite storage seam is not configured, the scaffold task now fails instead of silently degrading those authoring artifacts to `memory://` URIs,
 - supported field types are currently limited to `string`, `integer`, `number`, `boolean`, `object`, `array`, and `any`,
-- this slice covers Activity authoring only; shared validation/package/install/update planning now exist separately, and exact update diff/apply workflows remain later work.
+- this slice covers Activity authoring only; shared validation/package/install/update/uninstall planning now exist separately, and exact update/install apply plus uninstall diff/apply remain explicit later slices.
 
 ### Action scaffold task mode
 
@@ -205,7 +206,7 @@ Important behavior:
 - the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path, and those artifact payloads are uploaded through the control-plane Blob/Azurite storage seam while remaining visible in task detail metadata,
 - if the shared Blob/Azurite storage seam is not configured, the scaffold task now fails instead of silently degrading those authoring artifacts to `memory://` URIs,
 - supported field types are currently limited to `string`, `integer`, `number`, `boolean`, `object`, `array`, and `any`,
-- this slice is narrower than the Activity and Trigger authoring slices because it is based on the repo's current core action model rather than a fuller public authoring workflow; shared validation/package/install/update planning now exist separately, and exact update diff/apply workflows remain later work.
+- this slice is narrower than the Activity and Trigger authoring slices because it is based on the repo's current core action model rather than a fuller public authoring workflow; shared validation/package/install/update/uninstall planning now exist separately, and uninstall diff/apply remain later explicit slices.
 
 ### Trigger scaffold task mode
 
@@ -233,7 +234,7 @@ Important behavior:
 - the task persists a `contrib_bundle` artifact plus `build_log` and `test_report` artifacts for the isolated proof path, and those artifact payloads are uploaded through the control-plane Blob/Azurite storage seam while remaining visible in task detail metadata,
 - if the shared Blob/Azurite storage seam is not configured, the scaffold task now fails instead of silently degrading those authoring artifacts to `memory://` URIs,
 - supported field types are currently limited to `string`, `integer`, `number`, `boolean`, `object`, `array`, and `any`,
-- this slice covers Trigger authoring only; shared validation/package/install/update planning now exist separately, and exact update diff/apply workflows remain later work.
+- this slice covers Trigger authoring only; shared validation/package/install/update/uninstall planning now exist separately, and uninstall diff/apply remain later explicit slices.
 
 ### Contribution validate task mode
 
@@ -421,7 +422,33 @@ Important behavior:
 - the task persists a `contrib_update_apply` artifact plus a resulting `flogo_json` artifact through the same Blob/Azurite storage seam used for the rest of the contribution lifecycle,
 - the helper revalidates target-app identity, canonical before JSON, and app fingerprints from the saved update diff preview before writing,
 - if the app drifted, the reviewed preview is stale, or the diff preview is insufficient, the apply step fails honestly without mutating the target app,
-- uninstall, broader lifecycle management, and marketplace/publish behavior remain explicitly deferred.
+- conservative uninstall planning now exists separately, while uninstall diff/apply, broader lifecycle management, and marketplace/publish behavior remain explicitly deferred.
+
+### Contribution uninstall-plan task mode
+
+Uses the existing task endpoint with `inputs.mode = "uninstall_contrib_plan"` to inspect one target app, match one installed contribution conservatively, and produce a review-oriented uninstall plan without mutating `flogo.json`.
+
+Important input fields:
+
+- `selection.ref?`
+- `selection.alias?`
+- `selection.module?`
+- `selection.package?`
+- `selection.version?`
+- `selection.kind?`
+- `targetApp.projectId`
+- `targetApp.appId`
+- `targetApp.appPath?`
+
+Important behavior:
+
+- uninstall planning is analysis-only and does not mutate an app in this slice,
+- the planner routes the task to a single runner `uninstall_contrib_plan` step,
+- the task persists a `contrib_uninstall_plan` artifact through the same Blob/Azurite storage seam used for the rest of the contribution lifecycle,
+- the helper inspects current imports, alias/ref usage, and direct trigger/handler/task references so import presence alone is never treated as sufficient proof that uninstall is safe,
+- the result classifies installed-match quality as `exact`, `likely`, `ambiguous`, or `none` and uninstall readiness as `ready`, `blocked`, or `ambiguous`,
+- direct usages, orphan risks, blocked reasons, warnings, conflicts, limitations, and recommended next action stay explicit so the task does not hide orphaned-ref risk behind generic uninstall language,
+- malformed selection input, weak evidence, ambiguous installed matches, or missing durable storage fail honestly or lower readiness rather than pretending the uninstall is safe.
 
 ### `GET /v1/tasks`
 
@@ -1294,7 +1321,7 @@ Workflow behavior:
 
 - mutating workflows use build/run/smoke-oriented runner steps,
 - mutating contribution-install/update workflows now also include the approval-gated `install_contrib_apply` and `update_contrib_apply` runner steps,
-- analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, `preview_mapping`, `infer_flow_contracts`, `extract_subflow`, `inline_subflow`, `add_iterator`, `add_retry_policy`, `add_dowhile`, `add_error_path`, `diagnose_app`, `scaffold_activity`, `scaffold_action`, `scaffold_trigger`, `validate_contrib`, `package_contrib`, `install_contrib_plan`, `install_contrib_diff_plan`, `update_contrib_plan`, or `update_contrib_diff_plan`.
+- analysis-only workflows use `inventory_contribs`, `catalog_contribs`, `inspect_contrib_evidence`, `validate_governance`, `compare_composition`, `preview_mapping`, `infer_flow_contracts`, `extract_subflow`, `inline_subflow`, `add_iterator`, `add_retry_policy`, `add_dowhile`, `add_error_path`, `diagnose_app`, `scaffold_activity`, `scaffold_action`, `scaffold_trigger`, `validate_contrib`, `package_contrib`, `install_contrib_plan`, `install_contrib_diff_plan`, `update_contrib_plan`, `update_contrib_diff_plan`, or `uninstall_contrib_plan`.
 - analysis-only workflows also support `test_mapping` and `plan_properties`.
 
 ## Runner-worker API

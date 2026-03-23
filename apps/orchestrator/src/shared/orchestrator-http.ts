@@ -134,6 +134,9 @@ export function resolveWorkflowRunnerSteps(start: OrchestratorStartRequest): Run
   if (mode === "update_contrib_plan") {
     return ["update_contrib_plan"];
   }
+  if (mode === "uninstall_contrib_plan") {
+    return ["uninstall_contrib_plan"];
+  }
   if (mode === "update_contrib_diff_plan") {
     return ["update_contrib_diff_plan"];
   }
@@ -258,6 +261,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
       break;
     case "update_contrib_plan":
       jobKind = "contrib_update_plan";
+      break;
+    case "uninstall_contrib_plan":
+      jobKind = "contrib_uninstall_plan";
       break;
     case "update_contrib_diff_plan":
       jobKind = "contrib_update_diff_plan";
@@ -847,6 +853,19 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
         }
       };
       break;
+    case "uninstall_contrib_plan":
+      analysisPayload = {
+        selection:
+          start.request.inputs["selection"] && typeof start.request.inputs["selection"] === "object" && !Array.isArray(start.request.inputs["selection"])
+            ? (start.request.inputs["selection"] as Record<string, unknown>)
+            : undefined,
+        targetApp: {
+          projectId: start.request.projectId,
+          appId: start.request.appId,
+          appPath: start.request.appPath
+        }
+      };
+      break;
     case "update_contrib_diff_plan":
       analysisPayload = {
         updatePlanArtifactId:
@@ -995,6 +1014,9 @@ export function buildRunnerJobSpec(start: OrchestratorStartRequest, stepType: Ru
       break;
     case "update_contrib_plan":
       analysisKind = "update_contrib_plan";
+      break;
+    case "uninstall_contrib_plan":
+      analysisKind = "uninstall_contrib_plan";
       break;
     case "update_contrib_diff_plan":
       analysisKind = "update_contrib_diff_plan";

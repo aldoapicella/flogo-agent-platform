@@ -70,6 +70,7 @@ function getAnalysisMode(
   | "package_contrib"
   | "install_contrib_plan"
   | "update_contrib_plan"
+  | "uninstall_contrib_plan"
   | "update_contrib_diff_plan"
   | "install_contrib_diff_plan"
   | "mapping_preview"
@@ -104,6 +105,7 @@ function getAnalysisMode(
     mode === "package_contrib" ||
     mode === "install_contrib_plan" ||
     mode === "update_contrib_plan" ||
+    mode === "uninstall_contrib_plan" ||
     mode === "update_contrib_diff_plan" ||
     mode === "install_contrib_diff_plan" ||
     mode === "mapping_preview" ||
@@ -215,6 +217,8 @@ export class TaskPlanner {
       steps.push({ id: "install-contrib-plan", label: "Plan a reviewable contribution install into the target Flogo app without mutating flogo.json", tool: "runner.installContribPlan" });
     } else if (analysisMode === "update_contrib_plan") {
       steps.push({ id: "update-contrib-plan", label: "Plan a conservative contribution update against an installed target-app contribution without mutating flogo.json", tool: "runner.updateContribPlan" });
+    } else if (analysisMode === "uninstall_contrib_plan") {
+      steps.push({ id: "uninstall-contrib-plan", label: "Plan a conservative contribution uninstall against one installed target-app contribution without mutating flogo.json", tool: "runner.uninstallContribPlan" });
     } else if (analysisMode === "update_contrib_diff_plan") {
       steps.push({ id: "update-contrib-diff-plan", label: "Preview the exact canonical flogo.json mutation for a conservative contribution update without mutating the app", tool: "runner.updateContribDiffPlan" });
     } else if (analysisMode === "install_contrib_diff_plan") {

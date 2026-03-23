@@ -1479,6 +1479,208 @@ describe("RunnerExecutorService", () => {
     expect(result.artifacts.some((artifact) => artifact.type === "contrib_update_plan")).toBe(true);
   });
 
+  it("executes helper-backed contribution uninstall planning and publishes a durable uninstall-plan artifact", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          targetApp: {
+            projectId: "demo",
+            appId: "hello-rest",
+            appPath: "examples/hello-rest/flogo.json"
+          },
+          selection: {
+            alias: "unusedtrigger"
+          },
+          detectedInstalledContribution: {
+            alias: "unusedtrigger",
+            ref: "example.com/acme/unusedtrigger",
+            contributionKind: "trigger",
+            matchedBy: ["alias", "ref"],
+            confidence: "high"
+          },
+          matchQuality: "exact",
+          contributionKind: "trigger",
+          uninstallReady: true,
+          readiness: "ready",
+          appFingerprint: "app-sha",
+          planFingerprint: "plan-sha",
+          evidence: [
+            {
+              kind: "import",
+              summary: "Import alias \"unusedtrigger\" currently points to the selected trigger.",
+              confidence: "high"
+            }
+          ],
+          predictedChanges: {
+            importsToRemove: [
+              {
+                alias: "unusedtrigger",
+                ref: "example.com/acme/unusedtrigger",
+                action: "remove"
+              }
+            ],
+            affectedRefs: [],
+            directUsages: [],
+            orphanRisks: [],
+            changedPaths: ["imports.unusedtrigger"],
+            summaryLines: ["Remove import alias \"unusedtrigger\"."],
+            noMutation: true
+          },
+          blockedBy: [],
+          warnings: [],
+          conflicts: [],
+          diagnostics: [],
+          recommendedNextAction: "preview_uninstall_diff",
+          limitations: ["Planning only."]
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-uninstall-contrib-plan",
+      jobKind: "contrib_uninstall_plan",
+      stepType: "uninstall_contrib_plan",
+      analysisKind: "uninstall_contrib_plan",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://uninstall-contrib-plan",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        selection: {
+          alias: "unusedtrigger"
+        },
+        targetApp: {
+          projectId: "demo",
+          appId: "hello-rest",
+          appPath: "examples/hello-rest/flogo.json"
+        }
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    const uninstallArtifact = result.artifacts.find((artifact) => artifact.type === "contrib_uninstall_plan");
+    expect(result.ok).toBe(true);
+    expect(uninstallArtifact).toBeDefined();
+    expect((uninstallArtifact?.metadata as { result?: { uninstallReady?: boolean; matchQuality?: string; readiness?: string } } | undefined)?.result?.uninstallReady).toBe(true);
+    expect((uninstallArtifact?.metadata as { result?: { matchQuality?: string } } | undefined)?.result?.matchQuality).toBe("exact");
+    expect((uninstallArtifact?.metadata as { result?: { readiness?: string } } | undefined)?.result?.readiness).toBe("ready");
+  });
+
+  it("marks uninstall-plan jobs as failed when the installed contribution is still referenced", async () => {
+    process.env.FLOGO_HELPER_BIN = await createHelperScript(
+      JSON.stringify({
+        result: {
+          targetApp: {
+            projectId: "demo",
+            appId: "hello-rest",
+            appPath: "examples/hello-rest/flogo.json"
+          },
+          selection: {
+            alias: "webhooktrigger"
+          },
+          detectedInstalledContribution: {
+            alias: "webhooktrigger",
+            ref: "example.com/acme/webhook",
+            contributionKind: "trigger",
+            matchedBy: ["alias"],
+            confidence: "medium"
+          },
+          matchQuality: "likely",
+          contributionKind: "trigger",
+          uninstallReady: false,
+          readiness: "blocked",
+          evidence: [],
+          predictedChanges: {
+            importsToRemove: [
+              {
+                alias: "webhooktrigger",
+                ref: "example.com/acme/webhook",
+                action: "remove"
+              }
+            ],
+            affectedRefs: [
+              {
+                surface: "triggerRef",
+                value: "#webhooktrigger"
+              }
+            ],
+            directUsages: [
+              {
+                surface: "triggerRef",
+                path: "triggers.webhook.ref",
+                ref: "#webhooktrigger",
+                alias: "webhooktrigger",
+                summary: "Trigger \"webhook\" still uses the selected contribution."
+              }
+            ],
+            orphanRisks: [
+              {
+                surface: "triggerRef",
+                path: "triggers.webhook.ref",
+                ref: "#webhooktrigger",
+                alias: "webhooktrigger",
+                reason: "Removing import alias \"webhooktrigger\" would orphan the trigger ref.",
+                severity: "error"
+              }
+            ],
+            changedPaths: ["imports.webhooktrigger", "triggers.webhook.ref"],
+            summaryLines: ["Trigger \"webhook\" still uses the selected contribution."],
+            noMutation: true
+          },
+          blockedBy: [
+            {
+              code: "flogo.contrib.uninstall_plan.active_usage",
+              message: "Trigger \"webhook\" still uses the selected contribution.",
+              path: "triggers.webhook.ref",
+              severity: "error"
+            }
+          ],
+          warnings: ["Manual review is required before uninstall diff preview."],
+          conflicts: [],
+          diagnostics: [],
+          recommendedNextAction: "replacement_required",
+          limitations: ["Planning only."]
+        }
+      })
+    );
+
+    const service = new RunnerExecutorService();
+    const result = await service.execute({
+      taskId: "task-uninstall-contrib-plan-blocked",
+      jobKind: "contrib_uninstall_plan",
+      stepType: "uninstall_contrib_plan",
+      analysisKind: "uninstall_contrib_plan",
+      snapshotUri: ".",
+      appPath: "examples/hello-rest/flogo.json",
+      env: {},
+      envSecretRefs: {},
+      timeoutSeconds: 60,
+      artifactOutputUri: "memory://uninstall-contrib-plan-blocked",
+      jobTemplateName: "flogo-runner",
+      analysisPayload: {
+        selection: {
+          alias: "webhooktrigger"
+        },
+        targetApp: {
+          projectId: "demo",
+          appId: "hello-rest",
+          appPath: "examples/hello-rest/flogo.json"
+        }
+      },
+      command: [],
+      containerArgs: []
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("failed");
+    expect(result.artifacts.some((artifact) => artifact.type === "contrib_uninstall_plan")).toBe(true);
+  });
+
   it("executes helper-backed contribution update diff preview and publishes a conservative exact update-diff artifact", async () => {
     process.env.FLOGO_HELPER_BIN = await createHelperScript(
       JSON.stringify({

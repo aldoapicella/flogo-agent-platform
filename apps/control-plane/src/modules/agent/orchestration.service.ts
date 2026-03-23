@@ -408,7 +408,7 @@ export class OrchestrationService {
       };
     }
 
-    if (mode === "install_contrib_plan" || mode === "update_contrib_plan" || mode === "update_contrib_diff_plan" || mode === "install_contrib_diff_plan" || mode === "install_contrib_apply" || mode === "update_contrib_apply") {
+    if (mode === "install_contrib_plan" || mode === "update_contrib_plan" || mode === "uninstall_contrib_plan" || mode === "update_contrib_diff_plan" || mode === "install_contrib_diff_plan" || mode === "install_contrib_apply" || mode === "update_contrib_apply") {
       const targetApp =
         inputs["targetApp"] && typeof inputs["targetApp"] === "object" && !Array.isArray(inputs["targetApp"])
           ? (inputs["targetApp"] as Record<string, unknown>)
@@ -517,7 +517,7 @@ export class OrchestrationService {
         }
       }
       if (!appPath) {
-        throw new Error("Contribution install/update planning, exact diff preview, and install/update apply require a target appPath or a resolvable appId.");
+        throw new Error("Contribution install/update/uninstall planning, exact diff preview, and install/update apply require a target appPath or a resolvable appId.");
       }
 
       inputs = {
@@ -558,7 +558,7 @@ export class OrchestrationService {
 
     if (!this.storage.isConfigured()) {
       throw new Error(
-        "Contribution artifact storage is not configured. Set APP_ANALYSIS_STORAGE_CONNECTION_STRING, AZURITE_CONNECTION_STRING, or DURABLE_STORAGE_CONNECTION_STRING before running contribution scaffold, validate, package, install-plan, update-plan, update-diff-plan, install-diff-plan, install-apply, or update-apply tasks."
+        "Contribution artifact storage is not configured. Set APP_ANALYSIS_STORAGE_CONNECTION_STRING, AZURITE_CONNECTION_STRING, or DURABLE_STORAGE_CONNECTION_STRING before running contribution scaffold, validate, package, install-plan, update-plan, uninstall-plan, update-diff-plan, install-diff-plan, install-apply, or update-apply tasks."
       );
     }
 
@@ -593,7 +593,7 @@ export class OrchestrationService {
   private shouldPersistTaskArtifact(
     artifact: ArtifactRef
   ): artifact is ArtifactRef & {
-    type: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "contrib_install_plan" | "contrib_update_plan" | "contrib_update_diff_plan" | "contrib_install_diff_plan" | "contrib_install_apply_result" | "contrib_update_apply" | "build_log" | "test_report" | "flogo_json";
+    type: "contrib_bundle" | "contrib_validation_report" | "contrib_package" | "contrib_install_plan" | "contrib_update_plan" | "contrib_uninstall_plan" | "contrib_update_diff_plan" | "contrib_install_diff_plan" | "contrib_install_apply_result" | "contrib_update_apply" | "build_log" | "test_report" | "flogo_json";
     metadata: Record<string, unknown>;
   } {
     return (
@@ -603,6 +603,7 @@ export class OrchestrationService {
         artifact.type === "contrib_package" ||
         artifact.type === "contrib_install_plan" ||
         artifact.type === "contrib_update_plan" ||
+        artifact.type === "contrib_uninstall_plan" ||
         artifact.type === "contrib_update_diff_plan" ||
         artifact.type === "contrib_install_diff_plan" ||
         artifact.type === "contrib_install_apply_result" ||
