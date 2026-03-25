@@ -89,6 +89,7 @@ type PendingApproval struct {
 type PendingFileWrite struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
+	Delete  bool   `json:"delete,omitempty"`
 }
 
 type SessionEvent struct {
@@ -115,9 +116,24 @@ type SessionSnapshot struct {
 	LastStepResults []TurnStepResult `json:"lastStepResults,omitempty"`
 	LastTurnKind    string           `json:"lastTurnKind,omitempty"`
 	PendingApproval *PendingApproval `json:"pendingApproval,omitempty"`
+	UndoStack       []UndoEntry      `json:"undoStack,omitempty"`
 	LastReport      *RunReport       `json:"lastReport,omitempty"`
 	CreatedAt       string           `json:"createdAt"`
 	UpdatedAt       string           `json:"updatedAt"`
+}
+
+type UndoEntry struct {
+	ID        string             `json:"id"`
+	Summary   string             `json:"summary"`
+	CreatedAt string             `json:"createdAt"`
+	Writes    []PendingFileWrite `json:"writes"`
+}
+
+type SessionStreamEvent struct {
+	Type      string           `json:"type"`
+	SessionID string           `json:"sessionId"`
+	Snapshot  *SessionSnapshot `json:"snapshot,omitempty"`
+	CreatedAt string           `json:"createdAt"`
 }
 
 type TurnStepType string

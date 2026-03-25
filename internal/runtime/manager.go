@@ -24,9 +24,10 @@ type Manager struct {
 	stateDir    string
 	sessionsDir string
 
-	mu       sync.Mutex
-	sessions map[string]*contracts.SessionSnapshot
-	repoLock map[string]*sync.Mutex
+	mu          sync.Mutex
+	sessions    map[string]*contracts.SessionSnapshot
+	repoLock    map[string]*sync.Mutex
+	subscribers map[string]map[chan contracts.SessionStreamEvent]struct{}
 }
 
 type Options struct {
@@ -58,7 +59,9 @@ func NewManager(ctx context.Context, repoRoot string, stateDir string, manifestP
 		sessionsDir: filepath.Join(stateDir, "sessions"),
 		sessions:    map[string]*contracts.SessionSnapshot{},
 		repoLock:    map[string]*sync.Mutex{},
+		subscribers: map[string]map[chan contracts.SessionStreamEvent]struct{}{},
 	}
+	manager.coordinator.SetOnUpdate(manager.publishSnapshot)
 	if err := os.MkdirAll(manager.sessionsDir, 0o755); err != nil {
 		_ = service.Close()
 		return nil, err
@@ -120,9 +123,7 @@ func (m *Manager) CreateSession(_ context.Context, req contracts.SessionRequest)
 	m.mu.Lock()
 	m.sessions[snapshot.ID] = snapshot
 	m.mu.Unlock()
-	if err := m.saveSession(snapshot); err != nil {
-		return nil, err
-	}
+	m.publishSnapshot(snapshot)
 	return cloneSnapshot(snapshot), nil
 }
 
@@ -148,6 +149,44 @@ func (m *Manager) GetSession(id string) (*contracts.SessionSnapshot, error) {
 		return nil, fmt.Errorf("session %s not found", id)
 	}
 	return cloneSnapshot(snapshot), nil
+}
+
+func (m *Manager) SubscribeSession(id string) (<-chan contracts.SessionStreamEvent, func(), error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	snapshot, ok := m.sessions[id]
+	if !ok {
+		return nil, nil, fmt.Errorf("session %s not found", id)
+	}
+
+	ch := make(chan contracts.SessionStreamEvent, 16)
+	if _, ok := m.subscribers[id]; !ok {
+		m.subscribers[id] = map[chan contracts.SessionStreamEvent]struct{}{}
+	}
+	m.subscribers[id][ch] = struct{}{}
+
+	ch <- contracts.SessionStreamEvent{
+		Type:      "snapshot",
+		SessionID: id,
+		Snapshot:  cloneSnapshot(snapshot),
+		CreatedAt: timestamp(),
+	}
+
+	cancel := func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if subscribers, ok := m.subscribers[id]; ok {
+			if _, exists := subscribers[ch]; exists {
+				delete(subscribers, ch)
+				close(ch)
+			}
+			if len(subscribers) == 0 {
+				delete(m.subscribers, id)
+			}
+		}
+	}
+	return ch, cancel, nil
 }
 
 func (m *Manager) SendMessage(ctx context.Context, id string, content string) (*contracts.SessionSnapshot, error) {
@@ -180,6 +219,16 @@ func (m *Manager) Reject(id string, reason string) (*contracts.SessionSnapshot, 
 	return snapshot, nil
 }
 
+func (m *Manager) Undo(id string) (*contracts.SessionSnapshot, error) {
+	snapshot, err := m.withSessionLock(id, func(snapshot *contracts.SessionSnapshot) error {
+		return m.coordinator.UndoLastPatch(snapshot)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return snapshot, nil
+}
+
 func (m *Manager) withSessionLock(id string, fn func(*contracts.SessionSnapshot) error) (*contracts.SessionSnapshot, error) {
 	m.mu.Lock()
 	snapshot, ok := m.sessions[id]
@@ -203,9 +252,7 @@ func (m *Manager) withSessionLock(id string, fn func(*contracts.SessionSnapshot)
 	}
 	current.UpdatedAt = timestamp()
 
-	if err := m.saveSession(current); err != nil {
-		return nil, err
-	}
+	m.publishSnapshot(current)
 	return cloneSnapshot(current), nil
 }
 
@@ -257,6 +304,36 @@ func (m *Manager) saveSession(snapshot *contracts.SessionSnapshot) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(dir, "session.json"), append(payload, '\n'), 0o644)
+}
+
+func (m *Manager) publishSnapshot(snapshot *contracts.SessionSnapshot) {
+	if snapshot == nil {
+		return
+	}
+	if err := m.saveSession(snapshot); err != nil {
+		return
+	}
+
+	event := contracts.SessionStreamEvent{
+		Type:      "snapshot",
+		SessionID: snapshot.ID,
+		Snapshot:  cloneSnapshot(snapshot),
+		CreatedAt: timestamp(),
+	}
+
+	m.mu.Lock()
+	subscribers := make([]chan contracts.SessionStreamEvent, 0, len(m.subscribers[snapshot.ID]))
+	for ch := range m.subscribers[snapshot.ID] {
+		subscribers = append(subscribers, ch)
+	}
+	m.mu.Unlock()
+
+	for _, ch := range subscribers {
+		select {
+		case ch <- event:
+		default:
+		}
+	}
 }
 
 func cloneSnapshot(snapshot *contracts.SessionSnapshot) *contracts.SessionSnapshot {

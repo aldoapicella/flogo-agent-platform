@@ -8,13 +8,13 @@ The top-level loop is:
 
 1. create or resume a persisted session
 2. receive a user message in CLI or TUI
-3. classify the turn as inspect, repair, build, test, approve, reject, diff, or status
+3. ask the model for a structured Flogo turn plan
 4. inspect `flogo.json` and Flogo resources
 5. validate and retrieve official citations
-6. produce a deterministic or model-backed repair proposal when needed
+6. produce a model-backed repair proposal, guarded by deterministic validation and safety checks
 7. in review mode, hold the patch for approval
 8. after approval or in apply mode, write the patch, build, and run available tests
-9. persist transcript, plan, events, diff, artifacts, and final report back into the session
+9. stream session snapshots back into the clients while persisting transcript, plan, events, diff, artifacts, and final report
 
 ## Main Packages
 
@@ -53,6 +53,7 @@ The daemon keeps a persisted snapshot per session with:
 - structured plan
 - timeline events
 - pending approval state
+- undo stack for agent-authored writes
 - last execution report
 
 Sessions are saved under `.flogo-agent/sessions/<session-id>/session.json`.
@@ -66,10 +67,12 @@ The daemon exposes a local HTTP interface:
 - `POST /sessions`
 - `GET /sessions/{id}`
 - `POST /sessions/{id}/messages`
+- `GET /sessions/{id}/events`
 - `POST /sessions/{id}/approve`
 - `POST /sessions/{id}/reject`
+- `POST /sessions/{id}/undo`
 
-Both `chat` and `tui` use that API instead of calling orchestration directly.
+Both `chat` and `tui` use that API instead of calling orchestration directly. The default `flogo-agent` boot path auto-starts or reuses the local daemon and then attaches the TUI to the active session.
 
 ### Repo locking
 
@@ -79,7 +82,7 @@ The runtime keeps one mutex per repo path so concurrent sessions do not write th
 
 The conversational loop is intentionally narrow and Flogo-native.
 
-Current supported intents:
+Current supported intents and actions:
 
 - inspect the app and explain issues
 - repair and verify
@@ -90,13 +93,13 @@ Current supported intents:
 - reject pending patch
 - show current status
 
-The coordinator is stateful at the session level but still delegates actual validation and build/test work to the existing execution pipeline.
+The coordinator is stateful at the session level, persists structured turn plans and step results, and still delegates actual validation and build/test work to the existing execution pipeline.
 
 ## Repair Strategy
 
-### Deterministic repairs
+### Deterministic validation and repair guardrails
 
-The deterministic repair path handles narrow, auditable cases:
+The deterministic layer handles narrow, auditable cases and validates any model-generated candidate:
 
 - missing canonical imports
 - direct missing imports referenced by activities or triggers
@@ -105,14 +108,15 @@ The deterministic repair path handles narrow, auditable cases:
 - simple flow input and output key repairs
 - generated task IDs
 
-### Model-backed repairs
+### Model-backed planning and repairs
 
-If deterministic repair produces no patch, the platform can ask a model for a repaired `flogo.json`.
+The model is the primary reasoning layer for turn planning, assistant responses, and broader repair generation.
 
 Current implementation:
 
 - provider abstraction in `internal/model`
 - OpenAI Responses API implementation
+- structured turn planning in `internal/agentloop`
 - repair prompt uses:
   - current `flogo.json`
   - validation issues
@@ -150,7 +154,13 @@ Model candidates are reparsed and revalidated before use. They are only accepted
 
 - Docker-backed wrapper
 - configurable image, runtime, and network mode
-- intended for stronger sandboxing once hardened further
+- hardened defaults:
+  - `--network none`
+  - read-only root filesystem
+  - tmpfs-backed `/tmp`
+  - dropped Linux capabilities
+  - `no-new-privileges`
+  - PID limit
 
 ## Knowledge and Citations
 

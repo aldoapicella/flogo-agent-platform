@@ -7,10 +7,14 @@ Conversational terminal agent for TIBCO Flogo apps. The product is intentionally
 The current product is a working daemon-backed prototype with:
 
 - persistent local sessions
-- chat-first CLI and TUI clients
+- one-command chat-first TUI boot via `flogo-agent`
+- chat CLI and TUI clients over the same daemon API
 - review-gated patch approval flow
+- live session snapshot streaming into the TUI
+- undo for agent-authored file changes inside a session
 - schema and semantic validation for `flogo.json`
-- deterministic repair plus model-backed repair fallback
+- model-backed planning, repair, and conversational responses
+- deterministic validation, safety checks, and execution
 - Flogo build, flow test, and `.flogotest` unit-test execution
 - local git repo operations
 - local and isolated sandbox profiles
@@ -22,11 +26,11 @@ It is not yet a fully complete Claude/Codex-style Flogo agent. The current roadm
 
 From the user perspective, the loop is:
 
-1. start the local daemon
-2. create or resume a Flogo session from CLI or TUI
+1. run `flogo-agent` in a Flogo repo
+2. let the client auto-load `.env`, auto-start or reuse the local daemon, and resume the latest repo session
 3. chat with the agent about a Flogo repo
 4. let the agent inspect, validate, propose repairs, build, and test
-5. approve or reject proposed patches in review mode
+5. approve, reject, or undo agent-authored patches in review mode
 6. resume the same session later with transcript, plan, diff, and artifacts preserved
 
 ## Quick Start
@@ -37,7 +41,7 @@ From the user perspective, the loop is:
 - `git`
 - optional: `flogo` CLI for build and test workflows
 - optional: `docker` plus a compatible runtime for isolated execution
-- optional: `OPENAI_API_KEY` for model-backed repair fallback
+- optional: `OPENAI_API_KEY` for model-backed planning, responses, and repair
 
 ### Install the Flogo CLI
 
@@ -46,13 +50,17 @@ go install github.com/project-flogo/cli/...@latest
 export PATH="$(go env GOPATH)/bin:$PATH"
 ```
 
-### Start the daemon
+If the repo contains `.tools/bin/flogo`, `flogo-agent` now discovers that automatically for local runs, benchmarks, and daemon sessions.
+
+### Launch the default terminal UI
 
 ```bash
-go run ./cmd/flogo-agent daemon
+go run ./cmd/flogo-agent --repo ./testdata/benchmarks/invalid-mapping
 ```
 
-### Open a chat session
+That command auto-loads `.env` from the current repo or working directory, auto-starts or reuses the local daemon, and resumes the most recent session for the repo when possible.
+
+### Open the chat CLI directly
 
 ```bash
 go run ./cmd/flogo-agent chat \
@@ -77,6 +85,12 @@ go run ./cmd/flogo-agent chat \
 go run ./cmd/flogo-agent tui --repo /path/to/flogo-repo
 ```
 
+### Start the daemon explicitly
+
+```bash
+go run ./cmd/flogo-agent daemon
+```
+
 ### Use the compatibility one-shot command
 
 ```bash
@@ -88,10 +102,11 @@ go run ./cmd/flogo-agent run \
 
 ## CLI Commands
 
-- `flogo-agent daemon`: run the local session daemon
+- `flogo-agent`: launch the full-screen terminal client, auto-managing the local daemon
+- `flogo-agent daemon`: run the local session daemon explicitly
 - `flogo-agent chat`: create or resume a conversational Flogo session
-- `flogo-agent tui`: launch the full-screen terminal client
-- `flogo-agent session list|show|approve|reject`: inspect or control persisted sessions
+- `flogo-agent tui`: alias for the same full-screen terminal client
+- `flogo-agent session list|show|approve|reject|undo`: inspect or control persisted sessions
 - `flogo-agent run`: one-shot compatibility flow over the Flogo execution pipeline
 - `flogo-agent index`: ingest official sources into SQLite
 - `flogo-agent benchmark`: run benchmark fixtures and print a JSON summary
@@ -122,7 +137,7 @@ go run ./cmd/flogo-agent run \
 - `OPENAI_MODEL`
 - `OPENAI_REASONING_EFFORT`
 
-If `OPENAI_API_KEY` is not set, the product still works, but model-backed repair fallback is disabled.
+If `OPENAI_API_KEY` is not set, the product still works, but turn planning and responses fall back to deterministic behavior.
 
 ## Documentation
 

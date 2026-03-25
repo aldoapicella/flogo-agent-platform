@@ -1,12 +1,14 @@
 package runtime
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
 )
@@ -117,12 +119,29 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, snapshot)
+	case "events":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleSessionEvents(w, r, id)
 	case "approve":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		snapshot, err := s.manager.Approve(r.Context(), id)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, snapshot)
+	case "undo":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		snapshot, err := s.manager.Undo(id)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
@@ -148,6 +167,58 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, snapshot)
 	default:
 		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request, id string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	stream, cancel, err := s.manager.SubscribeSession(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	defer cancel()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	writer := bufio.NewWriter(w)
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, ok := <-stream:
+			if !ok {
+				return
+			}
+			payload, err := json.Marshal(event)
+			if err != nil {
+				continue
+			}
+			if _, err := writer.WriteString("data: " + string(payload) + "\n\n"); err != nil {
+				return
+			}
+			if err := writer.Flush(); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-heartbeat.C:
+			if _, err := writer.WriteString(": heartbeat\n\n"); err != nil {
+				return
+			}
+			if err := writer.Flush(); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
 	}
 }
 

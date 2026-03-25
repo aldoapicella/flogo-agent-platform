@@ -4,13 +4,18 @@
 
 ### Conversational commands
 
+- `flogo-agent`
+  - launches the default full-screen terminal client
+  - auto-loads `.env`
+  - auto-starts or reuses the local daemon
+  - auto-resumes the latest session for the repo when possible
 - `flogo-agent daemon`
   - starts the local HTTP daemon
 - `flogo-agent chat`
   - creates or resumes a conversational Flogo session
 - `flogo-agent tui`
-  - starts the full-screen terminal client
-- `flogo-agent session list|show|approve|reject`
+  - alias for the same full-screen terminal client
+- `flogo-agent session list|show|approve|reject|undo`
   - inspects or controls persisted sessions
 
 ### Compatibility and support commands
@@ -44,6 +49,7 @@
   - container runtime for isolated mode
 - `--sandbox-network`
   - network mode for isolated mode
+  - default: `none`
 
 ## Daemon and Session Flags
 
@@ -73,12 +79,19 @@
 - `OPENAI_REASONING_EFFORT`
   - overrides the Responses API reasoning effort
 
-If `OPENAI_API_KEY` is unset, the platform falls back to deterministic repairs only.
+If `OPENAI_API_KEY` is unset, the platform still works, but planning and assistant responses fall back to deterministic behavior.
+
+### Automatic dotenv loading
+
+- `.env` in the current working directory is loaded automatically
+- `.env` in the resolved repo root is then loaded automatically
+- existing shell environment variables win over `.env` values
 
 ### Tooling
 
 - `PATH`
   - must include the `flogo` binary for build and test workflows
+  - for local runs, `flogo-agent` also auto-discovers `.tools/bin/flogo` in the current repo or working directory, plus `$(go env GOPATH)/bin` when available
 
 ## State Layout
 
@@ -109,15 +122,18 @@ export OPENAI_API_KEY="..."
 export OPENAI_MODEL="gpt-5.2"
 ```
 
-Start the daemon:
+If the repo already contains `.tools/bin/flogo`, you do not need to export `PATH` manually for normal local use.
+
+Start the default UI:
+
+```bash
+go run ./cmd/flogo-agent --repo /path/to/repo
+```
+
+For explicit daemon control:
 
 ```bash
 go run ./cmd/flogo-agent daemon
-```
-
-Then connect a client:
-
-```bash
 go run ./cmd/flogo-agent chat --repo /path/to/repo --mode review
 ```
 

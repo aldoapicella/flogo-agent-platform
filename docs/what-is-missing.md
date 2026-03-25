@@ -9,22 +9,23 @@ The product already has:
 - local daemon-backed sessions
 - chat CLI and TUI clients
 - persisted transcript, plan, events, and approval state
+- streaming session snapshots from daemon to clients
+- undo for agent-authored edits
 - Flogo schema and semantic validation
-- deterministic repair plus model-backed repair fallback
+- model-backed planning, responses, and repair generation
 - Flogo build and test execution
 - citations from official Flogo sources
 
 The remaining work is mostly in conversation quality, deeper Flogo capability coverage, and product hardening.
 
-## Phase 1: Make The Conversational Loop Real
+## Phase 1: Deepen The Conversational Loop
 
-The current chat loop is still intent-classified and narrow. It feels more like a session wrapper around the execution pipeline than a true Claude/Codex-style agent.
+The chat loop is now model-planned, but it is still narrower than the research target. It still feels more like a strong Flogo workflow agent than a full Codex-like co-developer.
 
 Needed work:
 
-- replace the simple intent classifier with model-driven multi-step turn planning
-- add streaming assistant output and streaming tool events
-- let the model choose among structured tools instead of routing mostly through `Analyze` and `Run`
+- stream assistant text and tool output incrementally instead of only snapshot-level updates
+- let the model choose among richer structured tools instead of routing mostly through `Analyze` and `Run`
 - persist richer turn state: tool calls, partial plans, intermediate observations
 - add explicit slash-command handling without relying on text heuristics
 
@@ -54,11 +55,11 @@ The session runtime exists, but the user experience is still basic.
 
 Needed work:
 
-- add server-sent or websocket-style event streaming
 - improve chat CLI interaction with better live tool output
 - improve the TUI with dedicated panes for transcript, plan, approvals, artifacts, and logs
-- add session resume helpers, last-session shortcuts, and better session discovery
-- add undo for agent-authored edits inside a session
+- make session discovery richer than the current basic picker
+- add artifact browsing and log drill-down in both clients
+- support slash-command ergonomics consistently across clients
 
 Acceptance target:
 
@@ -70,7 +71,7 @@ The current policy is review-gated, but execution hardening is still shallow.
 
 Needed work:
 
-- move from Docker-only isolation seam to a hardened isolated profile
+- move from the current hardened Docker profile to a stronger isolated profile
 - classify tools and commands by risk level, network behavior, and approval requirements
 - block more destructive or secret-sensitive operations explicitly
 - add auditable patch/application history per session
@@ -90,7 +91,7 @@ Needed work:
 - track build success, test pass rate, and convergence within repair iterations
 - add regression suites for model-backed turns and conversational session behaviors
 - test daemon restart recovery and concurrent session usage more aggressively
-- make CI produce clear benchmark and runtime summaries
+- turn benchmark summaries into enforced gates instead of informational output
 
 Acceptance target:
 
@@ -98,8 +99,8 @@ Acceptance target:
 
 ## Recommended Next Order
 
-1. Replace the current conversational intent classifier with structured model-driven turn planning.
-2. Add streaming session events to the daemon and both clients.
-3. Expand Flogo validation and repair coverage.
-4. Improve TUI and chat UX around approvals, artifacts, and logs.
-5. Harden isolated execution and evaluation reporting.
+1. Expand Flogo validation and repair coverage.
+2. Stream assistant/tool output, not just session snapshots.
+3. Improve TUI and chat UX around approvals, artifacts, logs, and slash commands.
+4. Harden isolated execution and risk policy further.
+5. Turn benchmark reporting into enforced quality gates.

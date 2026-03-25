@@ -24,7 +24,6 @@ import (
 	"github.com/aldoapicella/flogo-agent-platform/internal/sandbox"
 	"github.com/aldoapicella/flogo-agent-platform/internal/session"
 	"github.com/aldoapicella/flogo-agent-platform/internal/tools"
-	"github.com/aldoapicella/flogo-agent-platform/internal/ui"
 )
 
 func main() {
@@ -35,6 +34,10 @@ func main() {
 }
 
 func newRootCommand() *cobra.Command {
+	return newRootCommandWithLaunch(launchInteractive)
+}
+
+func newRootCommandWithLaunch(launch func(interactiveOptions) error) *cobra.Command {
 	var repoPath string
 	var goal string
 	var mode string
@@ -54,6 +57,22 @@ func newRootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "flogo-agent",
 		Short: "Conversational Flogo coding agent",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return launch(interactiveOptions{
+				repoPath:      repoPath,
+				goal:          goal,
+				mode:          mode,
+				stateDir:      stateDir,
+				sources:       sources,
+				daemonURL:     daemonURL,
+				listenAddr:    listenAddr,
+				sessionID:     sessionID,
+				sandboxConfig: buildSandboxConfig(sandboxProfile, sandboxImage, sandboxRuntime, sandboxNetwork),
+			})
+		},
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			return loadDefaultEnv(repoPath)
+		},
 	}
 
 	root.PersistentFlags().StringVar(&repoPath, "repo", ".", "path to the target Flogo repository")
@@ -65,7 +84,7 @@ func newRootCommand() *cobra.Command {
 	root.PersistentFlags().StringVar(&sandboxProfile, "sandbox", string(contracts.SandboxProfileLocal), "sandbox profile: local|isolated")
 	root.PersistentFlags().StringVar(&sandboxImage, "sandbox-image", "", "container image to use for the isolated sandbox")
 	root.PersistentFlags().StringVar(&sandboxRuntime, "sandbox-runtime", "", "container runtime to use for the isolated sandbox")
-	root.PersistentFlags().StringVar(&sandboxNetwork, "sandbox-network", "bridge", "network mode for isolated sandbox execution")
+	root.PersistentFlags().StringVar(&sandboxNetwork, "sandbox-network", "none", "network mode for isolated sandbox execution")
 	root.PersistentFlags().StringVar(&daemonURL, "daemon-url", "http://127.0.0.1:7777", "local daemon base URL")
 	root.PersistentFlags().StringVar(&listenAddr, "listen", "127.0.0.1:7777", "daemon listen address")
 	root.PersistentFlags().StringVar(&sessionID, "session", "", "existing session identifier")
@@ -90,13 +109,19 @@ func newRootCommand() *cobra.Command {
 
 	root.AddCommand(&cobra.Command{
 		Use:   "tui",
-		Short: "Launch the terminal UI against the local daemon",
+		Short: "Launch the terminal UI",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := agentruntime.NewClient(daemonURL)
-			if err := client.Health(context.Background()); err != nil {
-				return err
-			}
-			return ui.New(client).Run(context.Background(), repoPath, goal, contracts.SessionMode(mode), stateDir, sources, buildSandboxConfig(sandboxProfile, sandboxImage, sandboxRuntime, sandboxNetwork), sessionID)
+			return launch(interactiveOptions{
+				repoPath:      repoPath,
+				goal:          goal,
+				mode:          mode,
+				stateDir:      stateDir,
+				sources:       sources,
+				daemonURL:     daemonURL,
+				listenAddr:    listenAddr,
+				sessionID:     sessionID,
+				sandboxConfig: buildSandboxConfig(sandboxProfile, sandboxImage, sandboxRuntime, sandboxNetwork),
+			})
 		},
 	})
 
@@ -161,6 +186,21 @@ func newRootCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := agentruntime.NewClient(daemonURL)
 			snapshot, err := client.Reject(context.Background(), args[0], rejectionReason)
+			if err != nil {
+				return err
+			}
+			fmt.Println(renderSession(snapshot))
+			return nil
+		},
+	})
+
+	sessionCmd.AddCommand(&cobra.Command{
+		Use:   "undo <id>",
+		Short: "Undo the last agent-authored patch",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := agentruntime.NewClient(daemonURL)
+			snapshot, err := client.Undo(context.Background(), args[0])
 			if err != nil {
 				return err
 			}
@@ -380,6 +420,8 @@ func interactiveChat(ctx context.Context, client *agentruntime.Client, snapshot 
 			snapshot, err = client.Approve(ctx, snapshot.ID)
 		case "/reject":
 			snapshot, err = client.Reject(ctx, snapshot.ID, "")
+		case "/undo":
+			snapshot, err = client.Undo(ctx, snapshot.ID)
 		default:
 			snapshot, err = client.SendMessage(ctx, snapshot.ID, line)
 		}

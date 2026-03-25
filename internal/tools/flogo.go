@@ -88,13 +88,17 @@ func (c *FlogoClient) CreateSource(ctx context.Context, repoPath string, outputP
 	if !c.Available() {
 		return missingBinaryResult("flogo"), nil
 	}
+	appFile := filepath.Join(repoPath, "flogo.json")
+	if absoluteAppFile, err := filepath.Abs(appFile); err == nil {
+		appFile = absoluteAppFile
+	}
 	workDir := repoPath
 	target := outputPath
 	if filepath.IsAbs(outputPath) {
 		workDir = filepath.Dir(outputPath)
 		target = filepath.Base(outputPath)
 	}
-	return c.runCLI(ctx, workDir, "create", "-f", filepath.Join(repoPath, "flogo.json"), target)
+	return c.runCLI(ctx, workDir, "create", "-f", appFile, target)
 }
 
 func (c *FlogoClient) ListContributions(ctx context.Context, repoPath string, filter string) (contracts.ToolResult, error) {

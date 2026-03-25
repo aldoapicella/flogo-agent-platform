@@ -111,6 +111,9 @@ func TestFlogoClientCreateSourceUsesParentDirectoryForAbsoluteOutputPath(t *test
 	if !strings.Contains(text, root+"|") || !strings.Contains(text, " create -f ") && !strings.Contains(text, "create -f") {
 		t.Fatalf("unexpected create invocation %q", text)
 	}
+	if !strings.Contains(text, filepath.Join(root, "flogo.json")) {
+		t.Fatalf("expected absolute app file path in create invocation, got %q", text)
+	}
 	if !strings.Contains(text, filepath.Base(outputPath)) {
 		t.Fatalf("expected basename output path, got %q", text)
 	}

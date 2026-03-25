@@ -23,7 +23,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Profile: contracts.SandboxProfileLocal,
-		Network: "bridge",
+		Network: "none",
 	}
 }
 
@@ -114,7 +114,7 @@ type DockerRunner struct {
 
 func NewDockerRunner(artifactRoot string, image string, runtime string, network string) *DockerRunner {
 	if network == "" {
-		network = "bridge"
+		network = "none"
 	}
 	return &DockerRunner{
 		local:        NewLocalRunner(artifactRoot),
@@ -142,6 +142,13 @@ func (r *DockerRunner) Run(ctx context.Context, invocation contracts.ToolInvocat
 	if r.Network != "" {
 		args = append(args, "--network", r.Network)
 	}
+	args = append(args,
+		"--read-only",
+		"--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
+		"--cap-drop", "ALL",
+		"--security-opt", "no-new-privileges",
+		"--pids-limit", "256",
+	)
 	for key, value := range invocation.Env {
 		args = append(args, "-e", key+"="+value)
 	}

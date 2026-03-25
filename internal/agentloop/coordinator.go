@@ -18,6 +18,7 @@ type Coordinator struct {
 	service   *session.Service
 	planner   *Planner
 	responder *Responder
+	onUpdate  func(*contracts.SessionSnapshot)
 }
 
 func New(service *session.Service, modelClient model.Client) *Coordinator {
@@ -26,6 +27,10 @@ func New(service *session.Service, modelClient model.Client) *Coordinator {
 		planner:   NewPlanner(modelClient),
 		responder: NewResponder(modelClient),
 	}
+}
+
+func (c *Coordinator) SetOnUpdate(fn func(*contracts.SessionSnapshot)) {
+	c.onUpdate = fn
 }
 
 func (c *Coordinator) HandleUserMessage(ctx context.Context, snapshot *contracts.SessionSnapshot, content string) error {
@@ -39,6 +44,7 @@ func (c *Coordinator) HandleUserMessage(ctx context.Context, snapshot *contracts
 	}
 
 	appendMessage(snapshot, contracts.RoleUser, content)
+	c.flush(snapshot)
 	plan := c.planner.PlanTurn(ctx, snapshot, content)
 	snapshot.LastTurnPlan = &plan
 	snapshot.LastTurnKind = "repair"
@@ -47,6 +53,7 @@ func (c *Coordinator) HandleUserMessage(ctx context.Context, snapshot *contracts
 	}
 	snapshot.LastStepResults = nil
 	appendEvent(snapshot, "planning", fmt.Sprintf("planned %d step(s) via %s", len(plan.Steps), plan.Planner))
+	c.flush(snapshot)
 
 	for _, step := range plan.Steps {
 		result, stop, err := c.executeStep(ctx, snapshot, step)
@@ -54,12 +61,14 @@ func (c *Coordinator) HandleUserMessage(ctx context.Context, snapshot *contracts
 			return err
 		}
 		snapshot.LastStepResults = append(snapshot.LastStepResults, result)
+		c.flush(snapshot)
 		if stop {
 			break
 		}
 	}
 
 	appendMessage(snapshot, contracts.RoleAssistant, c.composeAssistantResponse(ctx, snapshot))
+	c.flush(snapshot)
 	return nil
 }
 
@@ -73,6 +82,7 @@ func (c *Coordinator) ApprovePending(ctx context.Context, snapshot *contracts.Se
 	}
 	snapshot.LastStepResults = append(snapshot.LastStepResults, result)
 	appendMessage(snapshot, contracts.RoleAssistant, c.composeAssistantResponse(ctx, snapshot))
+	c.flush(snapshot)
 	return nil
 }
 
@@ -86,6 +96,7 @@ func (c *Coordinator) RejectPending(snapshot *contracts.SessionSnapshot, reason 
 	}
 	snapshot.LastStepResults = append(snapshot.LastStepResults, result)
 	appendMessage(snapshot, contracts.RoleAssistant, c.composeAssistantResponse(context.Background(), snapshot))
+	c.flush(snapshot)
 	return nil
 }
 
@@ -255,6 +266,15 @@ func (c *Coordinator) createMinimalApp(snapshot *contracts.SessionSnapshot, step
 	}
 
 	snapshot.Status = contracts.SessionStatusActive
+	if err := pushUndoEntry(snapshot, "undo bootstrap app creation", []string{doc.Path}); err != nil {
+		snapshot.Status = contracts.SessionStatusBlocked
+		appendEvent(snapshot, "blocked", err.Error())
+		return contracts.TurnStepResult{
+			Type:    contracts.TurnStepCreateMinimalApp,
+			Status:  contracts.TurnStepStatusBlocked,
+			Summary: err.Error(),
+		}, true, nil
+	}
 	if err := flogo.WriteDocument(doc); err != nil {
 		snapshot.Status = contracts.SessionStatusBlocked
 		appendEvent(snapshot, "blocked", err.Error())
@@ -290,6 +310,12 @@ func (c *Coordinator) repairAndVerify(ctx context.Context, snapshot *contracts.S
 		}, true, nil
 	}
 
+	if snapshot.Mode != contracts.ModeReview {
+		if err := pushUndoEntry(snapshot, "undo last applied repair", []string{filepath.Join(snapshot.RepoPath, "flogo.json")}); err != nil {
+			return contracts.TurnStepResult{}, true, err
+		}
+	}
+
 	report, err := c.service.Run(ctx, sessionRequest(snapshot))
 	if err != nil {
 		return contracts.TurnStepResult{}, true, err
@@ -317,6 +343,16 @@ func (c *Coordinator) approvePending(ctx context.Context, snapshot *contracts.Se
 		}, true, nil
 	}
 
+	if err := pushUndoEntry(snapshot, "undo approved patch", pendingApprovalPaths(snapshot.PendingApproval)); err != nil {
+		snapshot.Status = contracts.SessionStatusBlocked
+		appendEvent(snapshot, "blocked", err.Error())
+		return contracts.TurnStepResult{
+			Type:    contracts.TurnStepApprovePending,
+			Status:  contracts.TurnStepStatusBlocked,
+			Summary: err.Error(),
+		}, true, nil
+	}
+
 	if err := applyPendingWrites(snapshot.PendingApproval); err != nil {
 		snapshot.Status = contracts.SessionStatusBlocked
 		appendEvent(snapshot, "blocked", err.Error())
@@ -340,6 +376,37 @@ func (c *Coordinator) approvePending(ctx context.Context, snapshot *contracts.Se
 		ToolCalls: toolCallsFromReport(report, "approve_pending"),
 		Report:    report,
 	}, report.Outcome != contracts.RunOutcomeApplied, nil
+}
+
+func (c *Coordinator) UndoLastPatch(snapshot *contracts.SessionSnapshot) error {
+	if snapshot == nil {
+		return fmt.Errorf("session snapshot is required")
+	}
+	if len(snapshot.UndoStack) == 0 {
+		appendEvent(snapshot, "undo", "no agent-authored patch is available to undo")
+		appendMessage(snapshot, contracts.RoleAssistant, "There is no agent-authored patch to undo in this session.")
+		c.flush(snapshot)
+		return nil
+	}
+
+	entry := snapshot.UndoStack[len(snapshot.UndoStack)-1]
+	if err := applyWrites(entry.Writes); err != nil {
+		snapshot.Status = contracts.SessionStatusBlocked
+		appendEvent(snapshot, "blocked", err.Error())
+		appendMessage(snapshot, contracts.RoleAssistant, "Undo failed: "+err.Error())
+		c.flush(snapshot)
+		return err
+	}
+
+	snapshot.UndoStack = snapshot.UndoStack[:len(snapshot.UndoStack)-1]
+	snapshot.Status = contracts.SessionStatusActive
+	snapshot.PendingApproval = nil
+	snapshot.LastReport = nil
+	snapshot.LastStepResults = nil
+	appendEvent(snapshot, "undo", entry.Summary)
+	appendMessage(snapshot, contracts.RoleAssistant, "Reverted the last agent-authored patch.")
+	c.flush(snapshot)
+	return nil
 }
 
 func (c *Coordinator) rejectPending(snapshot *contracts.SessionSnapshot, reason string) contracts.TurnStepResult {
@@ -594,8 +661,18 @@ func applyPendingWrites(pending *contracts.PendingApproval) error {
 	if pending == nil {
 		return nil
 	}
-	for _, write := range pending.Writes {
+	return applyWrites(pending.Writes)
+}
+
+func applyWrites(writes []contracts.PendingFileWrite) error {
+	for _, write := range writes {
 		if strings.TrimSpace(write.Path) == "" {
+			continue
+		}
+		if write.Delete {
+			if err := os.Remove(write.Path); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove %s: %w", write.Path, err)
+			}
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(write.Path), 0o755); err != nil {
@@ -606,6 +683,78 @@ func applyPendingWrites(pending *contracts.PendingApproval) error {
 		}
 	}
 	return nil
+}
+
+func pendingWritePaths(pending *contracts.PendingApproval) []string {
+	if pending == nil {
+		return nil
+	}
+	paths := make([]string, 0, len(pending.Writes))
+	for _, write := range pending.Writes {
+		if strings.TrimSpace(write.Path) != "" {
+			paths = append(paths, write.Path)
+		}
+	}
+	return paths
+}
+
+func pendingApprovalPaths(pending *contracts.PendingApproval) []string {
+	paths := pendingWritePaths(pending)
+	if len(paths) > 0 {
+		return paths
+	}
+	if pending == nil || pending.PatchPlan == nil {
+		return nil
+	}
+	paths = make([]string, 0, len(pending.PatchPlan.TargetFiles))
+	for _, path := range pending.PatchPlan.TargetFiles {
+		if strings.TrimSpace(path) != "" {
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}
+
+func pushUndoEntry(snapshot *contracts.SessionSnapshot, summary string, paths []string) error {
+	writes, err := captureUndoWrites(paths)
+	if err != nil {
+		return err
+	}
+	if len(writes) == 0 {
+		return nil
+	}
+	snapshot.UndoStack = append(snapshot.UndoStack, contracts.UndoEntry{
+		ID:        nextID("undo"),
+		Summary:   summary,
+		CreatedAt: nowUTC(),
+		Writes:    writes,
+	})
+	return nil
+}
+
+func captureUndoWrites(paths []string) ([]contracts.PendingFileWrite, error) {
+	seen := map[string]struct{}{}
+	writes := make([]contracts.PendingFileWrite, 0, len(paths))
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				writes = append(writes, contracts.PendingFileWrite{Path: path, Delete: true})
+				continue
+			}
+			return nil, fmt.Errorf("capture undo contents for %s: %w", path, err)
+		}
+		writes = append(writes, contracts.PendingFileWrite{Path: path, Content: string(contents)})
+	}
+	return writes, nil
 }
 
 func toolCallsFromReport(report *contracts.RunReport, name string) []contracts.ToolCallRecord {
@@ -682,4 +831,11 @@ func nextID(prefix string) string {
 
 func nowUTC() string {
 	return time.Now().UTC().Format(time.RFC3339Nano)
+}
+
+func (c *Coordinator) flush(snapshot *contracts.SessionSnapshot) {
+	if c == nil || c.onUpdate == nil || snapshot == nil {
+		return
+	}
+	c.onUpdate(snapshot)
 }

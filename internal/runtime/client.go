@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -96,6 +97,63 @@ func (c *Client) Reject(ctx context.Context, id string, reason string) (*contrac
 		return nil, err
 	}
 	return &snapshot, nil
+}
+
+func (c *Client) Undo(ctx context.Context, id string) (*contracts.SessionSnapshot, error) {
+	var snapshot contracts.SessionSnapshot
+	if err := c.doJSON(ctx, http.MethodPost, "/sessions/"+id+"/undo", map[string]string{}, &snapshot); err != nil {
+		return nil, err
+	}
+	return &snapshot, nil
+}
+
+func (c *Client) StreamSession(ctx context.Context, id string, onEvent func(contracts.SessionStreamEvent) error) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/sessions/"+id+"/events", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("%s", strings.TrimSpace(string(body)))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	var data strings.Builder
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "data: ") {
+			data.WriteString(strings.TrimPrefix(line, "data: "))
+			continue
+		}
+		if strings.TrimSpace(line) != "" {
+			continue
+		}
+		if data.Len() == 0 {
+			continue
+		}
+		var event contracts.SessionStreamEvent
+		if err := json.Unmarshal([]byte(data.String()), &event); err != nil {
+			return err
+		}
+		if onEvent != nil {
+			if err := onEvent(event); err != nil {
+				return err
+			}
+		}
+		data.Reset()
+	}
+	if err := scanner.Err(); err != nil && ctx.Err() == nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 func (c *Client) doJSON(ctx context.Context, method string, path string, requestBody any, out any) error {

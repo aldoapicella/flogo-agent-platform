@@ -18,15 +18,33 @@ type FixtureResult struct {
 	SchemaIssues     int                  `json:"schemaIssues"`
 	SemanticIssues   int                  `json:"semanticIssues"`
 	ValidationPassed bool                 `json:"validationPassed"`
+	BuildAttempted   bool                 `json:"buildAttempted"`
+	BuildPassed      bool                 `json:"buildPassed"`
+	TestTotal        int                  `json:"testTotal"`
+	TestPassed       int                  `json:"testPassed"`
+	TestSkipped      int                  `json:"testSkipped"`
 	NextAction       string               `json:"nextAction,omitempty"`
 }
 
 type Summary struct {
-	Root     string                `json:"root"`
-	Mode     contracts.SessionMode `json:"mode"`
-	Total    int                   `json:"total"`
-	Outcomes map[string]int        `json:"outcomes"`
-	Fixtures []FixtureResult       `json:"fixtures"`
+	Root                     string                `json:"root"`
+	Mode                     contracts.SessionMode `json:"mode"`
+	Total                    int                   `json:"total"`
+	Outcomes                 map[string]int        `json:"outcomes"`
+	ValidationPassedFixtures int                   `json:"validationPassedFixtures"`
+	FixturesWithBuild        int                   `json:"fixturesWithBuild"`
+	BuildSuccessFixtures     int                   `json:"buildSuccessFixtures"`
+	AppliedFixtures          int                   `json:"appliedFixtures"`
+	ReadyFixtures            int                   `json:"readyFixtures"`
+	NonSkippedTests          int                   `json:"nonSkippedTests"`
+	PassedTests              int                   `json:"passedTests"`
+	SkippedTests             int                   `json:"skippedTests"`
+	ValidationPassRate       float64               `json:"validationPassRate"`
+	BuildSuccessRate         float64               `json:"buildSuccessRate"`
+	AppliedRate              float64               `json:"appliedRate"`
+	ReadyRate                float64               `json:"readyRate"`
+	TestPassRate             float64               `json:"testPassRate"`
+	Fixtures                 []FixtureResult       `json:"fixtures"`
 }
 
 func RunBenchmarks(ctx context.Context, repoRoot string, stateDir string, sources string, benchRoot string, mode contracts.SessionMode) (*Summary, error) {
@@ -71,11 +89,54 @@ func RunBenchmarks(ctx context.Context, repoRoot string, stateDir string, source
 			ValidationPassed: report.Evidence.ValidationResult.Passed,
 			NextAction:       report.NextAction,
 		}
+		if report.Evidence.BuildResult != nil {
+			result.BuildAttempted = true
+			result.BuildPassed = report.Evidence.BuildResult.ExitCode == 0
+		}
+		for _, test := range report.Evidence.TestResults {
+			result.TestTotal++
+			if test.Skipped {
+				result.TestSkipped++
+				continue
+			}
+			if test.Passed {
+				result.TestPassed++
+			}
+		}
 		summary.Fixtures = append(summary.Fixtures, result)
 		summary.Outcomes[string(report.Outcome)]++
+		if result.ValidationPassed {
+			summary.ValidationPassedFixtures++
+		}
+		if result.BuildAttempted {
+			summary.FixturesWithBuild++
+			if result.BuildPassed {
+				summary.BuildSuccessFixtures++
+			}
+		}
+		if report.Outcome == contracts.RunOutcomeApplied {
+			summary.AppliedFixtures++
+		}
+		if report.Outcome == contracts.RunOutcomeReady {
+			summary.ReadyFixtures++
+		}
+		summary.PassedTests += result.TestPassed
+		summary.SkippedTests += result.TestSkipped
+		summary.NonSkippedTests += result.TestTotal - result.TestSkipped
 	}
 
 	summary.Total = len(summary.Fixtures)
+	if summary.Total > 0 {
+		summary.ValidationPassRate = float64(summary.ValidationPassedFixtures) / float64(summary.Total)
+		summary.AppliedRate = float64(summary.AppliedFixtures) / float64(summary.Total)
+		summary.ReadyRate = float64(summary.ReadyFixtures) / float64(summary.Total)
+	}
+	if summary.FixturesWithBuild > 0 {
+		summary.BuildSuccessRate = float64(summary.BuildSuccessFixtures) / float64(summary.FixturesWithBuild)
+	}
+	if summary.NonSkippedTests > 0 {
+		summary.TestPassRate = float64(summary.PassedTests) / float64(summary.NonSkippedTests)
+	}
 	return summary, nil
 }
 

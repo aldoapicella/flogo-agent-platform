@@ -174,6 +174,106 @@ func TestManagerReloadsPersistedSessions(t *testing.T) {
 	}
 }
 
+func TestManagerUndoRestoresApprovedRepair(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	manifestPath, repoPath := writeRuntimeFixture(t, root, true)
+
+	manager, err := NewManager(ctx, root, filepath.Join(root, "state"), manifestPath, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+
+	snapshot, err := manager.CreateSession(ctx, contracts.SessionRequest{
+		RepoPath: repoPath,
+		Goal:     "repair the Flogo app",
+		Mode:     contracts.ModeReview,
+		ApprovalPolicy: contracts.ApprovalPolicy{
+			RequireWriteApproval: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err = manager.SendMessage(ctx, snapshot.ID, "repair and verify the app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err = manager.Approve(ctx, snapshot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.UndoStack) == 0 {
+		t.Fatal("expected an undo entry after approval")
+	}
+
+	snapshot, err = manager.Undo(snapshot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.UndoStack) != 0 {
+		t.Fatalf("expected undo stack to be empty, got %d", len(snapshot.UndoStack))
+	}
+	if snapshot.Status != contracts.SessionStatusActive {
+		t.Fatalf("expected active status after undo, got %s", snapshot.Status)
+	}
+	if snapshot.LastReport != nil {
+		t.Fatalf("expected last report to be cleared after undo, got %+v", snapshot.LastReport)
+	}
+
+	contents, err := os.ReadFile(filepath.Join(repoPath, "flogo.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	if !strings.Contains(text, "\"flowURI\": \"main\"") || !strings.Contains(text, "\"message\": \"$flow.body\"") {
+		t.Fatalf("expected original invalid descriptor to be restored, got %s", text)
+	}
+}
+
+func TestManagerUndoRemovesCreatedBootstrap(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	manifestPath, repoPath := writeEmptyRuntimeFixture(t, root, true)
+
+	manager, err := NewManager(ctx, root, filepath.Join(root, "state"), manifestPath, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+
+	snapshot, err := manager.CreateSession(ctx, contracts.SessionRequest{
+		RepoPath: repoPath,
+		Goal:     "create a Flogo app",
+		Mode:     contracts.ModeReview,
+		ApprovalPolicy: contracts.ApprovalPolicy{
+			RequireWriteApproval: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err = manager.SendMessage(ctx, snapshot.ID, "create a minimal flogo app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err = manager.Approve(ctx, snapshot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err = manager.Undo(snapshot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(repoPath, "flogo.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected undo to remove bootstrapped flogo.json, err=%v", err)
+	}
+}
+
 func writeRuntimeFixture(t *testing.T, root string, installFakeFlogo bool) (string, string) {
 	t.Helper()
 

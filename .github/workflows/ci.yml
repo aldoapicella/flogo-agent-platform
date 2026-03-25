@@ -22,7 +22,41 @@ jobs:
         run: go test ./...
 
       - name: Run benchmark summary
-        run: go run ./cmd/flogo-agent benchmark --bench-root ./testdata/benchmarks --mode review
+        run: go run ./cmd/flogo-agent benchmark --bench-root ./testdata/benchmarks --mode review > benchmark-summary.json
+
+      - name: Publish benchmark summary
+        run: |
+          python - <<'PY'
+          import json, os
+
+          with open("benchmark-summary.json", "r", encoding="utf-8") as handle:
+              summary = json.load(handle)
+
+          def pct(value):
+              return f"{value * 100:.1f}%"
+
+          lines = [
+              "## Benchmark Summary",
+              "",
+              f"- Fixtures: {summary.get('total', 0)}",
+              f"- Validation pass rate: {pct(summary.get('validationPassRate', 0.0))}",
+              f"- Applied rate: {pct(summary.get('appliedRate', 0.0))}",
+              f"- Ready-for-review rate: {pct(summary.get('readyRate', 0.0))}",
+              f"- Build success rate: {pct(summary.get('buildSuccessRate', 0.0))} ({summary.get('buildSuccessFixtures', 0)}/{summary.get('fixturesWithBuild', 0)} attempted fixtures)",
+              f"- Test pass rate: {pct(summary.get('testPassRate', 0.0))} ({summary.get('passedTests', 0)}/{summary.get('nonSkippedTests', 0)} non-skipped tests)",
+              "",
+              "### Outcomes",
+          ]
+
+          for outcome, count in sorted(summary.get("outcomes", {}).items()):
+              lines.append(f"- {outcome}: {count}")
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
+              handle.write("\n".join(lines) + "\n")
+          PY
+
+      - name: Print benchmark summary
+        run: cat benchmark-summary.json
 
   flogo-integration:
     runs-on: ubuntu-latest

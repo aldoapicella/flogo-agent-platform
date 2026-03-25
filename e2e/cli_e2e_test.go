@@ -42,7 +42,7 @@ func TestRunReviewModeE2E(t *testing.T) {
 	if !strings.Contains(stdout, "Outcome: ready") {
 		t.Fatalf("expected ready outcome, got stdout:\n%s", stdout)
 	}
-	if !strings.Contains(stdout, "\"flowURI\": \"res://flow:main\"") || !strings.Contains(stdout, "\"message\": \"=$flow.body\"") {
+	if !strings.Contains(stdout, "\"flowURI\": \"res://flow:main\"") || !strings.Contains(stdout, "\"message\": \"=$.pathParams.val\"") {
 		t.Fatalf("expected repaired diff, got stdout:\n%s", stdout)
 	}
 
@@ -50,7 +50,7 @@ func TestRunReviewModeE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(contents), "=$flow.body") {
+	if strings.Contains(string(contents), "=$.pathParams.val") {
 		t.Fatalf("review mode should not have modified the file: %s", string(contents))
 	}
 }
@@ -88,7 +88,7 @@ func TestRunApplyModeFlowTestsE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(contents), "res://flow:main") || !strings.Contains(string(contents), "=$flow.body") {
+	if !strings.Contains(string(contents), "res://flow:main") || !strings.Contains(string(contents), "=$.pathParams.val") {
 		t.Fatalf("expected repaired repo file, got %s", string(contents))
 	}
 }
