@@ -72,15 +72,17 @@
 ### Model configuration
 
 - `OPENAI_API_KEY`
-  - enables the OpenAI-backed model client
+  - required for agent workflows
 - `OPENAI_BASE_URL`
   - overrides `https://api.openai.com/v1`
 - `OPENAI_MODEL`
   - overrides the default model
+- `OPENAI_EVAL_MODEL`
+  - optional evaluator model for live conversation grading
 - `OPENAI_REASONING_EFFORT`
   - overrides the Responses API reasoning effort
 
-If `OPENAI_API_KEY` is unset, the platform still works, but planning and assistant responses fall back to deterministic behavior.
+If `OPENAI_API_KEY` is unset, agent commands fail fast with a configuration error. The only model-free CLI surface is `repo`.
 
 ### Automatic dotenv loading
 
@@ -122,6 +124,7 @@ go install github.com/aldoapicella/flogo-agent-platform/cmd/flogo-agent@latest
 export PATH="$(go env GOPATH)/bin:$PATH"
 export OPENAI_API_KEY="..."
 export OPENAI_MODEL="gpt-5.2"
+export OPENAI_EVAL_MODEL="gpt-5.2"
 ```
 
 If the repo already contains `.tools/bin/flogo`, you do not need to export `PATH` manually for normal local use.

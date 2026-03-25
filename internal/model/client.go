@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 )
@@ -25,16 +26,30 @@ type Client interface {
 	ProviderName() string
 }
 
+var ErrMissingOpenAIAPIKey = errors.New("OPENAI_API_KEY is required for agent commands")
+
 func NewFromEnv() (Client, error) {
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {
 		return nil, nil
 	}
 
-	return NewOpenAIClient(OpenAIConfig{
+	return NewOpenAIClient(configFromEnv(apiKey)), nil
+}
+
+func RequireFromEnv() (Client, error) {
+	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	if apiKey == "" {
+		return nil, ErrMissingOpenAIAPIKey
+	}
+	return NewOpenAIClient(configFromEnv(apiKey)), nil
+}
+
+func configFromEnv(apiKey string) OpenAIConfig {
+	return OpenAIConfig{
 		APIKey:          apiKey,
 		BaseURL:         strings.TrimSpace(os.Getenv("OPENAI_BASE_URL")),
 		Model:           strings.TrimSpace(os.Getenv("OPENAI_MODEL")),
 		ReasoningEffort: strings.TrimSpace(os.Getenv("OPENAI_REASONING_EFFORT")),
-	}), nil
+	}
 }

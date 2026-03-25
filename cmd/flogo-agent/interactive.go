@@ -252,6 +252,9 @@ func ensureDaemon(ctx context.Context, opts interactiveOptions) (*daemonHandle, 
 	if !sameBaseURL(opts.daemonURL, expectedURL) {
 		return nil, fmt.Errorf("daemon at %s is unreachable; automatic startup only supports local --daemon-url matching --listen (%s)", opts.daemonURL, expectedURL)
 	}
+	if _, err := requireAgentModel(); err != nil {
+		return nil, err
+	}
 
 	if err := os.MkdirAll(opts.stateDir, 0o755); err != nil {
 		return nil, err

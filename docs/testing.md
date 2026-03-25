@@ -31,16 +31,28 @@ The e2e suite builds the real `flogo-agent` binary and exercises the user-visibl
 Coverage includes:
 
 - default seamless UI boot plumbing
-- one-shot review and apply mode
-- fake Flogo build/test workflows
 - `.flogotest` unit-test execution
 - local git repo operations
-- model-backed repair and planning through a fake OpenAI-compatible server
 - daemon boot and health checks
-- chat session creation
-- approval flow through `session approve`
+- command-level model requirement checks
 
-These tests are hermetic and do not require a real OpenAI key or a real Flogo install.
+These tests are hermetic and do not require a real OpenAI key or a real Flogo install. They do not claim to validate actual model behavior.
+
+### Live OpenAI conversation tests
+
+Run with:
+
+```bash
+OPENAI_E2E=1 OPENAI_API_KEY="..." go test ./e2e -run 'TestLiveOpenAI.*' -v
+```
+
+These tests:
+
+- use the real OpenAI Responses API
+- use the real `flogo` CLI
+- assert structural session behavior first
+- score the finished conversation with a rubric
+- are skipped by default and are not part of the default CI gate
 
 ### Integration tests
 
@@ -68,7 +80,7 @@ Run with:
 go run ./cmd/flogo-agent benchmark --bench-root ./testdata/benchmarks --mode review
 ```
 
-This exercises the current fixture corpus and reports outcomes plus benchmark rates as JSON.
+This exercises the current fixture corpus and reports outcomes plus benchmark rates as JSON. Because benchmark mode is now model-backed, it requires `OPENAI_API_KEY`.
 
 ## Writing New E2E Tests
 
@@ -79,7 +91,7 @@ E2E tests should:
 - prefer the default root command when testing the primary UX
 - boot the daemon explicitly only when the test is about daemon lifecycle or advanced client commands
 - avoid sharing SQLite state between unrelated subprocesses
-- use fake binaries or fake HTTP servers for external dependencies unless the test is explicitly marked integration
+- keep fake dependencies out of product-level LLM tests
 - assert on user-visible output plus file, diff, or artifact effects
 
 ## CI
@@ -87,7 +99,6 @@ E2E tests should:
 CI currently runs:
 
 - `go test ./...`
-- benchmark summary with GitHub step-summary output
 - real Flogo integration tests in a separate job
 
-The e2e suite runs as part of the normal Go test matrix.
+Live OpenAI conversation evaluation runs in the separate pre-release workflow on tags and manual dispatch.

@@ -147,9 +147,10 @@ go run ./cmd/flogo-agent run \
 - `OPENAI_API_KEY`
 - `OPENAI_BASE_URL`
 - `OPENAI_MODEL`
+- `OPENAI_EVAL_MODEL`
 - `OPENAI_REASONING_EFFORT`
 
-If `OPENAI_API_KEY` is not set, the product still works, but turn planning and responses fall back to deterministic behavior.
+`OPENAI_API_KEY` is required for agent workflows such as `flogo-agent`, `tui`, `daemon`, `run`, and `benchmark`. The only model-free CLI surface is `repo`.
 
 ## Documentation
 
@@ -179,4 +180,10 @@ The enforced source-of-truth policy is in [AGENTS.md](./AGENTS.md).
 go test ./...
 go build ./cmd/flogo-agent
 go test -tags=integration ./internal/tools
+```
+
+Optional live OpenAI conversation smoke:
+
+```bash
+OPENAI_E2E=1 OPENAI_API_KEY="..." go test ./e2e -run 'TestLiveOpenAI.*' -v
 ```

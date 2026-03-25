@@ -109,6 +109,12 @@ func directConversationAnswer() string {
 }
 
 func (c *Coordinator) ApprovePending(ctx context.Context, snapshot *contracts.SessionSnapshot) error {
+	snapshot.LastTurnPlan = &contracts.TurnPlan{
+		GoalSummary: "Approve the pending patch and continue verification",
+		Planner:     "deterministic",
+	}
+	snapshot.LastTurnKind = "approval"
+	snapshot.LastStepResults = nil
 	result, _, err := c.executeStep(ctx, snapshot, contracts.TurnStep{
 		Type:   contracts.TurnStepApprovePending,
 		Reason: "the user approved the pending patch",
@@ -123,6 +129,12 @@ func (c *Coordinator) ApprovePending(ctx context.Context, snapshot *contracts.Se
 }
 
 func (c *Coordinator) RejectPending(snapshot *contracts.SessionSnapshot, reason string) error {
+	snapshot.LastTurnPlan = &contracts.TurnPlan{
+		GoalSummary: "Reject the pending patch",
+		Planner:     "deterministic",
+	}
+	snapshot.LastTurnKind = "approval"
+	snapshot.LastStepResults = nil
 	result, _, err := c.executeStep(context.Background(), snapshot, contracts.TurnStep{
 		Type:   contracts.TurnStepRejectPending,
 		Reason: reason,

@@ -29,6 +29,7 @@ Write the assistant reply for the user after a tool-augmented turn.
 Be concrete, concise, and grounded in the execution results.
 Do not invent tool outcomes, schema rules, build results, or approvals.
 If approval is pending, say that clearly.
+Do not suggest alternative fixes or unsupported options unless the user asked for them.
 If sources are available, cite them by source title in plain text.
 Do not use markdown fences.`),
 		UserPrompt:      buildResponderPrompt(snapshot),
@@ -38,7 +39,7 @@ Do not use markdown fences.`),
 		return trace
 	}
 
-	return strings.TrimSpace(response.Text) + "\n\n" + trace
+	return strings.TrimSpace(response.Text)
 }
 
 func buildResponderPrompt(snapshot *contracts.SessionSnapshot) string {
@@ -63,6 +64,7 @@ func buildResponderPrompt(snapshot *contracts.SessionSnapshot) string {
 	if snapshot.LastReport != nil {
 		builder.WriteString("Execution report:\n")
 		builder.WriteString("- " + summarizeReport(snapshot.LastReport) + "\n")
+		appendValidationSummary(&builder, snapshot.LastReport.Evidence.ValidationResult)
 		if snapshot.LastReport.PatchPlan != nil {
 			builder.WriteString("- Patch rationale: " + snapshot.LastReport.PatchPlan.Rationale + "\n")
 			builder.WriteString(fmt.Sprintf("- Patch safe: %t\n", snapshot.LastReport.PatchPlan.Safe))
@@ -94,8 +96,22 @@ func buildResponderPrompt(snapshot *contracts.SessionSnapshot) string {
 	builder.WriteString("Reply requirements:\n")
 	builder.WriteString("- First explain what happened in this turn.\n")
 	builder.WriteString("- Then explain the next action or approval requirement.\n")
+	builder.WriteString("- Mention the most important concrete issue or change when one is available.\n")
 	builder.WriteString("- Keep it under 140 words.\n")
 	return builder.String()
+}
+
+func appendValidationSummary(builder *strings.Builder, validation contracts.ValidationResult) {
+	appendIssue := func(prefix string, issues []contracts.ValidationIssue) {
+		for idx, issue := range issues {
+			if idx >= 2 {
+				break
+			}
+			builder.WriteString(fmt.Sprintf("- %s %s: %s\n", prefix, issue.RuleID, issue.Message))
+		}
+	}
+	appendIssue("Schema issue", validation.SchemaIssues)
+	appendIssue("Semantic issue", validation.SemanticIssues)
 }
 
 func latestCitations(snapshot *contracts.SessionSnapshot) []contracts.SourceCitation {

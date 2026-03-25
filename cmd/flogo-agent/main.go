@@ -19,6 +19,7 @@ import (
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
 	"github.com/aldoapicella/flogo-agent-platform/internal/evals"
 	"github.com/aldoapicella/flogo-agent-platform/internal/knowledge"
+	"github.com/aldoapicella/flogo-agent-platform/internal/model"
 	"github.com/aldoapicella/flogo-agent-platform/internal/reporting"
 	agentruntime "github.com/aldoapicella/flogo-agent-platform/internal/runtime"
 	"github.com/aldoapicella/flogo-agent-platform/internal/sandbox"
@@ -244,11 +245,18 @@ func newRootCommandWithLaunch(launch func(interactiveOptions) error) *cobra.Comm
 		Short: "Run benchmark fixtures and print a summary",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
+			modelClient, err := requireAgentModel()
+			if err != nil {
+				return err
+			}
 			rootDir := mustRepoRoot()
 			if stateDir == "" {
 				stateDir = filepath.Join(rootDir, ".flogo-agent")
 			}
-			summary, err := evals.RunBenchmarks(ctx, rootDir, stateDir, resolveSources(sources), benchRoot, contracts.SessionMode(mode))
+			summary, err := evals.RunBenchmarks(ctx, rootDir, stateDir, resolveSources(sources), benchRoot, contracts.SessionMode(mode), session.Options{
+				Model:   modelClient,
+				Sandbox: buildSandboxConfig(sandboxProfile, sandboxImage, sandboxRuntime, sandboxNetwork),
+			})
 			if err != nil {
 				return err
 			}
@@ -317,8 +325,12 @@ func newRootCommandWithLaunch(launch func(interactiveOptions) error) *cobra.Comm
 
 func runDaemon(listenAddr string, stateDir string, sources string, sandboxConfig sandbox.Config) error {
 	ctx := context.Background()
+	modelClient, err := requireAgentModel()
+	if err != nil {
+		return err
+	}
 	manager, err := agentruntime.NewManager(ctx, mustRepoRoot(), stateDir, resolveSources(sources), agentruntime.Options{
-		ServiceOptions: session.Options{Sandbox: sandboxConfig},
+		ServiceOptions: session.Options{Sandbox: sandboxConfig, Model: modelClient},
 	})
 	if err != nil {
 		return err
@@ -441,8 +453,13 @@ func runSession(repoPath string, goal string, mode string, stateDir string, sour
 	if err := session.EnsureRepoPath(repoPath); err != nil {
 		return err
 	}
+	modelClient, err := requireAgentModel()
+	if err != nil {
+		return err
+	}
 	service, err := session.NewServiceWithOptions(ctx, mustRepoRoot(), stateDir, resolveSources(sources), session.Options{
 		Sandbox: sandboxConfig,
+		Model:   modelClient,
 	})
 	if err != nil {
 		return err
@@ -507,6 +524,17 @@ func buildSandboxConfig(profile string, image string, runtime string, network st
 		config.Network = network
 	}
 	return config
+}
+
+func requireAgentModel() (model.Client, error) {
+	client, err := model.RequireFromEnv()
+	if err != nil {
+		if errors.Is(err, model.ErrMissingOpenAIAPIKey) {
+			return nil, fmt.Errorf("%w; configure it in the environment or .env before running agent workflows", err)
+		}
+		return nil, err
+	}
+	return client, nil
 }
 
 func runGitStatus(repoPath string, stateDir string) error {

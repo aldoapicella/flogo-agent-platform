@@ -30,11 +30,8 @@ func TestResponderPrependsModelAuthoredReply(t *testing.T) {
 	}
 
 	text := NewResponder(responderFakeModel{text: "I inspected the app and prepared a patch for review.", model: "test-model"}).ComposeTurnResponse(context.Background(), snapshot)
-	if !strings.HasPrefix(text, "I inspected the app and prepared a patch for review.") {
-		t.Fatalf("expected model reply prefix, got %q", text)
-	}
-	if !strings.Contains(text, "Plan: Repair and verify the app") {
-		t.Fatalf("expected deterministic trace appended, got %q", text)
+	if strings.TrimSpace(text) != "I inspected the app and prepared a patch for review." {
+		t.Fatalf("expected only the model-authored reply, got %q", text)
 	}
 }
 

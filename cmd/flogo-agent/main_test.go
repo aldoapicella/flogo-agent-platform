@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/aldoapicella/flogo-agent-platform/internal/model"
 )
 
 func TestRootCommandNoArgsLaunchesInteractive(t *testing.T) {
@@ -100,5 +103,27 @@ func TestEnsureToolPathPrependsRepoLocalToolsBin(t *testing.T) {
 	parts := strings.Split(os.Getenv("PATH"), string(os.PathListSeparator))
 	if len(parts) == 0 || parts[0] != toolDir {
 		t.Fatalf("expected repo-local .tools/bin to be prepended, got %q", os.Getenv("PATH"))
+	}
+}
+
+func TestRequireAgentModelFailsWithoutAPIKey(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+
+	_, err := requireAgentModel()
+	if !errors.Is(err, model.ErrMissingOpenAIAPIKey) {
+		t.Fatalf("expected missing api key error, got %v", err)
+	}
+}
+
+func TestRequireAgentModelBuildsOpenAIClient(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_MODEL", "gpt-5.2")
+
+	client, err := requireAgentModel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.ProviderName() != "openai" {
+		t.Fatalf("expected openai provider, got %q", client.ProviderName())
 	}
 }

@@ -47,8 +47,8 @@ type Summary struct {
 	Fixtures                 []FixtureResult       `json:"fixtures"`
 }
 
-func RunBenchmarks(ctx context.Context, repoRoot string, stateDir string, sources string, benchRoot string, mode contracts.SessionMode) (*Summary, error) {
-	service, err := session.NewService(ctx, repoRoot, stateDir, sources)
+func RunBenchmarks(ctx context.Context, repoRoot string, stateDir string, sources string, benchRoot string, mode contracts.SessionMode, options session.Options) (*Summary, error) {
+	service, err := session.NewServiceWithOptions(ctx, repoRoot, stateDir, sources, options)
 	if err != nil {
 		return nil, err
 	}

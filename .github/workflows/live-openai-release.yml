@@ -1,0 +1,55 @@
+name: Live OpenAI Release Gate
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  live-openai-conversation:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_E2E: "1"
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+      OPENAI_EVAL_MODEL: ${{ vars.OPENAI_EVAL_MODEL }}
+      OPENAI_E2E_ARTIFACT_DIR: ${{ github.workspace }}/openai-e2e-artifacts
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+          cache: true
+
+      - name: Validate OpenAI configuration
+        run: |
+          test -n "$OPENAI_API_KEY"
+
+      - name: Install Flogo CLI
+        run: |
+          go install github.com/project-flogo/cli/...@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Flogo CLI
+        run: flogo help >/dev/null
+
+      - name: Run live OpenAI conversation tests
+        run: go test ./e2e -run 'TestLiveOpenAI.*' -v
+
+      - name: Run benchmark summary with live model
+        run: go run ./cmd/flogo-agent benchmark --bench-root ./testdata/benchmarks --mode review > benchmark-summary.json
+
+      - name: Upload live conversation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openai-e2e-artifacts
+          path: |
+            ${{ github.workspace }}/openai-e2e-artifacts
+            benchmark-summary.json
+          if-no-files-found: warn
