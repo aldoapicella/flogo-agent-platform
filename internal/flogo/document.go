@@ -33,6 +33,10 @@ func LoadDocument(repoPath string) (*Document, error) {
 		return nil, fmt.Errorf("read flogo.json: %w", err)
 	}
 
+	return ParseDocumentBytes(path, contents, contents)
+}
+
+func ParseDocumentBytes(path string, original []byte, contents []byte) (*Document, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(contents, &raw); err != nil {
 		return nil, fmt.Errorf("parse flogo.json: %w", err)
@@ -40,7 +44,7 @@ func LoadDocument(repoPath string) (*Document, error) {
 
 	return &Document{
 		Path:     path,
-		Original: contents,
+		Original: original,
 		Raw:      raw,
 	}, nil
 }

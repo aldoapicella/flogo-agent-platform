@@ -66,7 +66,36 @@ func TestServiceRunAppliesSafeRepairs(t *testing.T) {
 	}
 
 	flogoScript := filepath.Join(root, "bin", "flogo")
-	if err := os.WriteFile(flogoScript, []byte("#!/bin/sh\nif [ \"$1\" = \"create\" ]; then mkdir -p \"$4\"; fi\nexit 0\n"), 0o755); err != nil {
+	script := `#!/bin/sh
+if [ "$1" = "create" ]; then
+  mkdir -p "$4"
+  cp "$3" "$4/flogo.json"
+  exit 0
+fi
+if [ "$1" = "build" ]; then
+  mkdir -p "$PWD/bin"
+  cat > "$PWD/bin/sample-app" <<'EOF'
+#!/bin/sh
+if [ "$1" = "-test" ] && [ "$2" = "-flows" ]; then
+  printf 'main\n'
+  exit 0
+fi
+if [ "$1" = "-test" ] && [ "$2" = "-flowdata" ]; then
+  printf '{}\n' > "$PWD/sample-app_main_input.json"
+  exit 0
+fi
+if [ "$1" = "-test" ] && [ "$2" = "-flowin" ]; then
+  printf '{}\n' > "$4"
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$PWD/bin/sample-app"
+  exit 0
+fi
+exit 0
+`
+	if err := os.WriteFile(flogoScript, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", filepath.Join(root, "bin")+":"+os.Getenv("PATH"))

@@ -13,6 +13,7 @@ import (
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
 	"github.com/aldoapicella/flogo-agent-platform/internal/flogo"
 	"github.com/aldoapicella/flogo-agent-platform/internal/knowledge"
+	"github.com/aldoapicella/flogo-agent-platform/internal/model"
 	"github.com/aldoapicella/flogo-agent-platform/internal/sandbox"
 	"github.com/aldoapicella/flogo-agent-platform/internal/tools"
 )
@@ -24,14 +25,27 @@ type Service struct {
 	store     *knowledge.Store
 	repoRoot  string
 	stateDir  string
+	options   Options
 
 	mu      sync.Mutex
 	pending *contracts.SessionRequest
 }
 
+type Options struct {
+	Sandbox sandbox.Config
+	Model   model.Client
+}
+
 func NewService(ctx context.Context, repoRoot string, stateDir string, manifestPath string) (*Service, error) {
+	return NewServiceWithOptions(ctx, repoRoot, stateDir, manifestPath, Options{})
+}
+
+func NewServiceWithOptions(ctx context.Context, repoRoot string, stateDir string, manifestPath string, options Options) (*Service, error) {
 	if stateDir == "" {
 		stateDir = filepath.Join(repoRoot, ".flogo-agent")
+	}
+	if options.Sandbox.Profile == "" {
+		options.Sandbox = sandbox.DefaultConfig()
 	}
 
 	knowledgePath := filepath.Join(stateDir, "knowledge.db")
@@ -48,16 +62,25 @@ func NewService(ctx context.Context, repoRoot string, stateDir string, manifestP
 	}
 
 	artifactRoot := filepath.Join(stateDir, "artifacts")
-	runner := sandbox.NewLocalRunner(artifactRoot)
+	runner := sandbox.NewRunner(artifactRoot, options.Sandbox)
 	flogoClient := tools.NewFlogoClient(runner)
+	modelClient := options.Model
+	if modelClient == nil {
+		var err error
+		modelClient, err = model.NewFromEnv()
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	return &Service{
 		retriever: agents.NewRetriever(store),
-		repairer:  agents.NewRepairer(),
+		repairer:  agents.NewRepairer(modelClient),
 		verifier:  agents.NewVerifier(flogoClient),
 		store:     store,
 		repoRoot:  repoRoot,
 		stateDir:  stateDir,
+		options:   options,
 	}, nil
 }
 
@@ -91,7 +114,7 @@ func (s *Service) Run(ctx context.Context, req contracts.SessionRequest) (*contr
 
 		if !validation.Passed {
 			citations := collectCitations(validation)
-			patchPlan, notes, err := s.repairer.BuildPatchPlan(doc, citations)
+			patchPlan, notes, err := s.repairer.BuildPatchPlan(ctx, doc, validation, citations)
 			if err != nil {
 				return nil, err
 			}
@@ -106,9 +129,13 @@ func (s *Service) Run(ctx context.Context, req contracts.SessionRequest) (*contr
 				return report, nil
 			}
 
-			if req.Mode == contracts.ModeReview || req.ApprovalPolicy.RequireWriteApproval {
+			if req.Mode == contracts.ModeReview || req.ApprovalPolicy.RequireWriteApproval || !patchPlan.Safe {
 				report.Outcome = contracts.RunOutcomeReady
-				report.NextAction = "review the proposed patch before applying"
+				if patchPlan.Safe {
+					report.NextAction = "review the proposed patch before applying"
+				} else {
+					report.NextAction = "review the model-generated patch before applying"
+				}
 				s.setPending(req)
 				return report, nil
 			}
@@ -133,6 +160,12 @@ func (s *Service) Run(ctx context.Context, req contracts.SessionRequest) (*contr
 			s.clearPending()
 			return report, nil
 		}
+		if !testsPassed(testResults) {
+			report.Outcome = contracts.RunOutcomeBlocked
+			report.NextAction = "inspect the generated test artifacts and repair the failing flow or unit tests"
+			s.clearPending()
+			return report, nil
+		}
 		report.Outcome = contracts.RunOutcomeApplied
 		report.NextAction = "validation, build, and available tests completed"
 		s.clearPending()
@@ -142,6 +175,55 @@ func (s *Service) Run(ctx context.Context, req contracts.SessionRequest) (*contr
 	report.Outcome = contracts.RunOutcomeFailed
 	report.NextAction = "exceeded maximum repair iterations"
 	s.clearPending()
+	return report, nil
+}
+
+func (s *Service) Analyze(ctx context.Context, req contracts.SessionRequest) (*contracts.RunReport, error) {
+	report := &contracts.RunReport{}
+	if req.StateDir == "" {
+		req.StateDir = s.stateDir
+	}
+
+	doc, err := flogo.LoadDocument(req.RepoPath)
+	if err != nil {
+		return nil, err
+	}
+
+	validation, err := s.verifier.Validate(doc)
+	if err != nil {
+		return nil, err
+	}
+	attachCitations(ctx, s.retriever, &validation)
+
+	report.Evidence.ValidationResult = validation
+	report.Evidence.Iteration = 1
+
+	if validation.Passed {
+		report.Outcome = contracts.RunOutcomeApplied
+		report.NextAction = "validation passed; build or test when ready"
+		return report, nil
+	}
+
+	citations := collectCitations(validation)
+	patchPlan, notes, err := s.repairer.BuildPatchPlan(ctx, doc, validation, citations)
+	if err != nil {
+		return nil, err
+	}
+	report.PatchPlan = patchPlan
+	report.Citations = citations
+	report.Messages = append(report.Messages, notes...)
+	if patchPlan != nil {
+		report.Outcome = contracts.RunOutcomeReady
+		if patchPlan.Safe {
+			report.NextAction = "review the proposed patch before applying"
+		} else {
+			report.NextAction = "review the model-generated patch before applying"
+		}
+		return report, nil
+	}
+
+	report.Outcome = contracts.RunOutcomeBlocked
+	report.NextAction = "no safe automated repair was available"
 	return report, nil
 }
 
@@ -231,4 +313,16 @@ func sanitizeName(value string) string {
 		builder.WriteByte('-')
 	}
 	return strings.Trim(builder.String(), "-")
+}
+
+func testsPassed(results []contracts.TestResult) bool {
+	for _, result := range results {
+		if result.Skipped {
+			continue
+		}
+		if !result.Passed {
+			return false
+		}
+	}
+	return true
 }

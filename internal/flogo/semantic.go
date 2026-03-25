@@ -20,6 +20,8 @@ func ValidateSemantics(doc *Document) []contracts.ValidationIssue {
 	issues = append(issues, validateFlowURIs(doc, catalog, flows)...)
 	issues = append(issues, validateFlowActionIO(doc, flows)...)
 	issues = append(issues, validateFlowExpressions(doc, flows)...)
+	issues = append(issues, validateFlowTasks(doc, catalog, flows)...)
+	issues = append(issues, validateFlowLinks(doc, flows)...)
 	issues = append(issues, validateMappings(doc)...)
 	sort.Slice(issues, func(i, j int) bool {
 		if issues[i].RuleID == issues[j].RuleID {
@@ -195,6 +197,19 @@ func validateFlowActionIO(doc *Document, flows map[string]flowResource) []contra
 				})
 			}
 		}
+
+		for _, param := range flow.OutputOrder {
+			if _, ok := action.Output[param.Name]; ok {
+				continue
+			}
+			issues = append(issues, contracts.ValidationIssue{
+				Severity: "warning",
+				RuleID:   "flow.output.missing_mapping",
+				Message:  fmt.Sprintf("flow output %q in %q has no trigger reply mapping", param.Name, flowID),
+				File:     doc.Path,
+				JSONPath: action.Path,
+			})
+		}
 	}
 	return issues
 }
@@ -243,6 +258,109 @@ func validateFlowExpressions(doc *Document, flows map[string]flowResource) []con
 				})
 			}
 		})
+	}
+	return issues
+}
+
+func validateFlowTasks(doc *Document, catalog importCatalog, flows map[string]flowResource) []contracts.ValidationIssue {
+	var issues []contracts.ValidationIssue
+	for _, flow := range flows {
+		seen := map[string]string{}
+		for _, task := range flow.Tasks {
+			if task.ID == "" {
+				issues = append(issues, contracts.ValidationIssue{
+					Severity: "error",
+					RuleID:   "task.id.missing",
+					Message:  fmt.Sprintf("task %q in flow %q is missing an id", task.Name, flow.ID),
+					File:     doc.Path,
+					JSONPath: task.Path,
+				})
+			} else if prior, ok := seen[task.ID]; ok {
+				issues = append(issues, contracts.ValidationIssue{
+					Severity: "error",
+					RuleID:   "task.id.duplicate",
+					Message:  fmt.Sprintf("task id %q is duplicated in flow %q; first seen at %s", task.ID, flow.ID, prior),
+					File:     doc.Path,
+					JSONPath: task.Path + ".id",
+				})
+			} else {
+				seen[task.ID] = task.Path + ".id"
+			}
+
+			if task.ActivityPath == "" {
+				issues = append(issues, contracts.ValidationIssue{
+					Severity: "error",
+					RuleID:   "task.activity.missing",
+					Message:  fmt.Sprintf("task %q in flow %q is missing an activity block", task.IDOrName(), flow.ID),
+					File:     doc.Path,
+					JSONPath: task.Path,
+				})
+				continue
+			}
+			if task.ActivityRef == "" {
+				issues = append(issues, contracts.ValidationIssue{
+					Severity: "error",
+					RuleID:   "task.activity.ref.missing",
+					Message:  fmt.Sprintf("task %q in flow %q is missing activity.ref", task.IDOrName(), flow.ID),
+					File:     doc.Path,
+					JSONPath: task.ActivityPath,
+				})
+				continue
+			}
+			if !catalog.resolve(task.ActivityRef) && (strings.HasPrefix(task.ActivityRef, "#") || strings.Contains(task.ActivityRef, "project-flogo")) {
+				issues = append(issues, contracts.ValidationIssue{
+					Severity: "error",
+					RuleID:   "task.activity.ref.unresolved",
+					Message:  fmt.Sprintf("task %q in flow %q references unresolved activity %q", task.IDOrName(), flow.ID, task.ActivityRef),
+					File:     doc.Path,
+					JSONPath: task.ActivityRefPath,
+				})
+			}
+		}
+	}
+	return issues
+}
+
+func validateFlowLinks(doc *Document, flows map[string]flowResource) []contracts.ValidationIssue {
+	var issues []contracts.ValidationIssue
+	for _, flow := range flows {
+		for _, link := range flow.Links {
+			if link.From == "" {
+				issues = append(issues, contracts.ValidationIssue{
+					Severity: "error",
+					RuleID:   "link.from.missing",
+					Message:  fmt.Sprintf("link in flow %q is missing a from task id", flow.ID),
+					File:     doc.Path,
+					JSONPath: link.Path,
+				})
+			} else if !flow.hasTask(link.From) {
+				issues = append(issues, contracts.ValidationIssue{
+					Severity: "error",
+					RuleID:   "link.from.unknown",
+					Message:  fmt.Sprintf("link in flow %q references unknown from task %q", flow.ID, link.From),
+					File:     doc.Path,
+					JSONPath: link.Path + ".from",
+				})
+			}
+
+			if link.To == "" {
+				issues = append(issues, contracts.ValidationIssue{
+					Severity: "error",
+					RuleID:   "link.to.missing",
+					Message:  fmt.Sprintf("link in flow %q is missing a to task id", flow.ID),
+					File:     doc.Path,
+					JSONPath: link.Path,
+				})
+			} else if !flow.hasTask(link.To) {
+				issues = append(issues, contracts.ValidationIssue{
+					Severity: "error",
+					RuleID:   "link.to.unknown",
+					Message:  fmt.Sprintf("link in flow %q references unknown to task %q", flow.ID, link.To),
+					File:     doc.Path,
+					JSONPath: link.Path + ".to",
+				})
+			}
+		}
 	}
 	return issues
 }
@@ -337,8 +455,11 @@ type flowResource struct {
 	ID          string
 	InputOrder  []flowParam
 	OutputOrder []flowParam
+	Tasks       []flowTask
+	Links       []flowLink
 	inputs      map[string]flowParam
 	outputs     map[string]flowParam
+	tasks       map[string]flowTask
 }
 
 func (f flowResource) hasInput(name string) bool {
@@ -351,9 +472,14 @@ func (f flowResource) hasOutput(name string) bool {
 	return ok
 }
 
+func (f flowResource) hasTask(name string) bool {
+	_, ok := f.tasks[name]
+	return ok
+}
+
 func collectFlowResources(doc *Document) map[string]flowResource {
 	out := map[string]flowResource{}
-	for _, item := range asSlice(doc.Raw["resources"]) {
+	for idx, item := range asSlice(doc.Raw["resources"]) {
 		resource, ok := item.(map[string]any)
 		if !ok {
 			continue
@@ -369,13 +495,19 @@ func collectFlowResources(doc *Document) map[string]flowResource {
 		metadata, _ := data["metadata"].(map[string]any)
 		inputs := parseFlowParams(metadata, "input")
 		outputs := parseFlowParams(metadata, "output")
+		basePath := fmt.Sprintf("$.resources[%d].data", idx)
+		tasks := parseFlowTasks(data, basePath)
+		links := parseFlowLinks(data, basePath)
 		key := strings.TrimPrefix(id, "flow:")
 		out[key] = flowResource{
 			ID:          key,
 			InputOrder:  inputs,
 			OutputOrder: outputs,
+			Tasks:       tasks,
+			Links:       links,
 			inputs:      indexFlowParams(inputs),
 			outputs:     indexFlowParams(outputs),
+			tasks:       indexFlowTasks(tasks),
 		}
 	}
 	return out
@@ -406,6 +538,88 @@ func indexFlowParams(items []flowParam) map[string]flowParam {
 	out := make(map[string]flowParam, len(items))
 	for _, item := range items {
 		out[item.Name] = item
+	}
+	return out
+}
+
+type flowTask struct {
+	ID              string
+	Name            string
+	Path            string
+	ActivityPath    string
+	ActivityRef     string
+	ActivityRefPath string
+}
+
+func (f flowTask) IDOrName() string {
+	if f.ID != "" {
+		return f.ID
+	}
+	if f.Name != "" {
+		return f.Name
+	}
+	return "<unnamed>"
+}
+
+type flowLink struct {
+	From string
+	To   string
+	Path string
+}
+
+func parseFlowTasks(data map[string]any, basePath string) []flowTask {
+	items := asSlice(data["tasks"])
+	out := make([]flowTask, 0, len(items))
+	for idx, item := range items {
+		task, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		path := fmt.Sprintf("%s.tasks[%d]", basePath, idx)
+		activity, _ := task["activity"].(map[string]any)
+		out = append(out, flowTask{
+			ID:              asString(task["id"]),
+			Name:            asString(task["name"]),
+			Path:            path,
+			ActivityPath:    path + ".activity",
+			ActivityRef:     asString(activity["ref"]),
+			ActivityRefPath: path + ".activity.ref",
+		})
+		if activity == nil {
+			out[len(out)-1].ActivityPath = ""
+			out[len(out)-1].ActivityRefPath = ""
+		}
+	}
+	return out
+}
+
+func parseFlowLinks(data map[string]any, basePath string) []flowLink {
+	items := asSlice(data["links"])
+	out := make([]flowLink, 0, len(items))
+	for idx, item := range items {
+		link, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		out = append(out, flowLink{
+			From: asString(link["from"]),
+			To:   asString(link["to"]),
+			Path: fmt.Sprintf("%s.links[%d]", basePath, idx),
+		})
+	}
+	return out
+}
+
+func indexFlowTasks(items []flowTask) map[string]flowTask {
+	out := make(map[string]flowTask, len(items))
+	for _, item := range items {
+		if item.ID == "" {
+			continue
+		}
+		if _, exists := out[item.ID]; exists {
+			continue
+		}
+		out[item.ID] = item
 	}
 	return out
 }

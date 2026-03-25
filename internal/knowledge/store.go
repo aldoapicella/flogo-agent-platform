@@ -41,6 +41,8 @@ func (s *Store) Close() error {
 
 func (s *Store) migrate(ctx context.Context) error {
 	statements := []string{
+		`PRAGMA journal_mode = WAL;`,
+		`PRAGMA busy_timeout = 5000;`,
 		`CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(source_id, title, locator, source_type, content, tags);`,
 		`CREATE TABLE IF NOT EXISTS run_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 	}

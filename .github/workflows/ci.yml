@@ -18,7 +18,7 @@ jobs:
           go-version-file: .go-version
           cache: true
 
-      - name: Run unit tests
+      - name: Run unit and end-to-end tests
         run: go test ./...
 
       - name: Run benchmark summary

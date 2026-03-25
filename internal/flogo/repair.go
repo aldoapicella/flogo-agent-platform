@@ -32,7 +32,13 @@ func BuildSafePatchPlan(doc *Document, citations []contracts.SourceCitation) (*c
 	if repairMissingImports(doc, &notes) {
 		changed = true
 	}
+	if repairMissingTaskIDs(doc, &notes) {
+		changed = true
+	}
 	if repairFlowInputMappings(doc, &notes) {
+		changed = true
+	}
+	if repairFlowOutputMappings(doc, &notes) {
 		changed = true
 	}
 
@@ -132,26 +138,38 @@ func unifiedDiff(original []byte, updated []byte) (string, error) {
 func repairMissingImports(doc *Document, notes *[]string) bool {
 	catalog := buildImportCatalog(doc.Imports())
 	missingByRef := map[string]string{}
+	explicitRefs := map[string]struct{}{}
 	walkJSON(doc.Raw, "$", func(path string, key string, value any, inMapping bool) {
 		if key != "ref" {
 			return
 		}
 		text, ok := value.(string)
-		if !ok || !strings.HasPrefix(text, "#") || catalog.resolve(text) {
+		if !ok || text == "" {
 			return
 		}
-		alias := strings.TrimPrefix(text, "#")
-		ref, ok := canonicalImportsByAlias[alias]
-		if !ok {
+		if catalog.resolve(text) {
 			return
 		}
-		if _, exists := catalog.byRef[ref]; exists {
+		if strings.HasPrefix(text, "#") {
+			alias := strings.TrimPrefix(text, "#")
+			ref, ok := canonicalImportsByAlias[alias]
+			if !ok {
+				return
+			}
+			if _, exists := catalog.byRef[ref]; exists {
+				return
+			}
+			missingByRef[ref] = alias
 			return
 		}
-		missingByRef[ref] = alias
+		normalized := normalizeImportRef(text)
+		if !strings.Contains(normalized, "/") {
+			return
+		}
+		explicitRefs[normalized] = struct{}{}
 	})
 
-	if len(missingByRef) == 0 {
+	if len(missingByRef) == 0 && len(explicitRefs) == 0 {
 		return false
 	}
 
@@ -164,10 +182,24 @@ func repairMissingImports(doc *Document, notes *[]string) bool {
 	for ref := range missingByRef {
 		refs = append(refs, ref)
 	}
+	for ref := range explicitRefs {
+		if _, exists := catalog.byRef[ref]; exists {
+			continue
+		}
+		refs = append(refs, ref)
+	}
 	sort.Strings(refs)
 	for _, ref := range refs {
+		if _, exists := catalog.byRef[ref]; exists {
+			continue
+		}
 		imports = append(imports, ref)
-		*notes = append(*notes, fmt.Sprintf("added canonical import %q for alias #%s", ref, missingByRef[ref]))
+		if alias, ok := missingByRef[ref]; ok {
+			*notes = append(*notes, fmt.Sprintf("added canonical import %q for alias #%s", ref, alias))
+		} else {
+			*notes = append(*notes, fmt.Sprintf("added missing direct import %q", ref))
+		}
+		catalog.byRef[ref] = newImport(ref, "")
 	}
 	doc.Raw["imports"] = imports
 	return true
@@ -230,6 +262,142 @@ func repairFlowInputMappings(doc *Document, notes *[]string) bool {
 		changed = true
 	})
 	return changed
+}
+
+func repairFlowOutputMappings(doc *Document, notes *[]string) bool {
+	flows := collectFlowResources(doc)
+	changed := false
+	forEachHandlerActionMap(doc, func(action map[string]any, path string) {
+		settings, _ := action["settings"].(map[string]any)
+		flowURI := asString(settings["flowURI"])
+		if flowURI == "" {
+			return
+		}
+		flowID := strings.TrimPrefix(flowURI, "res://flow:")
+		if !strings.HasPrefix(flowURI, "res://flow:") {
+			flowID = strings.TrimPrefix(flowURI, "flow:")
+		}
+		flow, ok := flows[flowID]
+		if !ok {
+			return
+		}
+
+		output, _ := action["output"].(map[string]any)
+		if output == nil {
+			return
+		}
+
+		var undefined []string
+		for key := range output {
+			if !flow.hasOutput(key) {
+				undefined = append(undefined, key)
+			}
+		}
+		var missing []string
+		for _, param := range flow.OutputOrder {
+			if _, ok := output[param.Name]; !ok {
+				missing = append(missing, param.Name)
+			}
+		}
+
+		if len(undefined) != 1 || len(missing) != 1 {
+			return
+		}
+		from := undefined[0]
+		to := missing[0]
+		if from == to {
+			return
+		}
+		if _, exists := output[to]; exists {
+			return
+		}
+
+		output[to] = output[from]
+		delete(output, from)
+		*notes = append(*notes, fmt.Sprintf("renamed flow output mapping %q to %q at %s.output", from, to, path))
+		changed = true
+	})
+	return changed
+}
+
+func repairMissingTaskIDs(doc *Document, notes *[]string) bool {
+	changed := false
+	for idx, item := range asSlice(doc.Raw["resources"]) {
+		resource, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := asString(resource["id"])
+		if !strings.HasPrefix(id, "flow:") {
+			continue
+		}
+		data, _ := resource["data"].(map[string]any)
+		tasks := asSlice(data["tasks"])
+		if len(tasks) == 0 {
+			continue
+		}
+
+		used := map[string]bool{}
+		for _, taskItem := range tasks {
+			task, ok := taskItem.(map[string]any)
+			if !ok {
+				continue
+			}
+			if taskID := asString(task["id"]); taskID != "" {
+				used[taskID] = true
+			}
+		}
+
+		for taskIdx, taskItem := range tasks {
+			task, ok := taskItem.(map[string]any)
+			if !ok {
+				continue
+			}
+			if asString(task["id"]) != "" {
+				continue
+			}
+			taskID := nextTaskID(asString(task["name"]), taskIdx, used)
+			task["id"] = taskID
+			used[taskID] = true
+			*notes = append(*notes, fmt.Sprintf("generated task id %q at $.resources[%d].data.tasks[%d].id", taskID, idx, taskIdx))
+			changed = true
+		}
+	}
+	return changed
+}
+
+func nextTaskID(name string, index int, used map[string]bool) string {
+	base := sanitizeTaskID(name)
+	if base == "" {
+		base = fmt.Sprintf("task_%d", index+1)
+	}
+	if !used[base] {
+		return base
+	}
+	for attempt := 2; ; attempt++ {
+		candidate := fmt.Sprintf("%s_%d", base, attempt)
+		if !used[candidate] {
+			return candidate
+		}
+	}
+}
+
+func sanitizeTaskID(name string) string {
+	if name == "" {
+		return ""
+	}
+	var builder strings.Builder
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			builder.WriteRune(r)
+			continue
+		}
+		if builder.Len() == 0 || builder.String()[builder.Len()-1] == '_' {
+			continue
+		}
+		builder.WriteByte('_')
+	}
+	return strings.Trim(builder.String(), "_")
 }
 
 func forEachHandlerActionMap(doc *Document, fn func(action map[string]any, path string)) {

@@ -233,3 +233,73 @@ func TestValidateSemanticsDetectsUnresolvedRefsAndFlowIODrift(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateSemanticsDetectsTaskAndLinkIssues(t *testing.T) {
+	doc := &Document{
+		Path: "flogo.json",
+		Raw: map[string]any{
+			"name":        "demo",
+			"type":        "flogo:app",
+			"version":     "1.0.0",
+			"description": "demo",
+			"imports": []any{
+				"github.com/project-flogo/flow",
+				"github.com/project-flogo/contrib/trigger/rest",
+			},
+			"properties": []any{},
+			"channels":   []any{},
+			"actions":    []any{},
+			"triggers":   []any{},
+			"resources": []any{
+				map[string]any{
+					"id": "flow:main",
+					"data": map[string]any{
+						"metadata": map[string]any{},
+						"tasks": []any{
+							map[string]any{
+								"name": "First",
+							},
+							map[string]any{
+								"id":   "dup",
+								"name": "Second",
+								"activity": map[string]any{
+									"ref": "#missing",
+								},
+							},
+							map[string]any{
+								"id":   "dup",
+								"name": "Third",
+								"activity": map[string]any{
+									"ref": "#rest",
+								},
+							},
+						},
+						"links": []any{
+							map[string]any{
+								"from": "dup",
+								"to":   "unknown",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	issues := ValidateSemantics(doc)
+	ruleIDs := map[string]bool{}
+	for _, issue := range issues {
+		ruleIDs[issue.RuleID] = true
+	}
+	for _, expected := range []string{
+		"task.id.missing",
+		"task.activity.missing",
+		"task.id.duplicate",
+		"task.activity.ref.unresolved",
+		"link.to.unknown",
+	} {
+		if !ruleIDs[expected] {
+			t.Fatalf("expected rule %s in %+v", expected, issues)
+		}
+	}
+}

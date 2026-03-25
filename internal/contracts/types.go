@@ -8,6 +8,20 @@ const (
 	ModeAuto   SessionMode = "auto"
 )
 
+type SandboxProfile string
+
+const (
+	SandboxProfileLocal    SandboxProfile = "local"
+	SandboxProfileIsolated SandboxProfile = "isolated"
+)
+
+type SandboxConfig struct {
+	Profile SandboxProfile `json:"profile"`
+	Image   string         `json:"image,omitempty"`
+	Runtime string         `json:"runtime,omitempty"`
+	Network string         `json:"network,omitempty"`
+}
+
 type ApprovalPolicy struct {
 	RequireWriteApproval      bool `json:"requireWriteApproval"`
 	RequireDependencyApproval bool `json:"requireDependencyApproval"`
@@ -19,8 +33,82 @@ type SessionRequest struct {
 	Goal            string         `json:"goal"`
 	Mode            SessionMode    `json:"mode"`
 	ApprovalPolicy  ApprovalPolicy `json:"approvalPolicy"`
+	Sandbox         SandboxConfig  `json:"sandbox"`
 	StateDir        string         `json:"stateDir"`
 	SourcesManifest string         `json:"sourcesManifest"`
+}
+
+type MessageRole string
+
+const (
+	RoleSystem    MessageRole = "system"
+	RoleUser      MessageRole = "user"
+	RoleAssistant MessageRole = "assistant"
+)
+
+type SessionStatus string
+
+const (
+	SessionStatusActive          SessionStatus = "active"
+	SessionStatusWaitingApproval SessionStatus = "waiting_approval"
+	SessionStatusBlocked         SessionStatus = "blocked"
+	SessionStatusCompleted       SessionStatus = "completed"
+)
+
+type PlanItemStatus string
+
+const (
+	PlanItemPending    PlanItemStatus = "pending"
+	PlanItemInProgress PlanItemStatus = "in_progress"
+	PlanItemCompleted  PlanItemStatus = "completed"
+	PlanItemBlocked    PlanItemStatus = "blocked"
+)
+
+type ChatMessage struct {
+	ID        string      `json:"id"`
+	Role      MessageRole `json:"role"`
+	Content   string      `json:"content"`
+	CreatedAt string      `json:"createdAt"`
+}
+
+type PlanItem struct {
+	ID      string         `json:"id"`
+	Title   string         `json:"title"`
+	Status  PlanItemStatus `json:"status"`
+	Details string         `json:"details,omitempty"`
+}
+
+type PendingApproval struct {
+	Kind        string     `json:"kind"`
+	Summary     string     `json:"summary"`
+	RequestedAt string     `json:"requestedAt"`
+	PatchPlan   *PatchPlan `json:"patchPlan,omitempty"`
+}
+
+type SessionEvent struct {
+	ID        string      `json:"id"`
+	Type      string      `json:"type"`
+	Summary   string      `json:"summary"`
+	CreatedAt string      `json:"createdAt"`
+}
+
+type SessionSnapshot struct {
+	ID              string           `json:"id"`
+	RepoPath        string           `json:"repoPath"`
+	Goal            string           `json:"goal"`
+	Mode            SessionMode      `json:"mode"`
+	ApprovalPolicy  ApprovalPolicy   `json:"approvalPolicy"`
+	Sandbox         SandboxConfig    `json:"sandbox"`
+	StateDir        string           `json:"stateDir"`
+	SourcesManifest string           `json:"sourcesManifest"`
+	Status          SessionStatus    `json:"status"`
+	Messages        []ChatMessage    `json:"messages,omitempty"`
+	Plan            []PlanItem       `json:"plan,omitempty"`
+	Events          []SessionEvent   `json:"events,omitempty"`
+	PendingApproval *PendingApproval `json:"pendingApproval,omitempty"`
+	LastReport      *RunReport       `json:"lastReport,omitempty"`
+	CreatedAt       string           `json:"createdAt"`
+	UpdatedAt       string           `json:"updatedAt"`
 }
 
 type SourceCitation struct {

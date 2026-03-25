@@ -13,12 +13,26 @@ import (
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
 )
 
-type Profile string
+type Config struct {
+	Profile contracts.SandboxProfile
+	Image   string
+	Runtime string
+	Network string
+}
 
-const (
-	ProfileLocal    Profile = "local"
-	ProfileIsolated Profile = "isolated"
-)
+func DefaultConfig() Config {
+	return Config{
+		Profile: contracts.SandboxProfileLocal,
+		Network: "bridge",
+	}
+}
+
+func NewRunner(artifactRoot string, config Config) Runner {
+	if config.Profile == contracts.SandboxProfileIsolated {
+		return NewDockerRunner(artifactRoot, config.Image, config.Runtime, config.Network)
+	}
+	return NewLocalRunner(artifactRoot)
+}
 
 type Runner interface {
 	Run(context.Context, contracts.ToolInvocation) (contracts.ToolResult, error)
@@ -95,14 +109,19 @@ type DockerRunner struct {
 	artifactRoot string
 	Image        string
 	Runtime      string
+	Network      string
 }
 
-func NewDockerRunner(artifactRoot string, image string, runtime string) *DockerRunner {
+func NewDockerRunner(artifactRoot string, image string, runtime string, network string) *DockerRunner {
+	if network == "" {
+		network = "bridge"
+	}
 	return &DockerRunner{
 		local:        NewLocalRunner(artifactRoot),
 		artifactRoot: artifactRoot,
 		Image:        image,
 		Runtime:      runtime,
+		Network:      network,
 	}
 }
 
@@ -120,13 +139,37 @@ func (r *DockerRunner) Run(ctx context.Context, invocation contracts.ToolInvocat
 	if r.Runtime != "" {
 		args = append(args, "--runtime", r.Runtime)
 	}
-	args = append(args, "-v", invocation.WorkDir+":/workspace", "-w", "/workspace", r.Image, invocation.ToolName)
+	if r.Network != "" {
+		args = append(args, "--network", r.Network)
+	}
+	for key, value := range invocation.Env {
+		args = append(args, "-e", key+"="+value)
+	}
+	args = append(args, "-v", invocation.WorkDir+":/workspace", "-w", "/workspace", r.Image, containerToolName(invocation))
 	args = append(args, invocation.Args...)
 	return r.local.Run(ctx, contracts.ToolInvocation{
 		ToolName:  "docker",
 		Args:      args,
 		WorkDir:   invocation.WorkDir,
 		EnvPolicy: invocation.EnvPolicy,
-		Env:       invocation.Env,
 	})
+}
+
+func containerToolName(invocation contracts.ToolInvocation) string {
+	tool := invocation.ToolName
+	if tool == "" || !filepath.IsAbs(tool) || invocation.WorkDir == "" {
+		return tool
+	}
+
+	rel, err := filepath.Rel(invocation.WorkDir, tool)
+	if err != nil {
+		return tool
+	}
+	if rel == "." {
+		return "/workspace"
+	}
+	if strings.HasPrefix(rel, "..") {
+		return tool
+	}
+	return filepath.ToSlash(filepath.Join("/workspace", rel))
 }
