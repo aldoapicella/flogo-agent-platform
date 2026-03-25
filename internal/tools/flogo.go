@@ -23,25 +23,25 @@ func (c *FlogoClient) Available() bool {
 	return err == nil
 }
 
-func (c *FlogoClient) Build(ctx context.Context, repoPath string) (contracts.ToolResult, error) {
+func (c *FlogoClient) Build(ctx context.Context, appPath string) (contracts.ToolResult, error) {
 	if !c.Available() {
 		return missingBinaryResult("flogo"), nil
 	}
 	return c.runner.Run(ctx, contracts.ToolInvocation{
 		ToolName:  "flogo",
-		Args:      []string{"build"},
-		WorkDir:   repoPath,
+		Args:      []string{"build", "-e"},
+		WorkDir:   appPath,
 		EnvPolicy: "default",
 	})
 }
 
-func (c *FlogoClient) Create(ctx context.Context, repoPath string) (contracts.ToolResult, error) {
+func (c *FlogoClient) CreateSource(ctx context.Context, repoPath string, outputPath string) (contracts.ToolResult, error) {
 	if !c.Available() {
 		return missingBinaryResult("flogo"), nil
 	}
 	return c.runner.Run(ctx, contracts.ToolInvocation{
 		ToolName:  "flogo",
-		Args:      []string{"create", "-f", filepath.Join(repoPath, "flogo.json")},
+		Args:      []string{"create", "-f", filepath.Join(repoPath, "flogo.json"), outputPath},
 		WorkDir:   repoPath,
 		EnvPolicy: "default",
 	})

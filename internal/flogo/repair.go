@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/pmezard/go-difflib/difflib"
@@ -11,15 +12,28 @@ import (
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
 )
 
+var canonicalImportsByAlias = map[string]string{
+	"flow": "github.com/project-flogo/flow",
+	"rest": "github.com/project-flogo/contrib/trigger/rest",
+	"log":  "github.com/project-flogo/contrib/activity/log",
+}
+
 func BuildSafePatchPlan(doc *Document, citations []contracts.SourceCitation) (*contracts.PatchPlan, []string, error) {
 	changed := false
-	notes := make([]string, 0, 2)
+	notes := make([]string, 0, 4)
 	resourceSet := make(map[string]struct{}, len(doc.ResourceIDs()))
 	for _, id := range doc.ResourceIDs() {
 		resourceSet[id] = struct{}{}
 		if strings.HasPrefix(id, "flow:") {
 			resourceSet[strings.TrimPrefix(id, "flow:")] = struct{}{}
 		}
+	}
+
+	if repairMissingImports(doc, &notes) {
+		changed = true
+	}
+	if repairFlowInputMappings(doc, &notes) {
+		changed = true
 	}
 
 	walkAndMutate(doc.Raw, "$", false, func(path string, key string, current any, inMapping bool) (any, bool) {
@@ -113,4 +127,135 @@ func unifiedDiff(original []byte, updated []byte) (string, error) {
 		Context:  3,
 	}
 	return difflib.GetUnifiedDiffString(diff)
+}
+
+func repairMissingImports(doc *Document, notes *[]string) bool {
+	catalog := buildImportCatalog(doc.Imports())
+	missingByRef := map[string]string{}
+	walkJSON(doc.Raw, "$", func(path string, key string, value any, inMapping bool) {
+		if key != "ref" {
+			return
+		}
+		text, ok := value.(string)
+		if !ok || !strings.HasPrefix(text, "#") || catalog.resolve(text) {
+			return
+		}
+		alias := strings.TrimPrefix(text, "#")
+		ref, ok := canonicalImportsByAlias[alias]
+		if !ok {
+			return
+		}
+		if _, exists := catalog.byRef[ref]; exists {
+			return
+		}
+		missingByRef[ref] = alias
+	})
+
+	if len(missingByRef) == 0 {
+		return false
+	}
+
+	imports := asSlice(doc.Raw["imports"])
+	if imports == nil {
+		imports = []any{}
+	}
+
+	refs := make([]string, 0, len(missingByRef))
+	for ref := range missingByRef {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	for _, ref := range refs {
+		imports = append(imports, ref)
+		*notes = append(*notes, fmt.Sprintf("added canonical import %q for alias #%s", ref, missingByRef[ref]))
+	}
+	doc.Raw["imports"] = imports
+	return true
+}
+
+func repairFlowInputMappings(doc *Document, notes *[]string) bool {
+	flows := collectFlowResources(doc)
+	changed := false
+	forEachHandlerActionMap(doc, func(action map[string]any, path string) {
+		settings, _ := action["settings"].(map[string]any)
+		flowURI := asString(settings["flowURI"])
+		if flowURI == "" {
+			return
+		}
+		flowID := strings.TrimPrefix(flowURI, "res://flow:")
+		if !strings.HasPrefix(flowURI, "res://flow:") {
+			flowID = strings.TrimPrefix(flowURI, "flow:")
+		}
+		flow, ok := flows[flowID]
+		if !ok {
+			return
+		}
+
+		input, _ := action["input"].(map[string]any)
+		if input == nil {
+			return
+		}
+
+		var undefined []string
+		for key := range input {
+			if !flow.hasInput(key) {
+				undefined = append(undefined, key)
+			}
+		}
+		var missing []string
+		for _, param := range flow.InputOrder {
+			if param.HasDefault {
+				continue
+			}
+			if _, ok := input[param.Name]; !ok {
+				missing = append(missing, param.Name)
+			}
+		}
+
+		if len(undefined) != 1 || len(missing) != 1 {
+			return
+		}
+		from := undefined[0]
+		to := missing[0]
+		if from == to {
+			return
+		}
+		if _, exists := input[to]; exists {
+			return
+		}
+
+		input[to] = input[from]
+		delete(input, from)
+		*notes = append(*notes, fmt.Sprintf("renamed flow input mapping %q to %q at %s.input", from, to, path))
+		changed = true
+	})
+	return changed
+}
+
+func forEachHandlerActionMap(doc *Document, fn func(action map[string]any, path string)) {
+	triggers := asSlice(doc.Raw["triggers"])
+	for triggerIdx, triggerItem := range triggers {
+		trigger, ok := triggerItem.(map[string]any)
+		if !ok {
+			continue
+		}
+		handlers := asSlice(trigger["handlers"])
+		for handlerIdx, handlerItem := range handlers {
+			handler, ok := handlerItem.(map[string]any)
+			if !ok {
+				continue
+			}
+			basePath := fmt.Sprintf("$.triggers[%d].handlers[%d]", triggerIdx, handlerIdx)
+			if action, ok := handler["action"].(map[string]any); ok {
+				fn(action, basePath+".action")
+			}
+			for actionIdx, actionItem := range asSlice(handler["actions"]) {
+				action, ok := actionItem.(map[string]any)
+				if !ok {
+					continue
+				}
+				fn(action, fmt.Sprintf("%s.actions[%d]", basePath, actionIdx))
+			}
+		}
+	}
 }

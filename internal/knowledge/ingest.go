@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func IngestManifest(ctx context.Context, repoRoot string, store *Store, manifestPath string) error {
@@ -57,8 +58,19 @@ func loadSource(repoRoot string, source Source) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if isHTMLResponse(resp.Header.Get("Content-Type"), body) {
+			return extractHTMLText(string(body)), nil
+		}
 		return string(body), nil
 	default:
 		return "", fmt.Errorf("unsupported source type %q", source.Type)
 	}
+}
+
+func isHTMLResponse(contentType string, body []byte) bool {
+	if strings.Contains(strings.ToLower(contentType), "html") {
+		return true
+	}
+	trimmed := strings.TrimSpace(string(body))
+	return strings.HasPrefix(strings.ToLower(trimmed), "<!doctype html") || strings.HasPrefix(strings.ToLower(trimmed), "<html")
 }

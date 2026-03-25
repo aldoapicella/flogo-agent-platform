@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-and-benchmarks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+          cache: true
+
+      - name: Run unit tests
+        run: go test ./...
+
+      - name: Run benchmark summary
+        run: go run ./cmd/flogo-agent benchmark --bench-root ./testdata/benchmarks --mode review
+
+  flogo-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+          cache: true
+
+      - name: Install Flogo CLI
+        run: |
+          go install github.com/project-flogo/cli/...@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Flogo CLI
+        run: flogo help >/dev/null
+
+      - name: Run Flogo integration tests
+        env:
+          FLOGO_INTEGRATION: "1"
+        run: go test -tags=integration ./internal/tools -run TestFlogoCLIIntegrationCreateAndBuild -v

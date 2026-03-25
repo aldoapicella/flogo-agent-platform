@@ -88,7 +88,7 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]contract
 		SELECT source_id, title, locator, source_type, snippet(chunks_fts, 4, '', '', '...', 18), bm25(chunks_fts)
 		FROM chunks_fts
 		WHERE chunks_fts MATCH ?
-		ORDER BY bm25(chunks_fts)
+		ORDER BY CASE WHEN tags LIKE '%official%' THEN 0 ELSE 1 END, bm25(chunks_fts)
 		LIMIT ?`, buildFTSQuery(query), limit)
 	if err != nil {
 		return nil, fmt.Errorf("search knowledge: %w", err)

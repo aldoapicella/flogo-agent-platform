@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Flogo compatibility schema based on official examples",
+  "type": "object",
+  "required": [
+    "name",
+    "type",
+    "version",
+    "imports",
+    "triggers",
+    "resources"
+  ],
+  "properties": {
+    "name": { "type": "string" },
+    "type": { "type": "string" },
+    "version": { "type": "string" },
+    "appModel": { "type": "string" },
+    "description": { "type": "string" },
+    "imports": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "properties": {
+              "ref": { "type": "string" },
+              "alias": { "type": "string" }
+            },
+            "required": ["ref"],
+            "additionalProperties": true
+          }
+        ]
+      }
+    },
+    "properties": { "type": "array" },
+    "channels": { "type": "array" },
+    "actions": { "type": "array" },
+    "triggers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "ref", "settings", "handlers"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string" },
+          "ref": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "settings": { "type": "object" },
+          "handlers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["settings"],
+              "properties": {
+                "name": { "type": "string" },
+                "settings": { "type": "object" },
+                "actions": {
+                  "type": "array",
+                  "items": { "$ref": "#/definitions/handlerAction" }
+                },
+                "action": { "$ref": "#/definitions/handlerAction" }
+              },
+              "oneOf": [
+                { "required": ["actions"] },
+                { "required": ["action"] }
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "data"],
+        "properties": {
+          "id": { "type": "string" },
+          "data": { "type": "object" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "definitions": {
+    "handlerAction": {
+      "type": "object",
+      "required": ["ref", "settings"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "ref": { "type": "string" },
+        "settings": { "type": "object" },
+        "input": { "type": "object" },
+        "output": { "type": "object" },
+        "data": { "type": "object" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

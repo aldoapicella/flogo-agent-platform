@@ -35,27 +35,38 @@ func TestServiceRunAppliesSafeRepairs(t *testing.T) {
   "type": "flogo:app",
   "version": "1.0.0",
   "description": "demo",
-  "imports": [],
+  "imports": [
+    "github.com/project-flogo/contrib/trigger/rest",
+    "github.com/project-flogo/flow"
+  ],
   "properties": [],
   "channels": [],
   "triggers": [
     {
+      "id": "receive_http_message",
+      "ref": "#rest",
+      "settings": {"port": "8888"},
       "handlers": [
         {
-          "settings": {"flowURI": "main"},
-          "input": {"message": "$flow.body"}
+          "settings": {"method": "GET", "path": "/test"},
+          "action": {
+            "ref": "#flow",
+            "settings": {"flowURI": "main"},
+            "input": {"message": "$flow.body"}
+          }
         }
       ]
     }
   ],
-  "resources": [{"id": "flow:main"}],
+  "appModel": "1.1.0",
+  "resources": [{"id": "flow:main", "data": {"metadata": {"input": [{"name": "message", "type": "string"}]}, "tasks": [], "links": []}}],
   "actions": []
 }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	flogoScript := filepath.Join(root, "bin", "flogo")
-	if err := os.WriteFile(flogoScript, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(flogoScript, []byte("#!/bin/sh\nif [ \"$1\" = \"create\" ]; then mkdir -p \"$4\"; fi\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", filepath.Join(root, "bin")+":"+os.Getenv("PATH"))

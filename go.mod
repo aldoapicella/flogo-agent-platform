@@ -8,6 +8,7 @@ require (
 	github.com/rivo/tview v0.42.0
 	github.com/spf13/cobra v1.10.2
 	github.com/xeipuuv/gojsonschema v1.2.0
+	golang.org/x/net v0.6.0
 	modernc.org/sqlite v1.47.0
 )
 

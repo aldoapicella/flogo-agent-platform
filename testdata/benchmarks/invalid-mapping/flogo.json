@@ -3,16 +3,29 @@
   "type": "flogo:app",
   "version": "1.0.0",
   "description": "benchmark fixture",
-  "imports": [],
+  "imports": [
+    "github.com/project-flogo/contrib/trigger/rest",
+    "github.com/project-flogo/flow"
+  ],
   "properties": [],
   "channels": [],
   "triggers": [
     {
+      "id": "receive_http_message",
+      "ref": "#rest",
       "name": "rest",
+      "settings": {
+        "port": "8888"
+      },
       "handlers": [
         {
+          "settings": {
+            "method": "GET",
+            "path": "/test/:val"
+          },
           "action": {
             "id": "runFlow",
+            "ref": "#flow",
             "settings": {
               "flowURI": "main"
             },
@@ -24,10 +37,19 @@
       ]
     }
   ],
+  "appModel": "1.1.0",
   "resources": [
     {
       "id": "flow:main",
       "data": {
+        "metadata": {
+          "input": [
+            {
+              "name": "message",
+              "type": "string"
+            }
+          ]
+        },
         "tasks": [],
         "links": []
       }

@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
+	"github.com/aldoapicella/flogo-agent-platform/internal/evals"
 	"github.com/aldoapicella/flogo-agent-platform/internal/knowledge"
 	"github.com/aldoapicella/flogo-agent-platform/internal/reporting"
 	"github.com/aldoapicella/flogo-agent-platform/internal/session"
@@ -29,6 +30,7 @@ func newRootCommand() *cobra.Command {
 	var mode string
 	var stateDir string
 	var sources string
+	var benchRoot string
 
 	root := &cobra.Command{
 		Use:   "flogo-agent",
@@ -40,6 +42,7 @@ func newRootCommand() *cobra.Command {
 	root.PersistentFlags().StringVar(&mode, "mode", string(contracts.ModeReview), "session mode: review|apply|auto")
 	root.PersistentFlags().StringVar(&stateDir, "state-dir", "", "state directory for artifacts and knowledge")
 	root.PersistentFlags().StringVar(&sources, "sources", "", "path to the knowledge manifest")
+	root.PersistentFlags().StringVar(&benchRoot, "bench-root", filepath.Join("testdata", "benchmarks"), "path to benchmark fixtures")
 
 	root.AddCommand(&cobra.Command{
 		Use:   "run",
@@ -81,6 +84,28 @@ func newRootCommand() *cobra.Command {
 			}
 			defer store.Close()
 			return knowledge.IngestManifest(ctx, rootDir, store, resolveSources(sources))
+		},
+	})
+
+	root.AddCommand(&cobra.Command{
+		Use:   "benchmark",
+		Short: "Run benchmark fixtures and print a summary",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			rootDir := mustRepoRoot()
+			if stateDir == "" {
+				stateDir = filepath.Join(rootDir, ".flogo-agent")
+			}
+			summary, err := evals.RunBenchmarks(ctx, rootDir, stateDir, resolveSources(sources), benchRoot, contracts.SessionMode(mode))
+			if err != nil {
+				return err
+			}
+			encoded, err := json.MarshalIndent(summary, "", "  ")
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(encoded))
+			return nil
 		},
 	})
 
