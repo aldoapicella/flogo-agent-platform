@@ -226,12 +226,16 @@ func newRootCommandWithLaunch(launch func(interactiveOptions) error) *cobra.Comm
 			if stateDir == "" {
 				stateDir = filepath.Join(rootDir, ".flogo-agent")
 			}
+			manifestPath, err := knowledge.ResolveManifestPath(stateDir, rootDir, resolveSources(sources))
+			if err != nil {
+				return err
+			}
 			store, err := knowledge.Open(ctx, filepath.Join(stateDir, "knowledge.db"))
 			if err != nil {
 				return err
 			}
 			defer store.Close()
-			return knowledge.IngestManifest(ctx, rootDir, store, resolveSources(sources))
+			return knowledge.IngestManifest(ctx, rootDir, store, manifestPath)
 		},
 	})
 
@@ -478,10 +482,14 @@ func mustRepoRoot() string {
 }
 
 func resolveSources(path string) string {
-	if path != "" {
+	if strings.TrimSpace(path) != "" {
 		return path
 	}
-	return filepath.Join(mustRepoRoot(), "docs", "sources", "manifest.json")
+	candidate := filepath.Join(mustRepoRoot(), "docs", "sources", "manifest.json")
+	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		return candidate
+	}
+	return ""
 }
 
 func buildSandboxConfig(profile string, image string, runtime string, network string) sandbox.Config {

@@ -102,7 +102,7 @@ func resolveInteractiveSources(repoPath string) string {
 			return candidate
 		}
 	}
-	return filepath.Join(repoPath, "docs", "sources", "manifest.json")
+	return ""
 }
 
 func loadDefaultEnv(repoPath string) error {

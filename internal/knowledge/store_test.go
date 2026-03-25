@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -118,5 +119,35 @@ func TestIngestWebHTMLExtractsText(t *testing.T) {
 	}
 	if len(citations) == 0 {
 		t.Fatal("expected citations from html source")
+	}
+}
+
+func TestResolveManifestPathMaterializesEmbeddedDefault(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "state")
+	repoRoot := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := ResolveManifestPath(stateDir, repoRoot, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(path, stateDir) {
+		t.Fatalf("expected embedded manifest under state dir, got %q", path)
+	}
+
+	manifest, err := LoadManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Sources) == 0 {
+		t.Fatal("expected embedded manifest to contain sources")
+	}
+	for _, source := range manifest.Sources {
+		if source.Type == "local_file" {
+			t.Fatalf("expected embedded manifest to avoid repo-local sources, got %+v", source)
+		}
 	}
 }

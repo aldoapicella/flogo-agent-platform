@@ -9,6 +9,7 @@
   - auto-loads `.env`
   - auto-starts or reuses the local daemon
   - auto-resumes the latest session for the repo when possible
+  - uses an embedded default official-source manifest when no local manifest is available
 - `flogo-agent daemon`
   - starts the local HTTP daemon
 - `flogo-agent chat`
@@ -117,6 +118,7 @@ Typical contents:
 ## Recommended Local Setup
 
 ```bash
+go install github.com/aldoapicella/flogo-agent-platform/cmd/flogo-agent@latest
 export PATH="$(go env GOPATH)/bin:$PATH"
 export OPENAI_API_KEY="..."
 export OPENAI_MODEL="gpt-5.2"
@@ -125,6 +127,12 @@ export OPENAI_MODEL="gpt-5.2"
 If the repo already contains `.tools/bin/flogo`, you do not need to export `PATH` manually for normal local use.
 
 Start the default UI:
+
+```bash
+flogo-agent --repo /path/to/repo
+```
+
+For local development from this checkout:
 
 ```bash
 go run ./cmd/flogo-agent --repo /path/to/repo

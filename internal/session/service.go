@@ -54,8 +54,9 @@ func NewServiceWithOptions(ctx context.Context, repoRoot string, stateDir string
 		return nil, err
 	}
 
-	if manifestPath == "" {
-		manifestPath = filepath.Join(repoRoot, "docs", "sources", "manifest.json")
+	manifestPath, err = knowledge.ResolveManifestPath(stateDir, repoRoot, manifestPath)
+	if err != nil {
+		return nil, err
 	}
 	if err := knowledge.IngestManifest(ctx, repoRoot, store, manifestPath); err != nil {
 		return nil, err

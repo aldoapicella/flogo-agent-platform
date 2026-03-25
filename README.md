@@ -43,6 +43,12 @@ From the user perspective, the loop is:
 - optional: `docker` plus a compatible runtime for isolated execution
 - optional: `OPENAI_API_KEY` for model-backed planning, responses, and repair
 
+- install the agent with:
+
+```bash
+go install github.com/aldoapicella/flogo-agent-platform/cmd/flogo-agent@latest
+```
+
 ### Install the Flogo CLI
 
 ```bash
@@ -55,10 +61,16 @@ If the repo contains `.tools/bin/flogo`, `flogo-agent` now discovers that automa
 ### Launch the default terminal UI
 
 ```bash
-go run ./cmd/flogo-agent --repo ./testdata/benchmarks/invalid-mapping
+flogo-agent --repo /path/to/flogo-repo
 ```
 
-That command auto-loads `.env` from the current repo or working directory, auto-starts or reuses the local daemon, and resumes the most recent session for the repo when possible.
+That command auto-loads `.env` from the current repo or working directory, auto-starts or reuses the local daemon, resumes the most recent session for the repo when possible, and falls back to an embedded official-source manifest when you are not running inside this source checkout.
+
+For local development from this repo, you can still run:
+
+```bash
+go run ./cmd/flogo-agent --repo ./testdata/benchmarks/invalid-mapping
+```
 
 ### Open the chat CLI directly
 

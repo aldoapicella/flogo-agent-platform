@@ -1,0 +1,67 @@
+{
+  "sources": [
+    {
+      "id": "flogo-app-configuration",
+      "title": "Project Flogo App Configuration",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/development/apps/app-configuration/",
+      "tags": ["official", "docs", "app-model", "flogo-json"]
+    },
+    {
+      "id": "flogo-io-parameters",
+      "title": "Project Flogo Flow Input Output Params",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/development/flows/io-parameters/",
+      "tags": ["official", "docs", "flow", "io-parameters", "mapping"]
+    },
+    {
+      "id": "flogo-cli-docs",
+      "title": "Building apps with Flogo CLI",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/labs/flogo-cli/",
+      "tags": ["official", "docs", "cli", "build", "create"]
+    },
+    {
+      "id": "flogo-helloworld",
+      "title": "My First App Hello World",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/labs/helloworld/",
+      "tags": ["official", "docs", "example", "hello-world"]
+    },
+    {
+      "id": "project-flogo-core",
+      "title": "project-flogo/core",
+      "type": "web",
+      "location": "https://github.com/project-flogo/core",
+      "tags": ["official", "github", "core"]
+    },
+    {
+      "id": "project-flogo-flow",
+      "title": "project-flogo/flow",
+      "type": "web",
+      "location": "https://github.com/project-flogo/flow",
+      "tags": ["official", "github", "flow"]
+    },
+    {
+      "id": "project-flogo-core-schema",
+      "title": "project-flogo/core schema.json",
+      "type": "web",
+      "location": "https://raw.githubusercontent.com/project-flogo/core/master/schema.json",
+      "tags": ["official", "github", "schema", "app-model"]
+    },
+    {
+      "id": "project-flogo-core-example",
+      "title": "project-flogo/core examples/engine/flogo.json",
+      "type": "web",
+      "location": "https://raw.githubusercontent.com/project-flogo/core/master/examples/engine/flogo.json",
+      "tags": ["official", "github", "example", "flogo-json"]
+    },
+    {
+      "id": "project-flogo-flow-example",
+      "title": "project-flogo/flow examples/log-flogo.json",
+      "type": "web",
+      "location": "https://raw.githubusercontent.com/project-flogo/flow/master/examples/log-flogo.json",
+      "tags": ["official", "github", "example", "flow"]
+    }
+  ]
+}

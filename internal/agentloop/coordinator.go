@@ -45,6 +45,21 @@ func (c *Coordinator) HandleUserMessage(ctx context.Context, snapshot *contracts
 
 	appendMessage(snapshot, contracts.RoleUser, content)
 	c.flush(snapshot)
+	if shouldAnswerWithoutExecution(content) {
+		snapshot.LastTurnPlan = &contracts.TurnPlan{
+			GoalSummary: "Answer a direct product question without inspecting the workspace",
+			Planner:     "deterministic",
+			Notes:       []string{"answered a direct question without running the repo workflow"},
+		}
+		snapshot.LastTurnKind = "conversation"
+		snapshot.LastStepResults = nil
+		snapshot.Status = contracts.SessionStatusActive
+		appendEvent(snapshot, "conversation", "answered a direct product question")
+		appendMessage(snapshot, contracts.RoleAssistant, directConversationAnswer())
+		c.flush(snapshot)
+		return nil
+	}
+
 	plan := c.planner.PlanTurn(ctx, snapshot, content)
 	snapshot.LastTurnPlan = &plan
 	snapshot.LastTurnKind = "repair"
@@ -70,6 +85,27 @@ func (c *Coordinator) HandleUserMessage(ctx context.Context, snapshot *contracts
 	appendMessage(snapshot, contracts.RoleAssistant, c.composeAssistantResponse(ctx, snapshot))
 	c.flush(snapshot)
 	return nil
+}
+
+func shouldAnswerWithoutExecution(content string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(content))
+	if normalized == "" {
+		return false
+	}
+	if containsAny(normalized, "repair", "fix", "build", "test", "verify", "create", "bootstrap", "run", "apply", "update", "inspect") {
+		return false
+	}
+	return containsAny(normalized,
+		"what are you",
+		"who are you",
+		"what can you do",
+		"how do you work",
+		"how does this work",
+	)
+}
+
+func directConversationAnswer() string {
+	return "I am a conversational coding agent specifically for TIBCO Flogo apps. I can inspect and repair flogo.json and flow resources, run Flogo create/build/test workflows, propose reviewable diffs, and explain changes with official Flogo citations. For direct product questions like this, I should answer directly instead of inspecting the repo."
 }
 
 func (c *Coordinator) ApprovePending(ctx context.Context, snapshot *contracts.SessionSnapshot) error {
