@@ -1,0 +1,16 @@
+{
+  "sources": [
+    {
+      "id": "research-report",
+      "title": "Building an LLM-Powered Terminal Agent for TIBCO Flogo",
+      "type": "local_file",
+      "location": "docs/research-report.md",
+      "tags": [
+        "research",
+        "report",
+        "flogo",
+        "architecture"
+      ]
+    }
+  ]
+}

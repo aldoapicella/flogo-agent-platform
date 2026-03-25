@@ -1,0 +1,37 @@
+{
+  "name": "sample-app",
+  "type": "flogo:app",
+  "version": "1.0.0",
+  "description": "benchmark fixture",
+  "imports": [],
+  "properties": [],
+  "channels": [],
+  "triggers": [
+    {
+      "name": "rest",
+      "handlers": [
+        {
+          "action": {
+            "id": "runFlow",
+            "settings": {
+              "flowURI": "main"
+            },
+            "input": {
+              "message": "$flow.body"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "resources": [
+    {
+      "id": "flow:main",
+      "data": {
+        "tasks": [],
+        "links": []
+      }
+    }
+  ],
+  "actions": []
+}
