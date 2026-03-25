@@ -56,8 +56,8 @@ func TestValidateSemanticsDetectsFlowURIAndMappingIssues(t *testing.T) {
 	}
 
 	issues := ValidateSemantics(doc)
-	if len(issues) != 2 {
-		t.Fatalf("expected 2 issues, got %d", len(issues))
+	if len(issues) != 3 {
+		t.Fatalf("expected 3 issues, got %d", len(issues))
 	}
 	if issues[0].RuleID == issues[1].RuleID {
 		t.Fatalf("expected distinct rule ids, got %+v", issues)
@@ -125,7 +125,7 @@ func TestBuildSafePatchPlanRepairsKnownIssues(t *testing.T) {
 	if !strings.Contains(plan.UnifiedDiff, "res://flow:main") {
 		t.Fatalf("expected flowURI repair in diff, got %s", plan.UnifiedDiff)
 	}
-	if !strings.Contains(plan.UnifiedDiff, "=$flow.body") {
+	if !strings.Contains(plan.UnifiedDiff, "=$.content") {
 		t.Fatalf("expected mapping repair in diff, got %s", plan.UnifiedDiff)
 	}
 }
@@ -302,4 +302,187 @@ func TestValidateSemanticsDetectsTaskAndLinkIssues(t *testing.T) {
 			t.Fatalf("expected rule %s in %+v", expected, issues)
 		}
 	}
+}
+
+func TestValidateSemanticsDetectsInlineHandlerActionID(t *testing.T) {
+	doc := &Document{
+		Path: "flogo.json",
+		Raw: map[string]any{
+			"name":        "demo",
+			"type":        "flogo:app",
+			"version":     "1.0.0",
+			"description": "demo",
+			"imports": []any{
+				"github.com/project-flogo/contrib/trigger/rest",
+				"github.com/project-flogo/flow",
+			},
+			"properties": []any{},
+			"channels":   []any{},
+			"actions":    []any{},
+			"triggers": []any{
+				map[string]any{
+					"id":       "t1",
+					"ref":      "#rest",
+					"settings": map[string]any{"port": "8888"},
+					"handlers": []any{
+						map[string]any{
+							"settings": map[string]any{"method": "GET", "path": "/test"},
+							"action": map[string]any{
+								"id":       "runFlow",
+								"ref":      "#flow",
+								"settings": map[string]any{"flowURI": "res://flow:main"},
+								"input":    map[string]any{"message": "=$flow.body"},
+							},
+						},
+					},
+				},
+			},
+			"resources": []any{
+				map[string]any{
+					"id": "flow:main",
+					"data": map[string]any{
+						"metadata": map[string]any{
+							"input": []any{
+								map[string]any{"name": "message", "type": "string"},
+							},
+						},
+						"tasks": []any{},
+						"links": []any{},
+					},
+				},
+			},
+		},
+	}
+
+	issues := ValidateSemantics(doc)
+	found := false
+	for _, issue := range issues {
+		if issue.RuleID == "handler.action.inline_id" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected inline handler action id issue, got %+v", issues)
+	}
+}
+
+func TestValidateSemanticsDetectsInvalidHandlerActionInputScope(t *testing.T) {
+	doc := &Document{
+		Path: "flogo.json",
+		Raw: map[string]any{
+			"name":        "demo",
+			"type":        "flogo:app",
+			"version":     "1.0.0",
+			"description": "demo",
+			"imports": []any{
+				"github.com/project-flogo/contrib/trigger/rest",
+				"github.com/project-flogo/flow",
+			},
+			"properties": []any{},
+			"channels":   []any{},
+			"actions":    []any{},
+			"triggers": []any{
+				map[string]any{
+					"id":       "t1",
+					"ref":      "#rest",
+					"settings": map[string]any{"port": "8888"},
+					"handlers": []any{
+						map[string]any{
+							"settings": map[string]any{"method": "GET", "path": "/test/:val"},
+							"action": map[string]any{
+								"ref":      "#flow",
+								"settings": map[string]any{"flowURI": "res://flow:main"},
+								"input":    map[string]any{"message": "=$flow.body"},
+							},
+						},
+					},
+				},
+			},
+			"resources": []any{
+				map[string]any{
+					"id": "flow:main",
+					"data": map[string]any{
+						"metadata": map[string]any{
+							"input": []any{
+								map[string]any{"name": "message", "type": "string"},
+							},
+						},
+						"tasks": []any{},
+						"links": []any{},
+					},
+				},
+			},
+		},
+	}
+
+	issues := ValidateSemantics(doc)
+	found := false
+	for _, issue := range issues {
+		if issue.RuleID == "handler.action.input.invalid_scope" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected handler action input scope issue, got %+v", issues)
+	}
+}
+
+func TestValidateSemanticsDetectsInvalidTriggerResolverInHandlerInput(t *testing.T) {
+	doc := &Document{
+		Path: "flogo.json",
+		Raw: map[string]any{
+			"name":        "demo",
+			"type":        "flogo:app",
+			"version":     "1.0.0",
+			"description": "demo",
+			"imports": []any{
+				"github.com/project-flogo/contrib/trigger/rest",
+				"github.com/project-flogo/flow",
+			},
+			"properties": []any{},
+			"channels":   []any{},
+			"actions":    []any{},
+			"triggers": []any{
+				map[string]any{
+					"id":       "t1",
+					"ref":      "#rest",
+					"settings": map[string]any{"port": "8888"},
+					"handlers": []any{
+						map[string]any{
+							"settings": map[string]any{"method": "GET", "path": "/test/:val"},
+							"action": map[string]any{
+								"ref":      "#flow",
+								"settings": map[string]any{"flowURI": "res://flow:main"},
+								"input":    map[string]any{"message": "=$trigger.pathParams.val"},
+							},
+						},
+					},
+				},
+			},
+			"resources": []any{
+				map[string]any{
+					"id": "flow:main",
+					"data": map[string]any{
+						"metadata": map[string]any{
+							"input": []any{
+								map[string]any{"name": "message", "type": "string"},
+							},
+						},
+						"tasks": []any{},
+						"links": []any{},
+					},
+				},
+			},
+		},
+	}
+
+	issues := ValidateSemantics(doc)
+	for _, issue := range issues {
+		if issue.RuleID == "handler.action.input.invalid_scope" {
+			return
+		}
+	}
+	t.Fatalf("expected invalid trigger resolver issue, got %+v", issues)
 }

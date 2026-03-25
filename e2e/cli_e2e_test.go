@@ -297,6 +297,70 @@ func TestDaemonChatApprovalE2E(t *testing.T) {
 	}
 }
 
+func TestDaemonChatCreateApprovalE2E(t *testing.T) {
+	root := t.TempDir()
+	manifest := writeKnowledgeManifest(t, root)
+	repoPath := writeEmptyRepo(t, root)
+	stateDir := filepath.Join(root, "state")
+	env := fakeToolEnv(t, root)
+	addr := freeAddress(t)
+
+	daemon, daemonStdout, daemonStderr := startDaemon(t, root, env, addr, stateDir, manifest)
+	defer stopDaemon(t, daemon, daemonStdout, daemonStderr)
+
+	stdout, stderr, err := runAgent(t, root, env,
+		"chat",
+		"--daemon-url", "http://"+addr,
+		"--repo", repoPath,
+		"--goal", "create and verify",
+		"--mode", "review",
+		"--state-dir", stateDir,
+		"--sources", manifest,
+		"--message", "create a minimal flogo app",
+	)
+	if err != nil {
+		t.Fatalf("chat failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	for _, expected := range []string{
+		"Session: session-",
+		"Turn kind: creation",
+		"Prepared a minimal Flogo app bootstrap",
+		"review the proposed bootstrap app before applying",
+	} {
+		if !strings.Contains(stdout, expected) {
+			t.Fatalf("expected %q in create output:\n%s", expected, stdout)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(repoPath, "flogo.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected review mode create flow not to write flogo.json before approval, err=%v", err)
+	}
+
+	sessionID := parseSessionID(t, stdout)
+	approveOut, approveErr, err := runAgent(t, root, env,
+		"session", "approve", sessionID,
+		"--daemon-url", "http://"+addr,
+	)
+	if err != nil {
+		t.Fatalf("session approve failed: %v\nstdout:\n%s\nstderr:\n%s", err, approveOut, approveErr)
+	}
+	for _, expected := range []string{
+		"status=completed",
+		"Outcome: applied",
+		"Test flow-tests passed=true",
+	} {
+		if !strings.Contains(approveOut, expected) {
+			t.Fatalf("expected %q in approve output:\n%s", expected, approveOut)
+		}
+	}
+	contents, err := os.ReadFile(filepath.Join(repoPath, "flogo.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(contents), "\"type\": \"flogo:app\"") || !strings.Contains(string(contents), "\"flowURI\": \"res://flow:main\"") {
+		t.Fatalf("expected created flogo.json, got %s", string(contents))
+	}
+}
+
 func runAgent(t *testing.T, workdir string, extraEnv []string, args ...string) (string, string, error) {
 	t.Helper()
 	cmd := exec.Command(agentBinary(t), args...)
@@ -535,6 +599,15 @@ func writeInvalidMappingRepo(t *testing.T, root string) string {
   "actions": []
 }`
 	if err := os.WriteFile(filepath.Join(repoPath, "flogo.json"), []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return repoPath
+}
+
+func writeEmptyRepo(t *testing.T, root string) string {
+	t.Helper()
+	repoPath := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return repoPath

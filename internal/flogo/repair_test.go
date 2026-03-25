@@ -201,3 +201,153 @@ func TestBuildSafePatchPlanAddsExplicitImportsAndTaskIDsAndOutputRename(t *testi
 		t.Fatalf("expected multiple repair notes, got %+v", notes)
 	}
 }
+
+func TestBuildSafePatchPlanRemovesInlineHandlerActionID(t *testing.T) {
+	doc := &Document{
+		Path:     "flogo.json",
+		Original: []byte(`{"name":"demo","type":"flogo:app","version":"1.0.0","description":"demo","imports":["github.com/project-flogo/contrib/trigger/rest","github.com/project-flogo/flow"],"properties":[],"channels":[],"actions":[],"triggers":[{"id":"t1","ref":"#rest","handlers":[{"action":{"id":"runFlow","ref":"#flow","settings":{"flowURI":"res://flow:main"},"input":{"message":"=$flow.body"}}}]}],"resources":[{"id":"flow:main","data":{"metadata":{"input":[{"name":"message","type":"string"}]},"tasks":[],"links":[]}}]}`),
+		Raw: map[string]any{
+			"name":        "demo",
+			"type":        "flogo:app",
+			"version":     "1.0.0",
+			"description": "demo",
+			"imports": []any{
+				"github.com/project-flogo/contrib/trigger/rest",
+				"github.com/project-flogo/flow",
+			},
+			"properties": []any{},
+			"channels":   []any{},
+			"actions":    []any{},
+			"triggers": []any{
+				map[string]any{
+					"id":  "t1",
+					"ref": "#rest",
+					"handlers": []any{
+						map[string]any{
+							"action": map[string]any{
+								"id":  "runFlow",
+								"ref": "#flow",
+								"settings": map[string]any{
+									"flowURI": "res://flow:main",
+								},
+								"input": map[string]any{
+									"message": "=$flow.body",
+								},
+							},
+						},
+					},
+				},
+			},
+			"resources": []any{
+				map[string]any{
+					"id": "flow:main",
+					"data": map[string]any{
+						"metadata": map[string]any{
+							"input": []any{
+								map[string]any{"name": "message", "type": "string"},
+							},
+						},
+						"tasks": []any{},
+						"links": []any{},
+					},
+				},
+			},
+		},
+	}
+
+	plan, notes, err := BuildSafePatchPlan(doc, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan == nil {
+		t.Fatal("expected patch plan")
+	}
+	if strings.Contains(plan.UnifiedDiff, `"id": "runFlow"`) {
+		t.Fatalf("expected inline handler action id to be removed, got %s", plan.UnifiedDiff)
+	}
+	foundNote := false
+	for _, note := range notes {
+		if strings.Contains(note, "removed inline handler action id") {
+			foundNote = true
+			break
+		}
+	}
+	if !foundNote {
+		t.Fatalf("expected repair note, got %+v", notes)
+	}
+}
+
+func TestBuildSafePatchPlanRepairsHandlerActionInputScope(t *testing.T) {
+	doc := &Document{
+		Path:     "flogo.json",
+		Original: []byte(`{"name":"demo","type":"flogo:app","version":"1.0.0","description":"demo","imports":["github.com/project-flogo/contrib/trigger/rest","github.com/project-flogo/flow"],"properties":[],"channels":[],"actions":[],"triggers":[{"id":"t1","ref":"#rest","handlers":[{"settings":{"method":"GET","path":"/test/:val"},"action":{"ref":"#flow","settings":{"flowURI":"res://flow:main"},"input":{"message":"=$flow.body"}}}]}],"resources":[{"id":"flow:main","data":{"metadata":{"input":[{"name":"message","type":"string"}]},"tasks":[],"links":[]}}]}`),
+		Raw: map[string]any{
+			"name":        "demo",
+			"type":        "flogo:app",
+			"version":     "1.0.0",
+			"description": "demo",
+			"imports": []any{
+				"github.com/project-flogo/contrib/trigger/rest",
+				"github.com/project-flogo/flow",
+			},
+			"properties": []any{},
+			"channels":   []any{},
+			"actions":    []any{},
+			"triggers": []any{
+				map[string]any{
+					"id":  "t1",
+					"ref": "#rest",
+					"handlers": []any{
+						map[string]any{
+							"settings": map[string]any{"method": "GET", "path": "/test/:val"},
+							"action": map[string]any{
+								"ref": "#flow",
+								"settings": map[string]any{
+									"flowURI": "res://flow:main",
+								},
+								"input": map[string]any{
+									"message": "=$flow.body",
+								},
+							},
+						},
+					},
+				},
+			},
+			"resources": []any{
+				map[string]any{
+					"id": "flow:main",
+					"data": map[string]any{
+						"metadata": map[string]any{
+							"input": []any{
+								map[string]any{"name": "message", "type": "string"},
+							},
+						},
+						"tasks": []any{},
+						"links": []any{},
+					},
+				},
+			},
+		},
+	}
+
+	plan, notes, err := BuildSafePatchPlan(doc, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan == nil {
+		t.Fatal("expected patch plan")
+	}
+	if !strings.Contains(plan.UnifiedDiff, `"message": "=$.pathParams.val"`) {
+		t.Fatalf("expected handler action input scope repair, got %s", plan.UnifiedDiff)
+	}
+	foundNote := false
+	for _, note := range notes {
+		if strings.Contains(note, "replaced invalid handler action input scope") {
+			foundNote = true
+			break
+		}
+	}
+	if !foundNote {
+		t.Fatalf("expected repair note, got %+v", notes)
+	}
+}

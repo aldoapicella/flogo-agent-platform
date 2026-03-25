@@ -3,9 +3,11 @@ package tools
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aldoapicella/flogo-agent-platform/internal/sandbox"
 )
@@ -147,5 +149,85 @@ func TestFlogoClientRunUnitTestsCapturesTestResultArtifacts(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected .testresult artifact, got %+v", result.ArtifactPaths)
+	}
+}
+
+func TestFlogoClientCreateSourceSetsGOPATHForCLI(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	binDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	script := filepath.Join(binDir, "flogo")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s' \"$GOPATH\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+	t.Setenv("GOPATH", "")
+
+	expectedGOPATHBytes, err := exec.Command("go", "env", "GOPATH").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedGOPATH := strings.TrimSpace(string(expectedGOPATHBytes))
+
+	client := NewFlogoClient(sandbox.NewLocalRunner(filepath.Join(root, "artifacts")))
+	result, err := client.CreateSource(ctx, root, filepath.Join(root, "generated-app"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("expected success, got %+v", result)
+	}
+
+	stdout, err := os.ReadFile(result.StdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(stdout)) != expectedGOPATH {
+		t.Fatalf("expected GOPATH %q, got %q", expectedGOPATH, strings.TrimSpace(string(stdout)))
+	}
+}
+
+func TestFlogoClientStartupSmokeTreatsTimeoutAsSuccess(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	executable := filepath.Join(root, "app")
+
+	script := "#!/bin/sh\nsleep 5\n"
+	if err := os.WriteFile(executable, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	client := NewFlogoClient(sandbox.NewLocalRunner(filepath.Join(root, "artifacts")))
+	result, err := client.StartupSmoke(ctx, executable, root, 100*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("expected timeout-normalized success, got %+v", result)
+	}
+}
+
+func TestFlogoClientStartupSmokePreservesImmediateFailure(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	executable := filepath.Join(root, "app")
+
+	script := "#!/bin/sh\nexit 1\n"
+	if err := os.WriteFile(executable, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	client := NewFlogoClient(sandbox.NewLocalRunner(filepath.Join(root, "artifacts")))
+	result, err := client.StartupSmoke(ctx, executable, root, 250*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode == 0 {
+		t.Fatalf("expected immediate failure to be preserved, got %+v", result)
 	}
 }

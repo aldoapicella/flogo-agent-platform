@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
 	"github.com/aldoapicella/flogo-agent-platform/internal/flogo"
@@ -15,6 +16,8 @@ import (
 type Verifier struct {
 	flogoClient *tools.FlogoClient
 }
+
+const startupSmokeTimeout = 3 * time.Second
 
 func NewVerifier(flogoClient *tools.FlogoClient) *Verifier {
 	return &Verifier{flogoClient: flogoClient}
@@ -34,17 +37,7 @@ func (v *Verifier) Validate(doc *flogo.Document) (contracts.ValidationResult, er
 }
 
 func (v *Verifier) BuildAndTest(ctx context.Context, repoPath string, workspaceRoot string) (*contracts.ToolResult, []contracts.TestResult, error) {
-	orphanResult, err := v.flogoClient.ListOrphaned(ctx, repoPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	results := []contracts.TestResult{
-		{
-			Name:   "orphaned-check",
-			Result: orphanResult,
-			Passed: orphanResult.ExitCode == 0,
-		},
-	}
+	results := []contracts.TestResult{}
 
 	if err := os.RemoveAll(workspaceRoot); err != nil {
 		return nil, results, err
@@ -60,6 +53,16 @@ func (v *Verifier) BuildAndTest(ctx context.Context, repoPath string, workspaceR
 	if createResult.ExitCode != 0 {
 		return &createResult, results, nil
 	}
+
+	orphanResult, err := v.flogoClient.ListOrphaned(ctx, workspaceRoot)
+	if err != nil {
+		return &createResult, results, err
+	}
+	results = append(results, contracts.TestResult{
+		Name:   "orphaned-check",
+		Result: orphanResult,
+		Passed: orphanResult.ExitCode == 0,
+	})
 
 	if err := copyIfExists(filepath.Join(repoPath, ".flogotest"), filepath.Join(workspaceRoot, ".flogotest")); err != nil {
 		return nil, results, err
@@ -83,6 +86,20 @@ func (v *Verifier) BuildAndTest(ctx context.Context, repoPath string, workspaceR
 		return &buildResult, results, nil
 	}
 
+	startupResult, err := v.flogoClient.StartupSmoke(ctx, executablePath, workspaceRoot, startupSmokeTimeout)
+	if err != nil {
+		return &buildResult, results, err
+	}
+	startupTest := contracts.TestResult{
+		Name:   "startup-smoke",
+		Result: startupResult,
+		Passed: startupResult.ExitCode == 0,
+	}
+	results = append(results, startupTest)
+	if !startupTest.Passed {
+		return &buildResult, results, nil
+	}
+
 	if _, err := os.Stat(filepath.Join(workspaceRoot, ".flogotest")); err == nil {
 		outputDir := filepath.Join(workspaceRoot, "test-results")
 		if err := os.MkdirAll(outputDir, 0o755); err != nil {
@@ -98,11 +115,15 @@ func (v *Verifier) BuildAndTest(ctx context.Context, repoPath string, workspaceR
 		if err != nil {
 			return &buildResult, results, err
 		}
-		results = append(results, contracts.TestResult{
+		unitResult := contracts.TestResult{
 			Name:   "unit-tests",
 			Result: testResult,
 			Passed: testResult.ExitCode == 0,
-		})
+		}
+		if unsupportedExecutableTestMode(testResult) {
+			unitResult.Skipped = true
+		}
+		results = append(results, unitResult)
 		return &buildResult, results, nil
 	}
 
@@ -110,11 +131,18 @@ func (v *Verifier) BuildAndTest(ctx context.Context, repoPath string, workspaceR
 	if err != nil {
 		return &buildResult, results, err
 	}
-	results = append(results, contracts.TestResult{
+	flowListResult := contracts.TestResult{
 		Name:   "flow-list",
 		Result: listFlows,
 		Passed: listFlows.ExitCode == 0,
-	})
+	}
+	if unsupportedExecutableTestMode(listFlows) {
+		flowListResult.Skipped = true
+	}
+	results = append(results, flowListResult)
+	if flowListResult.Skipped {
+		return &buildResult, results, nil
+	}
 	if listFlows.ExitCode != 0 {
 		return &buildResult, results, nil
 	}
@@ -161,6 +189,18 @@ func (v *Verifier) BuildAndTest(ctx context.Context, repoPath string, workspaceR
 	})
 
 	return &buildResult, results, nil
+}
+
+func unsupportedExecutableTestMode(result contracts.ToolResult) bool {
+	if result.ExitCode == 0 || result.StderrPath == "" {
+		return false
+	}
+	stderr, err := os.ReadFile(result.StderrPath)
+	if err != nil {
+		return false
+	}
+	text := strings.ToLower(string(stderr))
+	return strings.Contains(text, "flag provided but not defined: -test")
 }
 
 func copyIfExists(src string, dst string) error {

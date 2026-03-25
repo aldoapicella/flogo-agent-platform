@@ -62,8 +62,69 @@ func TestManagerRepairApprovalFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(contents), "res://flow:main") || !strings.Contains(string(contents), "=$flow.body") {
+	if !strings.Contains(string(contents), "res://flow:main") || !strings.Contains(string(contents), "=$.content") {
 		t.Fatalf("expected repaired flogo.json, got %s", string(contents))
+	}
+}
+
+func TestManagerCreationApprovalFlow(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	manifestPath, repoPath := writeEmptyRuntimeFixture(t, root, true)
+
+	manager, err := NewManager(ctx, root, filepath.Join(root, "state"), manifestPath, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+
+	snapshot, err := manager.CreateSession(ctx, contracts.SessionRequest{
+		RepoPath: repoPath,
+		Goal:     "create a Flogo app",
+		Mode:     contracts.ModeReview,
+		ApprovalPolicy: contracts.ApprovalPolicy{
+			RequireWriteApproval: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err = manager.SendMessage(ctx, snapshot.ID, "create a minimal flogo app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Status != contracts.SessionStatusWaitingApproval {
+		t.Fatalf("expected waiting approval, got %s", snapshot.Status)
+	}
+	if snapshot.PendingApproval == nil || len(snapshot.PendingApproval.Writes) != 1 {
+		t.Fatalf("expected pending bootstrap write, got %+v", snapshot.PendingApproval)
+	}
+	if snapshot.LastTurnKind != "creation" {
+		t.Fatalf("expected creation turn kind, got %s", snapshot.LastTurnKind)
+	}
+
+	if _, err := os.Stat(filepath.Join(repoPath, "flogo.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected review mode creation to avoid writing flogo.json before approval, err=%v", err)
+	}
+
+	snapshot, err = manager.Approve(ctx, snapshot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Status != contracts.SessionStatusCompleted {
+		t.Fatalf("expected completed status, got %s", snapshot.Status)
+	}
+	if snapshot.LastReport == nil || snapshot.LastReport.Outcome != contracts.RunOutcomeApplied {
+		t.Fatalf("expected applied report, got %+v", snapshot.LastReport)
+	}
+
+	contents, err := os.ReadFile(filepath.Join(repoPath, "flogo.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(contents), "\"flowURI\": \"res://flow:main\"") {
+		t.Fatalf("expected created flogo.json, got %s", string(contents))
 	}
 }
 
@@ -166,6 +227,71 @@ func writeRuntimeFixture(t *testing.T, root string, installFakeFlogo bool) (stri
   "resources": [{"id": "flow:main", "data": {"metadata": {"input": [{"name": "message", "type": "string"}]}, "tasks": [], "links": []}}],
   "actions": []
 }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if installFakeFlogo {
+		flogoScript := filepath.Join(root, "bin", "flogo")
+		script := `#!/bin/sh
+if [ "$1" = "list" ] && [ "$2" = "--orphaned" ]; then
+  printf '[]\n'
+  exit 0
+fi
+if [ "$1" = "create" ]; then
+  mkdir -p "$4"
+  cp "$3" "$4/flogo.json"
+  exit 0
+fi
+if [ "$1" = "build" ]; then
+  mkdir -p "$PWD/bin"
+  cat > "$PWD/bin/sample-app" <<'EOF'
+#!/bin/sh
+if [ "$1" = "-test" ] && [ "$2" = "-flows" ]; then
+  printf 'main\n'
+  exit 0
+fi
+if [ "$1" = "-test" ] && [ "$2" = "-flowdata" ]; then
+  printf '{}\n' > "$PWD/sample-app_main_input.json"
+  exit 0
+fi
+if [ "$1" = "-test" ] && [ "$2" = "-flowin" ]; then
+  printf '{}\n' > "$4"
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$PWD/bin/sample-app"
+  exit 0
+fi
+exit 0
+`
+		if err := os.WriteFile(flogoScript, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", filepath.Join(root, "bin")+":"+os.Getenv("PATH"))
+	}
+
+	return manifestPath, filepath.Join(root, "repo")
+}
+
+func writeEmptyRuntimeFixture(t *testing.T, root string, installFakeFlogo bool) (string, string) {
+	t.Helper()
+
+	for _, dir := range []string{
+		filepath.Join(root, "docs", "sources"),
+		filepath.Join(root, "repo"),
+		filepath.Join(root, "bin"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "docs", "reference.md"), []byte("# Flogo\nUse res://flow:<id> for flowURI values.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(root, "docs", "sources", "manifest.json")
+	if err := os.WriteFile(manifestPath, []byte(`{"sources":[{"id":"reference","title":"Reference","type":"local_file","location":"docs/reference.md","tags":["official","flowuri"]}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

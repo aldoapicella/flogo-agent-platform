@@ -1,3 +1,4 @@
 .flogo-agent/
 bin/
 /flogo-agent
+.env

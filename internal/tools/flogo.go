@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
 	"github.com/aldoapicella/flogo-agent-platform/internal/sandbox"
@@ -233,6 +234,23 @@ func (c *FlogoClient) RunUnitTests(ctx context.Context, executablePath string, w
 	return result, nil
 }
 
+func (c *FlogoClient) StartupSmoke(ctx context.Context, executablePath string, workDir string, timeout time.Duration) (contracts.ToolResult, error) {
+	if timeout <= 0 {
+		timeout = 3 * time.Second
+	}
+
+	smokeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	result, err := c.runExecutable(smokeCtx, executablePath, workDir)
+	if errors.Is(smokeCtx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+		result.ExitCode = 0
+		result.Error = ""
+		return result, nil
+	}
+	return result, err
+}
+
 func (c *FlogoClient) FindExecutable(appPath string) (string, error) {
 	binDir := filepath.Join(appPath, "bin")
 	entries, err := os.ReadDir(binDir)
@@ -261,6 +279,7 @@ func (c *FlogoClient) runCLI(ctx context.Context, repoPath string, args ...strin
 		Args:      args,
 		WorkDir:   repoPath,
 		EnvPolicy: "default",
+		Env:       flogoEnv(),
 	})
 }
 
@@ -366,4 +385,21 @@ func missingBinaryResult(name string) contracts.ToolResult {
 		ExitCode: -1,
 		Error:    errors.New("required binary not found in PATH").Error(),
 	}
+}
+
+func flogoEnv() map[string]string {
+	env := map[string]string{}
+	if value := strings.TrimSpace(os.Getenv("GOPATH")); value != "" {
+		env["GOPATH"] = value
+		return env
+	}
+
+	output, err := exec.Command("go", "env", "GOPATH").Output()
+	if err != nil {
+		return env
+	}
+	if value := strings.TrimSpace(string(output)); value != "" {
+		env["GOPATH"] = value
+	}
+	return env
 }

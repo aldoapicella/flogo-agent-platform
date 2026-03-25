@@ -123,7 +123,7 @@ exit 0
 		t.Fatal(err)
 	}
 	text := string(updated)
-	if !containsAll(text, "res://flow:main", "=$flow.body") {
+	if !containsAll(text, "res://flow:main", "=$.content") {
 		t.Fatalf("expected repaired file, got %s", text)
 	}
 }

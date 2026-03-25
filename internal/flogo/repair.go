@@ -32,6 +32,12 @@ func BuildSafePatchPlan(doc *Document, citations []contracts.SourceCitation) (*c
 	if repairMissingImports(doc, &notes) {
 		changed = true
 	}
+	if repairHandlerActionInputScopes(doc, &notes) {
+		changed = true
+	}
+	if repairInlineHandlerActionIDs(doc, &notes) {
+		changed = true
+	}
 	if repairMissingTaskIDs(doc, &notes) {
 		changed = true
 	}
@@ -203,6 +209,118 @@ func repairMissingImports(doc *Document, notes *[]string) bool {
 	}
 	doc.Raw["imports"] = imports
 	return true
+}
+
+func repairInlineHandlerActionIDs(doc *Document, notes *[]string) bool {
+	triggers := asSlice(doc.Raw["triggers"])
+	changed := false
+	for triggerIdx, triggerItem := range triggers {
+		trigger, ok := triggerItem.(map[string]any)
+		if !ok {
+			continue
+		}
+		handlers := asSlice(trigger["handlers"])
+		for handlerIdx, handlerItem := range handlers {
+			handler, ok := handlerItem.(map[string]any)
+			if !ok {
+				continue
+			}
+			action, ok := handler["action"].(map[string]any)
+			if !ok {
+				continue
+			}
+			actionID := asString(action["id"])
+			if actionID == "" {
+				continue
+			}
+			settings, _ := action["settings"].(map[string]any)
+			input, _ := action["input"].(map[string]any)
+			output, _ := action["output"].(map[string]any)
+			if asString(action["ref"]) == "" && len(settings) == 0 && len(input) == 0 && len(output) == 0 {
+				continue
+			}
+			delete(action, "id")
+			*notes = append(*notes, fmt.Sprintf("removed inline handler action id %q at $.triggers[%d].handlers[%d].action.id", actionID, triggerIdx, handlerIdx))
+			changed = true
+		}
+	}
+	return changed
+}
+
+func repairHandlerActionInputScopes(doc *Document, notes *[]string) bool {
+	triggers := asSlice(doc.Raw["triggers"])
+	changed := false
+	for triggerIdx, triggerItem := range triggers {
+		trigger, ok := triggerItem.(map[string]any)
+		if !ok {
+			continue
+		}
+		handlers := asSlice(trigger["handlers"])
+		for handlerIdx, handlerItem := range handlers {
+			handler, ok := handlerItem.(map[string]any)
+			if !ok {
+				continue
+			}
+			settings, _ := handler["settings"].(map[string]any)
+			sourceExpr := defaultHandlerInputSource(asString(settings["path"]))
+			if sourceExpr == "" {
+				continue
+			}
+			if repairHandlerActionInputsMap(handler["action"], sourceExpr, notes, triggerIdx, handlerIdx, "action") {
+				changed = true
+			}
+			for actionIdx, actionItem := range asSlice(handler["actions"]) {
+				if repairHandlerActionInputsMap(actionItem, sourceExpr, notes, triggerIdx, handlerIdx, fmt.Sprintf("actions[%d]", actionIdx)) {
+					changed = true
+				}
+			}
+		}
+	}
+	return changed
+}
+
+func repairHandlerActionInputsMap(raw any, sourceExpr string, notes *[]string, triggerIdx int, handlerIdx int, actionLabel string) bool {
+	action, ok := raw.(map[string]any)
+	if !ok {
+		return false
+	}
+	input, _ := action["input"].(map[string]any)
+	if len(input) == 0 {
+		return false
+	}
+	changed := false
+	for key, value := range input {
+		text, ok := value.(string)
+		if !ok || invalidHandlerActionInputResolver(text) == "" {
+			continue
+		}
+		input[key] = sourceExpr
+		*notes = append(*notes, fmt.Sprintf("replaced invalid handler action input scope at $.triggers[%d].handlers[%d].%s.input.%s with %q", triggerIdx, handlerIdx, actionLabel, key, sourceExpr))
+		changed = true
+	}
+	return changed
+}
+
+func defaultHandlerInputSource(routePath string) string {
+	params := extractRouteParams(routePath)
+	if len(params) == 1 {
+		return "=$.pathParams." + params[0]
+	}
+	return "=$.content"
+}
+
+func extractRouteParams(routePath string) []string {
+	if routePath == "" {
+		return nil
+	}
+	parts := strings.Split(routePath, "/")
+	var params []string
+	for _, part := range parts {
+		if strings.HasPrefix(part, ":") && len(part) > 1 {
+			params = append(params, strings.TrimPrefix(part, ":"))
+		}
+	}
+	return params
 }
 
 func repairFlowInputMappings(doc *Document, notes *[]string) bool {

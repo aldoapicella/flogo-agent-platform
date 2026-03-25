@@ -9,6 +9,7 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
+	"github.com/aldoapicella/flogo-agent-platform/internal/reporting"
 	agentruntime "github.com/aldoapicella/flogo-agent-platform/internal/runtime"
 	"github.com/aldoapicella/flogo-agent-platform/internal/sandbox"
 )
@@ -65,6 +66,12 @@ func (a *App) Run(ctx context.Context, initialRepo string, initialGoal string, i
 		current = snapshot
 		sessionID = snapshot.ID
 		fmt.Fprintf(statusView, "Session: %s\nStatus: %s\nRepo: %s\nMode: %s\n", snapshot.ID, snapshot.Status, snapshot.RepoPath, snapshot.Mode)
+		if snapshot.LastTurnPlan != nil {
+			fmt.Fprintf(statusView, "Planner: %s\nGoal: %s\n", snapshot.LastTurnPlan.Planner, snapshot.LastTurnPlan.GoalSummary)
+		}
+		if snapshot.LastTurnKind != "" {
+			fmt.Fprintf(statusView, "Turn kind: %s\n", snapshot.LastTurnKind)
+		}
 		if snapshot.PendingApproval != nil {
 			fmt.Fprintf(statusView, "\n[yellow]Pending approval[-]: %s\n", snapshot.PendingApproval.Summary)
 		}
@@ -73,8 +80,26 @@ func (a *App) Run(ctx context.Context, initialRepo string, initialGoal string, i
 			fmt.Fprintf(transcriptView, "[blue]%s[-] %s\n\n", strings.ToUpper(string(item.Role)), item.Content)
 		}
 
+		if snapshot.LastTurnPlan != nil {
+			fmt.Fprintln(planView, "Last turn plan:")
+			for _, step := range snapshot.LastTurnPlan.Steps {
+				fmt.Fprintf(planView, "- %s", step.Type)
+				if step.Reason != "" {
+					fmt.Fprintf(planView, ": %s", step.Reason)
+				}
+				fmt.Fprintln(planView)
+			}
+			fmt.Fprintln(planView)
+		}
+		if len(snapshot.LastStepResults) > 0 {
+			fmt.Fprintln(planView, "Step results:")
+			for _, result := range snapshot.LastStepResults {
+				fmt.Fprintf(planView, "- [%s] %s: %s\n", result.Status, result.Type, result.Summary)
+			}
+			fmt.Fprintln(planView)
+		}
 		if len(snapshot.Plan) > 0 {
-			fmt.Fprintln(planView, "Plan:")
+			fmt.Fprintln(planView, "Execution plan:")
 			for _, item := range snapshot.Plan {
 				fmt.Fprintf(planView, "- [%s] %s", item.Status, item.Title)
 				if item.Details != "" {
@@ -89,6 +114,10 @@ func (a *App) Run(ctx context.Context, initialRepo string, initialGoal string, i
 		} else if snapshot.LastReport != nil && snapshot.LastReport.PatchPlan != nil && strings.TrimSpace(snapshot.LastReport.PatchPlan.UnifiedDiff) != "" {
 			fmt.Fprintln(planView, "\nDiff:")
 			fmt.Fprintln(planView, snapshot.LastReport.PatchPlan.UnifiedDiff)
+		}
+		if snapshot.LastReport != nil {
+			fmt.Fprintln(planView, "\nReport:")
+			fmt.Fprintln(planView, reporting.FormatReport(snapshot.LastReport))
 		}
 	}
 

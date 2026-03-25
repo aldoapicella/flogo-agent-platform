@@ -79,17 +79,23 @@ type PlanItem struct {
 }
 
 type PendingApproval struct {
-	Kind        string     `json:"kind"`
-	Summary     string     `json:"summary"`
-	RequestedAt string     `json:"requestedAt"`
-	PatchPlan   *PatchPlan `json:"patchPlan,omitempty"`
+	Kind        string             `json:"kind"`
+	Summary     string             `json:"summary"`
+	RequestedAt string             `json:"requestedAt"`
+	PatchPlan   *PatchPlan         `json:"patchPlan,omitempty"`
+	Writes      []PendingFileWrite `json:"writes,omitempty"`
+}
+
+type PendingFileWrite struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
 }
 
 type SessionEvent struct {
-	ID        string      `json:"id"`
-	Type      string      `json:"type"`
-	Summary   string      `json:"summary"`
-	CreatedAt string      `json:"createdAt"`
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Summary   string `json:"summary"`
+	CreatedAt string `json:"createdAt"`
 }
 
 type SessionSnapshot struct {
@@ -105,10 +111,63 @@ type SessionSnapshot struct {
 	Messages        []ChatMessage    `json:"messages,omitempty"`
 	Plan            []PlanItem       `json:"plan,omitempty"`
 	Events          []SessionEvent   `json:"events,omitempty"`
+	LastTurnPlan    *TurnPlan        `json:"lastTurnPlan,omitempty"`
+	LastStepResults []TurnStepResult `json:"lastStepResults,omitempty"`
+	LastTurnKind    string           `json:"lastTurnKind,omitempty"`
 	PendingApproval *PendingApproval `json:"pendingApproval,omitempty"`
 	LastReport      *RunReport       `json:"lastReport,omitempty"`
 	CreatedAt       string           `json:"createdAt"`
 	UpdatedAt       string           `json:"updatedAt"`
+}
+
+type TurnStepType string
+
+const (
+	TurnStepInspectWorkspace TurnStepType = "inspect_workspace"
+	TurnStepAnalyzeFlogo     TurnStepType = "analyze_flogo"
+	TurnStepCreateMinimalApp TurnStepType = "create_minimal_app"
+	TurnStepRepairAndVerify  TurnStepType = "repair_and_verify"
+	TurnStepApprovePending   TurnStepType = "approve_pending"
+	TurnStepRejectPending    TurnStepType = "reject_pending"
+	TurnStepShowDiff         TurnStepType = "show_diff"
+	TurnStepShowStatus       TurnStepType = "show_status"
+)
+
+type TurnPlan struct {
+	GoalSummary      string            `json:"goalSummary"`
+	RequiresCreation bool              `json:"requiresCreation"`
+	Planner          string            `json:"planner,omitempty"`
+	Steps            []TurnStep        `json:"steps"`
+	Notes            []string          `json:"notes,omitempty"`
+	Workspace        map[string]string `json:"workspace,omitempty"`
+}
+
+type TurnStep struct {
+	Type   TurnStepType      `json:"type"`
+	Reason string            `json:"reason,omitempty"`
+	Params map[string]string `json:"params,omitempty"`
+}
+
+type TurnStepStatus string
+
+const (
+	TurnStepStatusCompleted TurnStepStatus = "completed"
+	TurnStepStatusBlocked   TurnStepStatus = "blocked"
+	TurnStepStatusSkipped   TurnStepStatus = "skipped"
+)
+
+type ToolCallRecord struct {
+	Name    string      `json:"name"`
+	Summary string      `json:"summary,omitempty"`
+	Result  *ToolResult `json:"result,omitempty"`
+}
+
+type TurnStepResult struct {
+	Type      TurnStepType     `json:"type"`
+	Status    TurnStepStatus   `json:"status"`
+	Summary   string           `json:"summary"`
+	ToolCalls []ToolCallRecord `json:"toolCalls,omitempty"`
+	Report    *RunReport       `json:"report,omitempty"`
 }
 
 type SourceCitation struct {

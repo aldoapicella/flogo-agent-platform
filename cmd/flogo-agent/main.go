@@ -542,6 +542,20 @@ func renderSession(snapshot *contracts.SessionSnapshot) string {
 	for _, message := range snapshot.Messages {
 		builder.WriteString(fmt.Sprintf("%s: %s\n", strings.ToUpper(string(message.Role)), message.Content))
 	}
+	if snapshot.LastTurnPlan != nil {
+		builder.WriteString("\nLast turn:\n")
+		builder.WriteString(fmt.Sprintf("- Planner: %s\n", snapshot.LastTurnPlan.Planner))
+		builder.WriteString(fmt.Sprintf("- Goal: %s\n", snapshot.LastTurnPlan.GoalSummary))
+		if snapshot.LastTurnKind != "" {
+			builder.WriteString(fmt.Sprintf("- Kind: %s\n", snapshot.LastTurnKind))
+		}
+	}
+	if len(snapshot.LastStepResults) > 0 {
+		builder.WriteString("\nStep results:\n")
+		for _, result := range snapshot.LastStepResults {
+			builder.WriteString(fmt.Sprintf("- [%s] %s: %s\n", result.Status, result.Type, result.Summary))
+		}
+	}
 	if snapshot.PendingApproval != nil && snapshot.PendingApproval.PatchPlan != nil && strings.TrimSpace(snapshot.PendingApproval.PatchPlan.UnifiedDiff) != "" {
 		builder.WriteString("\nDiff:\n")
 		builder.WriteString(snapshot.PendingApproval.PatchPlan.UnifiedDiff)
@@ -555,6 +569,11 @@ func renderSession(snapshot *contracts.SessionSnapshot) string {
 			}
 			builder.WriteByte('\n')
 		}
+	}
+	if snapshot.LastReport != nil {
+		builder.WriteString("\nReport:\n")
+		builder.WriteString(reporting.FormatReport(snapshot.LastReport))
+		builder.WriteByte('\n')
 	}
 	return strings.TrimSpace(builder.String())
 }

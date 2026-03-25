@@ -14,6 +14,7 @@ import (
 
 	"github.com/aldoapicella/flogo-agent-platform/internal/agentloop"
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
+	"github.com/aldoapicella/flogo-agent-platform/internal/model"
 	"github.com/aldoapicella/flogo-agent-platform/internal/session"
 )
 
@@ -33,6 +34,16 @@ type Options struct {
 }
 
 func NewManager(ctx context.Context, repoRoot string, stateDir string, manifestPath string, options Options) (*Manager, error) {
+	modelClient := options.ServiceOptions.Model
+	if modelClient == nil {
+		var err error
+		modelClient, err = model.NewFromEnv()
+		if err != nil {
+			return nil, err
+		}
+		options.ServiceOptions.Model = modelClient
+	}
+
 	service, err := session.NewServiceWithOptions(ctx, repoRoot, stateDir, manifestPath, options.ServiceOptions)
 	if err != nil {
 		return nil, err
@@ -42,7 +53,7 @@ func NewManager(ctx context.Context, repoRoot string, stateDir string, manifestP
 	}
 	manager := &Manager{
 		service:     service,
-		coordinator: agentloop.New(service),
+		coordinator: agentloop.New(service, modelClient),
 		stateDir:    stateDir,
 		sessionsDir: filepath.Join(stateDir, "sessions"),
 		sessions:    map[string]*contracts.SessionSnapshot{},

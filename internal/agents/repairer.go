@@ -17,9 +17,38 @@ func NewRepairer(modelClient model.Client) *Repairer {
 }
 
 func (r *Repairer) BuildPatchPlan(ctx context.Context, doc *flogo.Document, validation contracts.ValidationResult, citations []contracts.SourceCitation) (*contracts.PatchPlan, []string, error) {
-	plan, notes, err := flogo.BuildSafePatchPlan(doc, citations)
-	if err != nil || plan != nil || r == nil || r.modelClient == nil {
-		return plan, notes, err
+	if r != nil && r.modelClient != nil {
+		plan, notes, err := flogo.BuildModelPatchPlan(ctx, doc, validation, citations, r.modelClient)
+		if err == nil && plan != nil {
+			if plan.Safe {
+				return plan, notes, nil
+			}
+
+			fallbackPlan, fallbackNotes, fallbackErr := flogo.BuildSafePatchPlan(doc, citations)
+			if fallbackErr != nil {
+				return plan, append(notes, fallbackNotes...), fallbackErr
+			}
+			if fallbackPlan != nil {
+				combinedNotes := append(notes, "model repair candidate was not executable-safe; used deterministic repair rules")
+				combinedNotes = append(combinedNotes, fallbackNotes...)
+				return fallbackPlan, combinedNotes, nil
+			}
+			return plan, notes, nil
+		}
+		fallbackPlan, fallbackNotes, fallbackErr := flogo.BuildSafePatchPlan(doc, citations)
+		if fallbackErr != nil {
+			return nil, append(notes, fallbackNotes...), fallbackErr
+		}
+		if fallbackPlan != nil {
+			combinedNotes := append(notes, "model repair did not yield a usable patch; used deterministic repair rules")
+			combinedNotes = append(combinedNotes, fallbackNotes...)
+			return fallbackPlan, combinedNotes, nil
+		}
+		if err != nil {
+			return nil, notes, err
+		}
+		return nil, notes, nil
 	}
-	return flogo.BuildModelPatchPlan(ctx, doc, validation, citations, r.modelClient)
+
+	return flogo.BuildSafePatchPlan(doc, citations)
 }

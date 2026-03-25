@@ -18,6 +18,8 @@ func ValidateSemantics(doc *Document) []contracts.ValidationIssue {
 	issues = append(issues, validateImportRefs(doc, catalog)...)
 	issues = append(issues, validateOrphanedImports(doc.Path, catalog)...)
 	issues = append(issues, validateFlowURIs(doc, catalog, flows)...)
+	issues = append(issues, validateHandlerActions(doc)...)
+	issues = append(issues, validateHandlerActionInputScopes(doc)...)
 	issues = append(issues, validateFlowActionIO(doc, flows)...)
 	issues = append(issues, validateFlowExpressions(doc, flows)...)
 	issues = append(issues, validateFlowTasks(doc, catalog, flows)...)
@@ -97,6 +99,85 @@ func validateMappings(doc *Document) []contracts.ValidationIssue {
 		}
 	})
 	return issues
+}
+
+func validateHandlerActions(doc *Document) []contracts.ValidationIssue {
+	var issues []contracts.ValidationIssue
+	triggers := asSlice(doc.Raw["triggers"])
+	for triggerIdx, triggerItem := range triggers {
+		trigger, ok := triggerItem.(map[string]any)
+		if !ok {
+			continue
+		}
+		handlers := asSlice(trigger["handlers"])
+		for handlerIdx, handlerItem := range handlers {
+			handler, ok := handlerItem.(map[string]any)
+			if !ok {
+				continue
+			}
+			action, ok := handler["action"].(map[string]any)
+			if !ok {
+				continue
+			}
+			actionID := asString(action["id"])
+			if actionID == "" {
+				continue
+			}
+			settings, _ := action["settings"].(map[string]any)
+			input, _ := action["input"].(map[string]any)
+			output, _ := action["output"].(map[string]any)
+			if asString(action["ref"]) == "" && len(settings) == 0 && len(input) == 0 && len(output) == 0 {
+				continue
+			}
+			issues = append(issues, contracts.ValidationIssue{
+				Severity: "error",
+				RuleID:   "handler.action.inline_id",
+				Message:  fmt.Sprintf("inline handler action %q should not declare id when the action body is embedded", actionID),
+				File:     doc.Path,
+				JSONPath: fmt.Sprintf("$.triggers[%d].handlers[%d].action.id", triggerIdx, handlerIdx),
+			})
+		}
+	}
+	return issues
+}
+
+func validateHandlerActionInputScopes(doc *Document) []contracts.ValidationIssue {
+	var issues []contracts.ValidationIssue
+	for _, action := range collectHandlerActions(doc) {
+		for key, value := range action.Input {
+			text, ok := value.(string)
+			if !ok {
+				continue
+			}
+			resolver := invalidHandlerActionInputResolver(text)
+			if resolver == "" {
+				continue
+			}
+			issues = append(issues, contracts.ValidationIssue{
+				Severity: "error",
+				RuleID:   "handler.action.input.invalid_scope",
+				Message:  fmt.Sprintf("handler action input %q uses unsupported resolver %s before the flow executes; map from trigger data using $.<field> instead", key, resolver),
+				File:     doc.Path,
+				JSONPath: action.InputPath + "." + key,
+			})
+		}
+	}
+	return issues
+}
+
+func invalidHandlerActionInputResolver(text string) string {
+	switch {
+	case strings.Contains(text, "$flow."):
+		return "$flow"
+	case strings.Contains(text, "$trigger."):
+		return "$trigger"
+	case strings.Contains(text, "$activity[") || strings.Contains(text, "$activity."):
+		return "$activity"
+	case strings.Contains(text, "$iteration."):
+		return "$iteration"
+	default:
+		return ""
+	}
 }
 
 func validateImportRefs(doc *Document, catalog importCatalog) []contracts.ValidationIssue {

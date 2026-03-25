@@ -3,19 +3,29 @@ package agentloop
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
+	"github.com/aldoapicella/flogo-agent-platform/internal/flogo"
+	"github.com/aldoapicella/flogo-agent-platform/internal/model"
 	"github.com/aldoapicella/flogo-agent-platform/internal/session"
 )
 
 type Coordinator struct {
-	service *session.Service
+	service   *session.Service
+	planner   *Planner
+	responder *Responder
 }
 
-func New(service *session.Service) *Coordinator {
-	return &Coordinator{service: service}
+func New(service *session.Service, modelClient model.Client) *Coordinator {
+	return &Coordinator{
+		service:   service,
+		planner:   NewPlanner(modelClient),
+		responder: NewResponder(modelClient),
+	}
 }
 
 func (c *Coordinator) HandleUserMessage(ctx context.Context, snapshot *contracts.SessionSnapshot, content string) error {
@@ -29,117 +39,331 @@ func (c *Coordinator) HandleUserMessage(ctx context.Context, snapshot *contracts
 	}
 
 	appendMessage(snapshot, contracts.RoleUser, content)
-	intent := classifyIntent(content)
-
-	switch intent {
-	case intentApprove:
-		return c.ApprovePending(ctx, snapshot)
-	case intentReject:
-		return c.RejectPending(snapshot, "")
-	case intentPlan:
-		appendMessage(snapshot, contracts.RoleAssistant, renderPlan(snapshot))
-		appendEvent(snapshot, "plan", "rendered current execution plan")
-		return nil
-	case intentDiff:
-		appendMessage(snapshot, contracts.RoleAssistant, renderDiff(snapshot))
-		appendEvent(snapshot, "diff", "rendered current patch diff")
-		return nil
-	case intentStatus:
-		appendMessage(snapshot, contracts.RoleAssistant, renderStatus(snapshot))
-		appendEvent(snapshot, "status", "rendered current session status")
-		return nil
-	case intentInspect:
-		report, err := c.service.Analyze(ctx, sessionRequest(snapshot))
-		if err != nil {
-			return err
-		}
-		applyReport(snapshot, report, false)
-		appendMessage(snapshot, contracts.RoleAssistant, renderReport("inspection", report))
-		return nil
-	default:
-		report, err := c.service.Run(ctx, sessionRequest(snapshot))
-		if err != nil {
-			return err
-		}
-		applyReport(snapshot, report, true)
-		appendMessage(snapshot, contracts.RoleAssistant, renderReport("execution", report))
-		return nil
+	plan := c.planner.PlanTurn(ctx, snapshot, content)
+	snapshot.LastTurnPlan = &plan
+	snapshot.LastTurnKind = "repair"
+	if plan.RequiresCreation {
+		snapshot.LastTurnKind = "creation"
 	}
+	snapshot.LastStepResults = nil
+	appendEvent(snapshot, "planning", fmt.Sprintf("planned %d step(s) via %s", len(plan.Steps), plan.Planner))
+
+	for _, step := range plan.Steps {
+		result, stop, err := c.executeStep(ctx, snapshot, step)
+		if err != nil {
+			return err
+		}
+		snapshot.LastStepResults = append(snapshot.LastStepResults, result)
+		if stop {
+			break
+		}
+	}
+
+	appendMessage(snapshot, contracts.RoleAssistant, c.composeAssistantResponse(ctx, snapshot))
+	return nil
 }
 
 func (c *Coordinator) ApprovePending(ctx context.Context, snapshot *contracts.SessionSnapshot) error {
-	if snapshot == nil {
-		return fmt.Errorf("session snapshot is required")
-	}
-	if snapshot.PendingApproval == nil {
-		appendMessage(snapshot, contracts.RoleAssistant, "No pending patch is waiting for approval.")
-		appendEvent(snapshot, "approval", "no pending approval was available")
-		return nil
-	}
-
-	report, err := c.service.Run(ctx, applyRequest(snapshot))
+	result, _, err := c.executeStep(ctx, snapshot, contracts.TurnStep{
+		Type:   contracts.TurnStepApprovePending,
+		Reason: "the user approved the pending patch",
+	})
 	if err != nil {
 		return err
 	}
-	applyReport(snapshot, report, true)
-	appendMessage(snapshot, contracts.RoleAssistant, renderReport("approval", report))
-	appendEvent(snapshot, "approval", "approved and executed the pending patch")
+	snapshot.LastStepResults = append(snapshot.LastStepResults, result)
+	appendMessage(snapshot, contracts.RoleAssistant, c.composeAssistantResponse(ctx, snapshot))
 	return nil
 }
 
 func (c *Coordinator) RejectPending(snapshot *contracts.SessionSnapshot, reason string) error {
-	if snapshot == nil {
-		return fmt.Errorf("session snapshot is required")
+	result, _, err := c.executeStep(context.Background(), snapshot, contracts.TurnStep{
+		Type:   contracts.TurnStepRejectPending,
+		Reason: reason,
+	})
+	if err != nil {
+		return err
 	}
+	snapshot.LastStepResults = append(snapshot.LastStepResults, result)
+	appendMessage(snapshot, contracts.RoleAssistant, c.composeAssistantResponse(context.Background(), snapshot))
+	return nil
+}
+
+func (c *Coordinator) executeStep(ctx context.Context, snapshot *contracts.SessionSnapshot, step contracts.TurnStep) (contracts.TurnStepResult, bool, error) {
+	switch step.Type {
+	case contracts.TurnStepInspectWorkspace:
+		return c.inspectWorkspace(snapshot, step), false, nil
+	case contracts.TurnStepAnalyzeFlogo:
+		return c.analyzeFlogo(ctx, snapshot)
+	case contracts.TurnStepCreateMinimalApp:
+		return c.createMinimalApp(snapshot, step)
+	case contracts.TurnStepRepairAndVerify:
+		return c.repairAndVerify(ctx, snapshot)
+	case contracts.TurnStepApprovePending:
+		return c.approvePending(ctx, snapshot)
+	case contracts.TurnStepRejectPending:
+		return c.rejectPending(snapshot, step.Reason), true, nil
+	case contracts.TurnStepShowDiff:
+		return contracts.TurnStepResult{
+			Type:    step.Type,
+			Status:  contracts.TurnStepStatusCompleted,
+			Summary: renderDiff(snapshot),
+		}, true, nil
+	case contracts.TurnStepShowStatus:
+		return contracts.TurnStepResult{
+			Type:    step.Type,
+			Status:  contracts.TurnStepStatusCompleted,
+			Summary: renderStatus(snapshot),
+		}, true, nil
+	default:
+		return contracts.TurnStepResult{
+			Type:    step.Type,
+			Status:  contracts.TurnStepStatusBlocked,
+			Summary: fmt.Sprintf("unsupported step type %q", step.Type),
+		}, true, nil
+	}
+}
+
+func (c *Coordinator) inspectWorkspace(snapshot *contracts.SessionSnapshot, step contracts.TurnStep) contracts.TurnStepResult {
+	var summaries []string
+	path := filepath.Join(snapshot.RepoPath, "flogo.json")
+	if _, err := os.Stat(path); err == nil {
+		summaries = append(summaries, "found flogo.json")
+	} else {
+		summaries = append(summaries, "flogo.json is missing")
+	}
+	if _, err := os.Stat(filepath.Join(snapshot.RepoPath, ".flogotest")); err == nil {
+		summaries = append(summaries, "found .flogotest")
+	}
+	if snapshot.PendingApproval != nil {
+		summaries = append(summaries, "a patch is waiting for approval")
+	}
+	appendEvent(snapshot, "workspace", strings.Join(summaries, "; "))
+	return contracts.TurnStepResult{
+		Type:      step.Type,
+		Status:    contracts.TurnStepStatusCompleted,
+		Summary:   strings.Join(summaries, "; "),
+		ToolCalls: []contracts.ToolCallRecord{{Name: "inspect_workspace", Summary: step.Reason}},
+	}
+}
+
+func (c *Coordinator) analyzeFlogo(ctx context.Context, snapshot *contracts.SessionSnapshot) (contracts.TurnStepResult, bool, error) {
+	if !hasFlogoJSON(snapshot.RepoPath) {
+		snapshot.Status = contracts.SessionStatusBlocked
+		summary := "No flogo.json is present. Create a Flogo app first before analysis."
+		appendEvent(snapshot, "blocked", summary)
+		return contracts.TurnStepResult{
+			Type:    contracts.TurnStepAnalyzeFlogo,
+			Status:  contracts.TurnStepStatusBlocked,
+			Summary: summary,
+		}, true, nil
+	}
+
+	report, err := c.service.Analyze(ctx, sessionRequest(snapshot))
+	if err != nil {
+		return contracts.TurnStepResult{}, true, err
+	}
+	applyReport(snapshot, report, false)
+	appendEvent(snapshot, "analysis", "analyzed the current Flogo descriptor")
+	return contracts.TurnStepResult{
+		Type:      contracts.TurnStepAnalyzeFlogo,
+		Status:    statusFromOutcome(report.Outcome),
+		Summary:   summarizeReport(report),
+		ToolCalls: toolCallsFromReport(report, "analyze_flogo"),
+		Report:    report,
+	}, report.Outcome == contracts.RunOutcomeBlocked, nil
+}
+
+func (c *Coordinator) createMinimalApp(snapshot *contracts.SessionSnapshot, step contracts.TurnStep) (contracts.TurnStepResult, bool, error) {
+	req := flogo.DefaultBootstrapRequest(snapshot.RepoPath)
+	if value := strings.TrimSpace(step.Params["app_name"]); value != "" {
+		req.AppName = value
+	}
+	if value := strings.TrimSpace(step.Params["flow_name"]); value != "" {
+		req.FlowName = value
+	}
+	if value := strings.TrimSpace(step.Params["route"]); value != "" {
+		req.Route = value
+	}
+	if value := strings.TrimSpace(step.Params["port"]); value != "" {
+		req.Port = value
+	}
+
+	doc, err := flogo.BuildMinimalAppDocument(snapshot.RepoPath, req)
+	if err != nil {
+		snapshot.Status = contracts.SessionStatusBlocked
+		appendEvent(snapshot, "blocked", err.Error())
+		return contracts.TurnStepResult{
+			Type:    contracts.TurnStepCreateMinimalApp,
+			Status:  contracts.TurnStepStatusBlocked,
+			Summary: err.Error(),
+		}, true, nil
+	}
+
+	patchPlan, content, err := flogo.BuildDocumentPatchPlan(
+		doc,
+		"bootstrap a minimal Flogo app descriptor with a REST trigger and main flow",
+		nil,
+		true,
+	)
+	if err != nil {
+		snapshot.Status = contracts.SessionStatusBlocked
+		appendEvent(snapshot, "blocked", err.Error())
+		return contracts.TurnStepResult{
+			Type:    contracts.TurnStepCreateMinimalApp,
+			Status:  contracts.TurnStepStatusBlocked,
+			Summary: err.Error(),
+		}, true, nil
+	}
+
+	if snapshot.Mode == contracts.ModeReview || snapshot.ApprovalPolicy.RequireWriteApproval {
+		snapshot.Status = contracts.SessionStatusWaitingApproval
+		snapshot.PendingApproval = &contracts.PendingApproval{
+			Kind:        "bootstrap",
+			Summary:     "review the proposed bootstrap app before applying",
+			RequestedAt: nowUTC(),
+			PatchPlan:   patchPlan,
+			Writes: []contracts.PendingFileWrite{
+				{Path: doc.Path, Content: content},
+			},
+		}
+		snapshot.LastReport = &contracts.RunReport{
+			Outcome:    contracts.RunOutcomeReady,
+			PatchPlan:  patchPlan,
+			NextAction: "review the proposed bootstrap app before applying",
+		}
+		snapshot.Plan = []contracts.PlanItem{
+			{ID: "inspect", Title: "Inspect flogo.json and flow resources", Status: contracts.PlanItemCompleted},
+			{ID: "create", Title: "Create a minimal Flogo app bootstrap", Status: contracts.PlanItemInProgress, Details: "review the proposed bootstrap app before applying"},
+			{ID: "repair", Title: "Repair Flogo descriptor issues", Status: contracts.PlanItemPending},
+			{ID: "build", Title: "Build the generated app", Status: contracts.PlanItemPending},
+			{ID: "test", Title: "Run available flow and unit tests", Status: contracts.PlanItemPending},
+		}
+		appendEvent(snapshot, "creation", "prepared a bootstrap flogo.json for review")
+		return contracts.TurnStepResult{
+			Type:   contracts.TurnStepCreateMinimalApp,
+			Status: contracts.TurnStepStatusCompleted,
+			Summary: fmt.Sprintf(
+				"Prepared a minimal Flogo app bootstrap with app %q, flow %q, route %q, and port %q for review.",
+				req.AppName, req.FlowName, req.Route, req.Port,
+			),
+			ToolCalls: []contracts.ToolCallRecord{
+				{Name: "create_minimal_app", Summary: "prepared bootstrap flogo.json patch"},
+			},
+			Report: snapshot.LastReport,
+		}, true, nil
+	}
+
+	snapshot.Status = contracts.SessionStatusActive
+	if err := flogo.WriteDocument(doc); err != nil {
+		snapshot.Status = contracts.SessionStatusBlocked
+		appendEvent(snapshot, "blocked", err.Error())
+		return contracts.TurnStepResult{
+			Type:    contracts.TurnStepCreateMinimalApp,
+			Status:  contracts.TurnStepStatusBlocked,
+			Summary: err.Error(),
+		}, true, nil
+	}
+	appendEvent(snapshot, "creation", fmt.Sprintf("created bootstrap app at %s", doc.Path))
+	return contracts.TurnStepResult{
+		Type:   contracts.TurnStepCreateMinimalApp,
+		Status: contracts.TurnStepStatusCompleted,
+		Summary: fmt.Sprintf(
+			"Created a minimal Flogo app bootstrap with app %q, flow %q, route %q, and port %q.",
+			req.AppName, req.FlowName, req.Route, req.Port,
+		),
+		ToolCalls: []contracts.ToolCallRecord{
+			{Name: "create_minimal_app", Summary: "wrote bootstrap flogo.json"},
+		},
+	}, false, nil
+}
+
+func (c *Coordinator) repairAndVerify(ctx context.Context, snapshot *contracts.SessionSnapshot) (contracts.TurnStepResult, bool, error) {
+	if !hasFlogoJSON(snapshot.RepoPath) {
+		snapshot.Status = contracts.SessionStatusBlocked
+		summary := "No flogo.json is present. Create a Flogo app before repair and verification."
+		appendEvent(snapshot, "blocked", summary)
+		return contracts.TurnStepResult{
+			Type:    contracts.TurnStepRepairAndVerify,
+			Status:  contracts.TurnStepStatusBlocked,
+			Summary: summary,
+		}, true, nil
+	}
+
+	report, err := c.service.Run(ctx, sessionRequest(snapshot))
+	if err != nil {
+		return contracts.TurnStepResult{}, true, err
+	}
+	applyReport(snapshot, report, true)
+	appendEvent(snapshot, "execution", report.NextAction)
+	stop := report.Outcome != contracts.RunOutcomeApplied
+	return contracts.TurnStepResult{
+		Type:      contracts.TurnStepRepairAndVerify,
+		Status:    statusFromOutcome(report.Outcome),
+		Summary:   summarizeReport(report),
+		ToolCalls: toolCallsFromReport(report, "repair_and_verify"),
+		Report:    report,
+	}, stop, nil
+}
+
+func (c *Coordinator) approvePending(ctx context.Context, snapshot *contracts.SessionSnapshot) (contracts.TurnStepResult, bool, error) {
 	if snapshot.PendingApproval == nil {
-		appendMessage(snapshot, contracts.RoleAssistant, "No pending patch is waiting for rejection.")
-		appendEvent(snapshot, "approval", "no pending approval was available to reject")
-		return nil
+		summary := "No pending patch is waiting for approval."
+		appendEvent(snapshot, "approval", summary)
+		return contracts.TurnStepResult{
+			Type:    contracts.TurnStepApprovePending,
+			Status:  contracts.TurnStepStatusCompleted,
+			Summary: summary,
+		}, true, nil
+	}
+
+	if err := applyPendingWrites(snapshot.PendingApproval); err != nil {
+		snapshot.Status = contracts.SessionStatusBlocked
+		appendEvent(snapshot, "blocked", err.Error())
+		return contracts.TurnStepResult{
+			Type:    contracts.TurnStepApprovePending,
+			Status:  contracts.TurnStepStatusBlocked,
+			Summary: err.Error(),
+		}, true, nil
+	}
+
+	report, err := c.service.Run(ctx, applyRequest(snapshot))
+	if err != nil {
+		return contracts.TurnStepResult{}, true, err
+	}
+	applyReport(snapshot, report, true)
+	appendEvent(snapshot, "approval", "approved and executed the pending patch")
+	return contracts.TurnStepResult{
+		Type:      contracts.TurnStepApprovePending,
+		Status:    statusFromOutcome(report.Outcome),
+		Summary:   summarizeReport(report),
+		ToolCalls: toolCallsFromReport(report, "approve_pending"),
+		Report:    report,
+	}, report.Outcome != contracts.RunOutcomeApplied, nil
+}
+
+func (c *Coordinator) rejectPending(snapshot *contracts.SessionSnapshot, reason string) contracts.TurnStepResult {
+	if snapshot.PendingApproval == nil {
+		summary := "No pending patch is waiting for rejection."
+		appendEvent(snapshot, "approval", summary)
+		return contracts.TurnStepResult{
+			Type:    contracts.TurnStepRejectPending,
+			Status:  contracts.TurnStepStatusCompleted,
+			Summary: summary,
+		}
 	}
 
 	snapshot.PendingApproval = nil
 	snapshot.Status = contracts.SessionStatusActive
-	message := "Rejected the pending patch. I can inspect again, generate a new repair, or explain the current issues."
+	summary := "Rejected the pending patch."
 	if strings.TrimSpace(reason) != "" {
-		message = fmt.Sprintf("Rejected the pending patch (%s). I can inspect again, generate a new repair, or explain the current issues.", reason)
+		summary = fmt.Sprintf("Rejected the pending patch: %s", strings.TrimSpace(reason))
 	}
-	appendMessage(snapshot, contracts.RoleAssistant, message)
-	appendEvent(snapshot, "approval", "rejected the pending patch")
-	snapshot.UpdatedAt = nowUTC()
-	return nil
-}
-
-type intentKind string
-
-const (
-	intentInspect intentKind = "inspect"
-	intentExecute intentKind = "execute"
-	intentApprove intentKind = "approve"
-	intentReject  intentKind = "reject"
-	intentPlan    intentKind = "plan"
-	intentDiff    intentKind = "diff"
-	intentStatus  intentKind = "status"
-)
-
-func classifyIntent(content string) intentKind {
-	normalized := strings.ToLower(strings.TrimSpace(content))
-	switch {
-	case strings.HasPrefix(normalized, "/approve"), strings.Contains(normalized, "approve pending"), normalized == "approve":
-		return intentApprove
-	case strings.HasPrefix(normalized, "/reject"), normalized == "reject":
-		return intentReject
-	case strings.HasPrefix(normalized, "/plan"), normalized == "plan":
-		return intentPlan
-	case strings.HasPrefix(normalized, "/diff"), normalized == "diff":
-		return intentDiff
-	case strings.HasPrefix(normalized, "/status"), normalized == "status":
-		return intentStatus
-	case strings.Contains(normalized, "build"), strings.Contains(normalized, "test"), strings.Contains(normalized, "repair"),
-		strings.Contains(normalized, "fix"), strings.Contains(normalized, "apply"), strings.Contains(normalized, "update"),
-		strings.Contains(normalized, "verify"), strings.Contains(normalized, "run"):
-		return intentExecute
-	default:
-		return intentInspect
+	appendEvent(snapshot, "approval", summary)
+	return contracts.TurnStepResult{
+		Type:    contracts.TurnStepRejectPending,
+		Status:  contracts.TurnStepStatusCompleted,
+		Summary: summary,
 	}
 }
 
@@ -165,7 +389,7 @@ func applyRequest(snapshot *contracts.SessionSnapshot) contracts.SessionRequest 
 func applyReport(snapshot *contracts.SessionSnapshot, report *contracts.RunReport, executed bool) {
 	snapshot.LastReport = report
 	snapshot.UpdatedAt = nowUTC()
-	snapshot.Plan = derivePlan(report)
+	snapshot.Plan = derivePlan(report, snapshot.LastTurnKind)
 
 	switch report.Outcome {
 	case contracts.RunOutcomeReady:
@@ -176,51 +400,54 @@ func applyReport(snapshot *contracts.SessionSnapshot, report *contracts.RunRepor
 			RequestedAt: nowUTC(),
 			PatchPlan:   report.PatchPlan,
 		}
-		appendEvent(snapshot, "analysis", "prepared a reviewable patch proposal")
 	case contracts.RunOutcomeApplied:
 		snapshot.PendingApproval = nil
 		if executed {
 			snapshot.Status = contracts.SessionStatusCompleted
-			appendEvent(snapshot, "execution", "completed validation, build, and available tests")
 		} else {
 			snapshot.Status = contracts.SessionStatusActive
-			appendEvent(snapshot, "analysis", "inspected the app and found no blocking validation issues")
 		}
-	case contracts.RunOutcomeBlocked:
+	case contracts.RunOutcomeBlocked, contracts.RunOutcomeFailed:
 		snapshot.PendingApproval = nil
 		snapshot.Status = contracts.SessionStatusBlocked
-		appendEvent(snapshot, "blocked", report.NextAction)
 	default:
 		snapshot.PendingApproval = nil
-		snapshot.Status = contracts.SessionStatusBlocked
-		appendEvent(snapshot, "failed", report.NextAction)
 	}
 }
 
-func derivePlan(report *contracts.RunReport) []contracts.PlanItem {
+func derivePlan(report *contracts.RunReport, lastTurnKind string) []contracts.PlanItem {
 	plan := []contracts.PlanItem{
 		{ID: "inspect", Title: "Inspect flogo.json and flow resources", Status: contracts.PlanItemCompleted},
-		{ID: "repair", Title: "Repair Flogo descriptor issues", Status: contracts.PlanItemPending},
-		{ID: "build", Title: "Build the generated app", Status: contracts.PlanItemPending},
-		{ID: "test", Title: "Run available flow and unit tests", Status: contracts.PlanItemPending},
 	}
+	if lastTurnKind == "creation" {
+		plan = append(plan, contracts.PlanItem{ID: "create", Title: "Create a minimal Flogo app bootstrap", Status: contracts.PlanItemCompleted})
+	}
+	plan = append(plan,
+		contracts.PlanItem{ID: "repair", Title: "Repair Flogo descriptor issues", Status: contracts.PlanItemPending},
+		contracts.PlanItem{ID: "build", Title: "Build the generated app", Status: contracts.PlanItemPending},
+		contracts.PlanItem{ID: "test", Title: "Run available flow and unit tests", Status: contracts.PlanItemPending},
+	)
 	if report == nil {
 		return plan
 	}
 
+	repairIndex := len(plan) - 3
+	buildIndex := len(plan) - 2
+	testIndex := len(plan) - 1
+
 	if report.PatchPlan != nil {
-		plan[1].Status = contracts.PlanItemInProgress
-		plan[1].Details = report.NextAction
+		plan[repairIndex].Status = contracts.PlanItemInProgress
+		plan[repairIndex].Details = report.NextAction
 	}
 	if report.Evidence.ValidationResult.Passed {
-		plan[1].Status = contracts.PlanItemCompleted
+		plan[repairIndex].Status = contracts.PlanItemCompleted
 	}
 	if report.Evidence.BuildResult != nil {
 		if report.Evidence.BuildResult.ExitCode == 0 {
-			plan[2].Status = contracts.PlanItemCompleted
+			plan[buildIndex].Status = contracts.PlanItemCompleted
 		} else {
-			plan[2].Status = contracts.PlanItemBlocked
-			plan[2].Details = report.NextAction
+			plan[buildIndex].Status = contracts.PlanItemBlocked
+			plan[buildIndex].Details = report.NextAction
 		}
 	}
 	if len(report.Evidence.TestResults) > 0 {
@@ -232,90 +459,90 @@ func derivePlan(report *contracts.RunReport) []contracts.PlanItem {
 			}
 		}
 		if testsPassed {
-			plan[3].Status = contracts.PlanItemCompleted
+			plan[testIndex].Status = contracts.PlanItemCompleted
 		} else {
-			plan[3].Status = contracts.PlanItemBlocked
-			plan[3].Details = report.NextAction
+			plan[testIndex].Status = contracts.PlanItemBlocked
+			plan[testIndex].Details = report.NextAction
 		}
 	}
 	if report.Outcome == contracts.RunOutcomeBlocked && report.Evidence.BuildResult == nil {
-		plan[1].Status = contracts.PlanItemBlocked
-		plan[1].Details = report.NextAction
+		plan[repairIndex].Status = contracts.PlanItemBlocked
+		plan[repairIndex].Details = report.NextAction
 	}
 	return plan
 }
 
-func renderReport(kind string, report *contracts.RunReport) string {
-	if report == nil {
-		return "No report is available."
+func renderTurnSummary(snapshot *contracts.SessionSnapshot) string {
+	if snapshot == nil {
+		return "No session is loaded."
 	}
 
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("Completed %s.\n", kind))
-	builder.WriteString(fmt.Sprintf("Outcome: %s\n", report.Outcome))
-	builder.WriteString(fmt.Sprintf("Validation passed: %t\n", report.Evidence.ValidationResult.Passed))
-
-	issues := append([]contracts.ValidationIssue{}, report.Evidence.ValidationResult.SchemaIssues...)
-	issues = append(issues, report.Evidence.ValidationResult.SemanticIssues...)
-	if len(issues) > 0 {
-		builder.WriteString("Top issues:\n")
-		for idx, issue := range issues {
-			if idx >= 3 {
-				break
-			}
-			builder.WriteString(fmt.Sprintf("- %s: %s\n", issue.RuleID, issue.Message))
-		}
-	}
-
-	if report.PatchPlan != nil {
-		builder.WriteString("Patch rationale: ")
-		builder.WriteString(strings.TrimSpace(report.PatchPlan.Rationale))
+	if snapshot.LastTurnPlan != nil {
+		builder.WriteString("Plan: ")
+		builder.WriteString(snapshot.LastTurnPlan.GoalSummary)
 		builder.WriteByte('\n')
-		if diff := strings.TrimSpace(report.PatchPlan.UnifiedDiff); diff != "" {
-			builder.WriteString("Diff:\n")
-			builder.WriteString(diff)
-			builder.WriteByte('\n')
+		builder.WriteString("Planner: ")
+		builder.WriteString(snapshot.LastTurnPlan.Planner)
+		builder.WriteByte('\n')
+	}
+	if snapshot.LastTurnKind != "" {
+		builder.WriteString("Turn kind: ")
+		builder.WriteString(snapshot.LastTurnKind)
+		builder.WriteByte('\n')
+	}
+	if len(snapshot.LastStepResults) > 0 {
+		builder.WriteString("Step results:\n")
+		for _, result := range snapshot.LastStepResults {
+			builder.WriteString(fmt.Sprintf("- [%s] %s: %s\n", result.Status, result.Type, result.Summary))
 		}
 	}
-
-	if report.Evidence.BuildResult != nil {
-		builder.WriteString(fmt.Sprintf("Build exit code: %d\n", report.Evidence.BuildResult.ExitCode))
+	if snapshot.PendingApproval != nil {
+		builder.WriteString("Pending approval: ")
+		builder.WriteString(snapshot.PendingApproval.Summary)
+		builder.WriteByte('\n')
 	}
-	for _, test := range report.Evidence.TestResults {
-		builder.WriteString(fmt.Sprintf("Test %s passed=%t skipped=%t exit=%d\n", test.Name, test.Passed, test.Skipped, test.Result.ExitCode))
-	}
-	if len(report.Citations) > 0 {
-		builder.WriteString("Sources:\n")
-		for idx, citation := range report.Citations {
-			if idx >= 3 {
-				break
-			}
-			builder.WriteString("- " + citation.Title)
-			if citation.Locator != "" {
-				builder.WriteString(" (" + citation.Locator + ")")
-			}
-			builder.WriteByte('\n')
+	if snapshot.LastReport != nil {
+		builder.WriteString("Latest report: ")
+		builder.WriteString(summarizeReport(snapshot.LastReport))
+		builder.WriteByte('\n')
+		for _, test := range snapshot.LastReport.Evidence.TestResults {
+			builder.WriteString(fmt.Sprintf("Test %s passed=%t skipped=%t\n", test.Name, test.Passed, test.Skipped))
 		}
-	}
-	if report.NextAction != "" {
-		builder.WriteString("Next: ")
-		builder.WriteString(report.NextAction)
 	}
 	return strings.TrimSpace(builder.String())
 }
 
 func renderPlan(snapshot *contracts.SessionSnapshot) string {
-	if snapshot == nil || len(snapshot.Plan) == 0 {
+	if snapshot == nil {
 		return "No plan is available yet."
 	}
 	var builder strings.Builder
-	builder.WriteString("Current Flogo execution plan:\n")
-	for _, item := range snapshot.Plan {
-		builder.WriteString(fmt.Sprintf("- [%s] %s", item.Status, item.Title))
-		if item.Details != "" {
-			builder.WriteString(": " + item.Details)
+	if snapshot.LastTurnPlan != nil {
+		builder.WriteString("Last turn plan:\n")
+		for _, step := range snapshot.LastTurnPlan.Steps {
+			builder.WriteString("- " + string(step.Type))
+			if step.Reason != "" {
+				builder.WriteString(": " + step.Reason)
+			}
+			builder.WriteByte('\n')
 		}
-		builder.WriteByte('\n')
+	}
+	if len(snapshot.Plan) > 0 {
+		if builder.Len() > 0 {
+			builder.WriteByte('\n')
+		}
+		builder.WriteString("Execution plan:\n")
+		for _, item := range snapshot.Plan {
+			builder.WriteString(fmt.Sprintf("- [%s] %s", item.Status, item.Title))
+			if item.Details != "" {
+				builder.WriteString(": " + item.Details)
+			}
+			builder.WriteByte('\n')
+		}
+	}
+	if builder.Len() == 0 {
+		return "No plan is available yet."
 	}
 	return strings.TrimSpace(builder.String())
 }
@@ -341,6 +568,12 @@ func renderStatus(snapshot *contracts.SessionSnapshot) string {
 	builder.WriteString(fmt.Sprintf("Session %s\n", snapshot.ID))
 	builder.WriteString(fmt.Sprintf("Status: %s\n", snapshot.Status))
 	builder.WriteString(fmt.Sprintf("Repo: %s\n", snapshot.RepoPath))
+	if snapshot.LastTurnKind != "" {
+		builder.WriteString(fmt.Sprintf("Last turn kind: %s\n", snapshot.LastTurnKind))
+	}
+	if snapshot.LastTurnPlan != nil {
+		builder.WriteString("Last planner: " + snapshot.LastTurnPlan.Planner + "\n")
+	}
 	if snapshot.PendingApproval != nil {
 		builder.WriteString("Pending approval: yes\n")
 		builder.WriteString("Next: " + snapshot.PendingApproval.Summary)
@@ -348,6 +581,79 @@ func renderStatus(snapshot *contracts.SessionSnapshot) string {
 		builder.WriteString("Pending approval: no")
 	}
 	return builder.String()
+}
+
+func (c *Coordinator) composeAssistantResponse(ctx context.Context, snapshot *contracts.SessionSnapshot) string {
+	if c == nil || c.responder == nil {
+		return renderTurnSummary(snapshot)
+	}
+	return c.responder.ComposeTurnResponse(ctx, snapshot)
+}
+
+func applyPendingWrites(pending *contracts.PendingApproval) error {
+	if pending == nil {
+		return nil
+	}
+	for _, write := range pending.Writes {
+		if strings.TrimSpace(write.Path) == "" {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(write.Path), 0o755); err != nil {
+			return fmt.Errorf("create directory for %s: %w", write.Path, err)
+		}
+		if err := os.WriteFile(write.Path, []byte(write.Content), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", write.Path, err)
+		}
+	}
+	return nil
+}
+
+func toolCallsFromReport(report *contracts.RunReport, name string) []contracts.ToolCallRecord {
+	if report == nil {
+		return nil
+	}
+	records := []contracts.ToolCallRecord{
+		{Name: name, Summary: report.NextAction},
+	}
+	if report.Evidence.BuildResult != nil {
+		records = append(records, contracts.ToolCallRecord{
+			Name:   "build",
+			Result: report.Evidence.BuildResult,
+		})
+	}
+	for _, test := range report.Evidence.TestResults {
+		result := test.Result
+		records = append(records, contracts.ToolCallRecord{
+			Name:    test.Name,
+			Summary: fmt.Sprintf("passed=%t skipped=%t", test.Passed, test.Skipped),
+			Result:  &result,
+		})
+	}
+	return records
+}
+
+func summarizeReport(report *contracts.RunReport) string {
+	if report == nil {
+		return "no report available"
+	}
+	if report.NextAction != "" {
+		return fmt.Sprintf("Outcome: %s; %s", report.Outcome, report.NextAction)
+	}
+	return fmt.Sprintf("Outcome: %s", report.Outcome)
+}
+
+func statusFromOutcome(outcome contracts.RunOutcome) contracts.TurnStepStatus {
+	switch outcome {
+	case contracts.RunOutcomeApplied, contracts.RunOutcomeReady:
+		return contracts.TurnStepStatusCompleted
+	default:
+		return contracts.TurnStepStatusBlocked
+	}
+}
+
+func hasFlogoJSON(repoPath string) bool {
+	_, err := os.Stat(filepath.Join(repoPath, "flogo.json"))
+	return err == nil
 }
 
 func appendMessage(snapshot *contracts.SessionSnapshot, role contracts.MessageRole, content string) {
