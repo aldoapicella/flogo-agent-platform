@@ -1,24 +1,64 @@
 # Configuration
 
-## CLI Flags
+## CLI Commands
 
-### Common flags
+### Conversational commands
 
-- `--repo`: target Flogo repository or fixture directory
-- `--goal`: task description recorded in the session report
-- `--mode`: `review`, `apply`, or `auto`
-- `--state-dir`: state root for SQLite, artifacts, and generated workspaces
-- `--sources`: explicit path to the knowledge manifest
-- `--bench-root`: benchmark root for the `benchmark` command
+- `flogo-agent daemon`
+  - starts the local HTTP daemon
+- `flogo-agent chat`
+  - creates or resumes a conversational Flogo session
+- `flogo-agent tui`
+  - starts the full-screen terminal client
+- `flogo-agent session list|show|approve|reject`
+  - inspects or controls persisted sessions
 
-### Sandbox flags
+### Compatibility and support commands
 
-- `--sandbox local|isolated`
-- `--sandbox-image <image>`
-- `--sandbox-runtime <runtime>`
-- `--sandbox-network <mode>`
+- `flogo-agent run`
+  - one-shot compatibility execution
+- `flogo-agent index`
+  - ingests knowledge sources into SQLite
+- `flogo-agent benchmark`
+  - runs benchmark fixtures
+- `flogo-agent repo ...`
+  - local forge-agnostic git operations
 
-`local` is the default. `isolated` requires a usable container image and container runtime on the machine.
+## Common Flags
+
+- `--repo`
+  - target Flogo repository or fixture directory
+- `--goal`
+  - task description recorded in the session
+- `--mode`
+  - `review`, `apply`, or `auto`
+- `--state-dir`
+  - state root for SQLite, artifacts, generated workspaces, and sessions
+- `--sources`
+  - explicit path to the knowledge manifest
+- `--sandbox`
+  - `local` or `isolated`
+- `--sandbox-image`
+  - container image for isolated mode
+- `--sandbox-runtime`
+  - container runtime for isolated mode
+- `--sandbox-network`
+  - network mode for isolated mode
+
+## Daemon and Session Flags
+
+- `--daemon-url`
+  - base URL used by `chat`, `tui`, and `session`
+  - default: `http://127.0.0.1:7777`
+- `--listen`
+  - listen address used by `daemon`
+  - default: `127.0.0.1:7777`
+- `--session`
+  - existing session id to resume in `chat` or `tui`
+- `--message`
+  - one message to send in non-interactive chat mode
+- `--reason`
+  - optional rejection reason for `session reject`
 
 ## Environment Variables
 
@@ -33,7 +73,7 @@
 - `OPENAI_REASONING_EFFORT`
   - overrides the Responses API reasoning effort
 
-If `OPENAI_API_KEY` is unset, the platform uses deterministic repairs only.
+If `OPENAI_API_KEY` is unset, the platform falls back to deterministic repairs only.
 
 ### Tooling
 
@@ -56,6 +96,8 @@ Typical contents:
   - stdout, stderr, and generated files from tool invocations
 - `workspaces/`
   - generated build workspaces for `flogo create` and `flogo build`
+- `sessions/`
+  - persisted session snapshots for chat and TUI
 - `benchmarks/`
   - per-fixture state when running benchmark mode
 
@@ -67,14 +109,20 @@ export OPENAI_API_KEY="..."
 export OPENAI_MODEL="gpt-5.2"
 ```
 
-Then run:
+Start the daemon:
 
 ```bash
-go run ./cmd/flogo-agent run --repo /path/to/repo --mode review
+go run ./cmd/flogo-agent daemon
+```
+
+Then connect a client:
+
+```bash
+go run ./cmd/flogo-agent chat --repo /path/to/repo --mode review
 ```
 
 ## Secret Handling
 
 - Do not hardcode API keys in source files.
 - Prefer environment variables or a local secret manager.
-- Rotate any key that has been exposed in terminal output, logs, or chat transcripts.
+- Rotate any key that has been exposed in logs, terminal output, or chat history.

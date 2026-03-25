@@ -1,31 +1,33 @@
 # Flogo Agent Platform
 
-Terminal-first tooling for validating, repairing, building, and testing TIBCO Flogo applications with official-source grounding.
+Conversational terminal agent for TIBCO Flogo apps. The product is intentionally Flogo-specific: it inspects Flogo repos, repairs `flogo.json` and related flow resources, runs Flogo build and test workflows, and explains non-trivial changes with citations from official Flogo sources.
 
 ## Status
 
-The platform is currently a working prototype with:
+The current product is a working daemon-backed prototype with:
 
-- `flogo.json` schema validation and semantic validation
-- deterministic repair planning for common Flogo defects
-- model-backed repair fallback through an abstract provider interface
-- terminal CLI and TUI workflows
+- persistent local sessions
+- chat-first CLI and TUI clients
+- review-gated patch approval flow
+- schema and semantic validation for `flogo.json`
+- deterministic repair plus model-backed repair fallback
+- Flogo build, flow test, and `.flogotest` unit-test execution
 - local git repo operations
-- local and isolated sandbox runner profiles
-- benchmark, unit, integration, and end-to-end test coverage
+- local and isolated sandbox profiles
+- unit, runtime, integration, and end-to-end coverage
 
-It is not yet a fully reliable production system for every Flogo app shape or every enterprise workflow.
+It is not yet a fully complete Claude/Codex-style Flogo agent. The current roadmap is in [What’s Missing](./docs/what-is-missing.md).
 
-## Capabilities
+## Product Loop
 
-- Validate `flogo.json` against embedded upstream-compatible schemas
-- Detect semantic issues in imports, `ref` usage, `flowURI`, mappings, flow I/O, task activity refs, and flow links
-- Generate reviewable unified diffs for safe repairs
-- Fall back to a model-generated `flogo.json` repair when rule-based repair cannot help
-- Build Flogo projects through the `flogo` CLI
-- Run executable-level flow tests and `.flogotest`-based unit tests
-- Attach citations from official Flogo docs and repos to validation and repair output
-- Run local git status, diff, branch, and commit operations without assuming a specific forge
+From the user perspective, the loop is:
+
+1. start the local daemon
+2. create or resume a Flogo session from CLI or TUI
+3. chat with the agent about a Flogo repo
+4. let the agent inspect, validate, propose repairs, build, and test
+5. approve or reject proposed patches in review mode
+6. resume the same session later with transcript, plan, diff, and artifacts preserved
 
 ## Quick Start
 
@@ -44,7 +46,38 @@ go install github.com/project-flogo/cli/...@latest
 export PATH="$(go env GOPATH)/bin:$PATH"
 ```
 
-### Run a review-only repair pass
+### Start the daemon
+
+```bash
+go run ./cmd/flogo-agent daemon
+```
+
+### Open a chat session
+
+```bash
+go run ./cmd/flogo-agent chat \
+  --repo ./testdata/benchmarks/invalid-mapping \
+  --goal "repair and verify this Flogo app" \
+  --mode review
+```
+
+### Send a single chat turn non-interactively
+
+```bash
+go run ./cmd/flogo-agent chat \
+  --repo ./testdata/benchmarks/invalid-mapping \
+  --goal "repair and verify this Flogo app" \
+  --mode review \
+  --message "repair and verify the app"
+```
+
+### Launch the TUI
+
+```bash
+go run ./cmd/flogo-agent tui --repo /path/to/flogo-repo
+```
+
+### Use the compatibility one-shot command
 
 ```bash
 go run ./cmd/flogo-agent run \
@@ -53,54 +86,43 @@ go run ./cmd/flogo-agent run \
   --mode review
 ```
 
-### Apply repairs automatically
-
-```bash
-go run ./cmd/flogo-agent run \
-  --repo /path/to/flogo-repo \
-  --goal "repair and verify" \
-  --mode apply
-```
-
-### Launch the terminal UI
-
-```bash
-go run ./cmd/flogo-agent tui --repo /path/to/flogo-repo
-```
-
 ## CLI Commands
 
-- `flogo-agent run`: run one non-interactive validation, repair, and verification session
-- `flogo-agent tui`: launch the terminal UI
-- `flogo-agent index`: ingest knowledge sources into SQLite
+- `flogo-agent daemon`: run the local session daemon
+- `flogo-agent chat`: create or resume a conversational Flogo session
+- `flogo-agent tui`: launch the full-screen terminal client
+- `flogo-agent session list|show|approve|reject`: inspect or control persisted sessions
+- `flogo-agent run`: one-shot compatibility flow over the Flogo execution pipeline
+- `flogo-agent index`: ingest official sources into SQLite
 - `flogo-agent benchmark`: run benchmark fixtures and print a JSON summary
-- `flogo-agent repo status`: run `git status --short`
-- `flogo-agent repo diff [--staged]`: run `git diff`
-- `flogo-agent repo branch <name> [--checkout]`: create a local branch
-- `flogo-agent repo commit -m <message>`: stage and commit all local changes
+- `flogo-agent repo status|diff|branch|commit`: local forge-agnostic git operations
 
 ## Configuration
 
-### Command flags
+### Common flags
 
-- `--repo`: target repository
+- `--repo`: target Flogo repository
 - `--goal`: task description recorded in the session
 - `--mode`: `review`, `apply`, or `auto`
-- `--state-dir`: artifact and knowledge state directory
-- `--sources`: override the knowledge manifest
+- `--state-dir`: state root for knowledge, artifacts, workspaces, and sessions
+- `--sources`: explicit path to the source manifest
+- `--daemon-url`: local daemon URL for `chat`, `tui`, and `session`
+- `--listen`: daemon listen address for `daemon`
+- `--session`: existing session id to resume
+- `--message`: single message to send in chat mode
 - `--sandbox`: `local` or `isolated`
 - `--sandbox-image`: container image for isolated mode
 - `--sandbox-runtime`: container runtime for isolated mode
-- `--sandbox-network`: container network mode for isolated mode
+- `--sandbox-network`: network mode for isolated mode
 
 ### Model environment variables
 
-- `OPENAI_API_KEY`: enables the OpenAI-backed model client
-- `OPENAI_BASE_URL`: override the OpenAI API base URL
-- `OPENAI_MODEL`: override the default model
-- `OPENAI_REASONING_EFFORT`: override the reasoning effort sent to the Responses API
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`
+- `OPENAI_MODEL`
+- `OPENAI_REASONING_EFFORT`
 
-If `OPENAI_API_KEY` is not set, the platform still works, but only deterministic repairs are available.
+If `OPENAI_API_KEY` is not set, the product still works, but model-backed repair fallback is disabled.
 
 ## Documentation
 
@@ -108,6 +130,7 @@ If `OPENAI_API_KEY` is not set, the platform still works, but only deterministic
 - [Configuration](./docs/configuration.md)
 - [Testing](./docs/testing.md)
 - [Troubleshooting](./docs/troubleshooting.md)
+- [What’s Missing](./docs/what-is-missing.md)
 - [Research Report](./docs/research-report.md)
 
 ## Official Flogo Sources

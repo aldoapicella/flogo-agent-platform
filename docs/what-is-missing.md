@@ -1,0 +1,105 @@
+# What Is Missing
+
+This document captures the main gaps between the current implementation and the target product: a Claude/Codex-style conversational coding agent specifically for Flogo apps.
+
+## Current State
+
+The product already has:
+
+- local daemon-backed sessions
+- chat CLI and TUI clients
+- persisted transcript, plan, events, and approval state
+- Flogo schema and semantic validation
+- deterministic repair plus model-backed repair fallback
+- Flogo build and test execution
+- citations from official Flogo sources
+
+The remaining work is mostly in conversation quality, deeper Flogo capability coverage, and product hardening.
+
+## Phase 1: Make The Conversational Loop Real
+
+The current chat loop is still intent-classified and narrow. It feels more like a session wrapper around the execution pipeline than a true Claude/Codex-style agent.
+
+Needed work:
+
+- replace the simple intent classifier with model-driven multi-step turn planning
+- add streaming assistant output and streaming tool events
+- let the model choose among structured tools instead of routing mostly through `Analyze` and `Run`
+- persist richer turn state: tool calls, partial plans, intermediate observations
+- add explicit slash-command handling without relying on text heuristics
+
+Acceptance target:
+
+- the agent can handle multi-turn Flogo debugging and creation tasks conversationally without collapsing back to a single repair pass
+
+## Phase 2: Deepen Flogo Coverage
+
+The Flogo intelligence is useful but still incomplete for a production-grade Flogo agent.
+
+Needed work:
+
+- expand validation for triggers, handlers, activities, links, reply mappings, and extension-specific constraints
+- expand repairs beyond the current safe cases
+- support broader Flogo app creation and modification flows, not only repair-centric turns
+- support richer CLI operations such as dependency maintenance and plugin workflows when the agent decides they are needed
+- improve executable-test handling across more app shapes and failure modes
+
+Acceptance target:
+
+- the agent can create, repair, modify, build, and test a wider range of real Flogo apps with minimal manual intervention
+
+## Phase 3: Improve Session UX
+
+The session runtime exists, but the user experience is still basic.
+
+Needed work:
+
+- add server-sent or websocket-style event streaming
+- improve chat CLI interaction with better live tool output
+- improve the TUI with dedicated panes for transcript, plan, approvals, artifacts, and logs
+- add session resume helpers, last-session shortcuts, and better session discovery
+- add undo for agent-authored edits inside a session
+
+Acceptance target:
+
+- the product feels like a real interactive coding agent rather than a wrapper around stored reports
+
+## Phase 4: Safety and Sandbox Hardening
+
+The current policy is review-gated, but execution hardening is still shallow.
+
+Needed work:
+
+- move from Docker-only isolation seam to a hardened isolated profile
+- classify tools and commands by risk level, network behavior, and approval requirements
+- block more destructive or secret-sensitive operations explicitly
+- add auditable patch/application history per session
+- improve artifact retention and log discoverability
+
+Acceptance target:
+
+- users can trust the agent to operate safely on local Flogo repos by default
+
+## Phase 5: Evaluation And Reliability
+
+The repo has tests, but the product still needs stronger success measurement against the research goals.
+
+Needed work:
+
+- enlarge the benchmark corpus with more real-world Flogo failures
+- track build success, test pass rate, and convergence within repair iterations
+- add regression suites for model-backed turns and conversational session behaviors
+- test daemon restart recovery and concurrent session usage more aggressively
+- make CI produce clear benchmark and runtime summaries
+
+Acceptance target:
+
+- the team can measure whether the agent is improving or regressing on real Flogo tasks
+
+## Recommended Next Order
+
+1. Replace the current conversational intent classifier with structured model-driven turn planning.
+2. Add streaming session events to the daemon and both clients.
+3. Expand Flogo validation and repair coverage.
+4. Improve TUI and chat UX around approvals, artifacts, and logs.
+5. Harden isolated execution and evaluation reporting.

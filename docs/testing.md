@@ -2,7 +2,7 @@
 
 ## Test Layers
 
-The project uses four layers of tests.
+The project currently uses four layers of tests.
 
 ### Unit tests
 
@@ -15,24 +15,28 @@ go test ./...
 These cover:
 
 - schema and semantic validation
-- deterministic repair logic
+- deterministic and model-backed repair logic
 - knowledge indexing and retrieval
 - sandbox command shaping
 - git wrapper behavior
 - model provider behavior
-- session orchestration
+- one-shot execution orchestration
+- daemon-backed session manager behavior
 
-### End-to-end CLI tests
+### End-to-end CLI and daemon tests
 
-The e2e suite builds the `flogo-agent` binary and exercises the real CLI surface through subprocesses.
+The e2e suite builds the real `flogo-agent` binary and exercises the user-visible product surface through subprocesses.
 
 Coverage includes:
 
-- review mode on invalid fixtures
-- apply mode with fake Flogo build/test workflows
-- `.flogotest` unit-test execution path
+- one-shot review and apply mode
+- fake Flogo build/test workflows
+- `.flogotest` unit-test execution
 - local git repo operations
 - model-backed repair fallback through a fake OpenAI-compatible server
+- daemon boot and health checks
+- chat session creation
+- approval flow through `session approve`
 
 These tests are hermetic and do not require a real OpenAI key or a real Flogo install.
 
@@ -44,7 +48,7 @@ Run with:
 go test -tags=integration ./internal/tools -v
 ```
 
-These tests expect a real `flogo` binary and validate CLI wrapper behavior against the real tool.
+These tests expect a real `flogo` binary and validate the wrapper behavior against the real CLI.
 
 To enable them:
 
@@ -70,9 +74,10 @@ E2E tests should:
 
 - build the real CLI binary
 - use an isolated temporary `--state-dir`
-- avoid sharing SQLite state between concurrent subprocesses
+- boot the daemon explicitly when testing `chat`, `tui`, or `session`
+- avoid sharing SQLite state between unrelated subprocesses
 - use fake binaries or fake HTTP servers for external dependencies unless the test is explicitly marked integration
-- assert on user-visible CLI output and on file/artifact results
+- assert on user-visible output plus file, diff, or artifact effects
 
 ## CI
 
