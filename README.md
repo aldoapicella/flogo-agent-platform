@@ -27,7 +27,7 @@ It is not yet a fully complete Claude/Codex-style Flogo agent. The current roadm
 From the user perspective, the loop is:
 
 1. run `flogo-agent` in a Flogo repo
-2. let the client auto-load `.env`, auto-start or reuse the local daemon, and resume the latest repo session
+2. let the client auto-load `.env`, load any stored user credential, prompt for a model API key on first run when needed, auto-start or reuse the local daemon, and resume the latest repo session
 3. chat with the agent about a Flogo repo
 4. let the agent inspect, validate, propose repairs, build, and test
 5. approve, reject, or undo agent-authored patches in review mode
@@ -41,7 +41,7 @@ From the user perspective, the loop is:
 - `git`
 - optional: `flogo` CLI for build and test workflows
 - optional: `docker` plus a compatible runtime for isolated execution
-- optional: `OPENAI_API_KEY` for model-backed planning, responses, and repair
+- optional: pre-set `OPENAI_API_KEY` if you do not want the app to prompt on first run
 
 - install the agent with:
 
@@ -65,6 +65,8 @@ flogo-agent --repo /path/to/flogo-repo
 ```
 
 That command auto-loads `.env` from the current repo or working directory, auto-starts or reuses the local daemon, resumes the most recent session for the repo when possible, and falls back to an embedded official-source manifest when you are not running inside this source checkout.
+
+If no model API key is available from the shell, `.env`, or stored user config, the app prompts for it on first launch and stores it in your user config for future runs.
 
 For local development from this repo, you can still run:
 

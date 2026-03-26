@@ -31,6 +31,7 @@ The e2e suite builds the real `flogo-agent` binary and exercises the user-visibl
 Coverage includes:
 
 - default seamless UI boot plumbing
+- first-run model API key bootstrap in both TTY and non-interactive modes
 - `.flogotest` unit-test execution
 - local git repo operations
 - daemon boot and health checks

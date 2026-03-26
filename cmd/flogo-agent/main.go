@@ -245,7 +245,7 @@ func newRootCommandWithLaunch(launch func(interactiveOptions) error) *cobra.Comm
 		Short: "Run benchmark fixtures and print a summary",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			modelClient, err := requireAgentModel()
+			modelClient, err := ensureAgentModelCLI()
 			if err != nil {
 				return err
 			}
@@ -325,7 +325,7 @@ func newRootCommandWithLaunch(launch func(interactiveOptions) error) *cobra.Comm
 
 func runDaemon(listenAddr string, stateDir string, sources string, sandboxConfig sandbox.Config) error {
 	ctx := context.Background()
-	modelClient, err := requireAgentModel()
+	modelClient, err := ensureAgentModelCLI()
 	if err != nil {
 		return err
 	}
@@ -453,7 +453,7 @@ func runSession(repoPath string, goal string, mode string, stateDir string, sour
 	if err := session.EnsureRepoPath(repoPath); err != nil {
 		return err
 	}
-	modelClient, err := requireAgentModel()
+	modelClient, err := ensureAgentModelCLI()
 	if err != nil {
 		return err
 	}

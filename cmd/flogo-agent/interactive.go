@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aldoapicella/flogo-agent-platform/internal/config"
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
 	agentruntime "github.com/aldoapicella/flogo-agent-platform/internal/runtime"
 	"github.com/aldoapicella/flogo-agent-platform/internal/sandbox"
@@ -111,6 +112,9 @@ func loadDefaultEnv(repoPath string) error {
 		return err
 	}
 	if err := loadDotEnvFiles(cwd, repoPath); err != nil {
+		return err
+	}
+	if err := config.LoadIntoEnv(); err != nil {
 		return err
 	}
 	ensureToolPath(cwd, repoPath)
@@ -252,7 +256,7 @@ func ensureDaemon(ctx context.Context, opts interactiveOptions) (*daemonHandle, 
 	if !sameBaseURL(opts.daemonURL, expectedURL) {
 		return nil, fmt.Errorf("daemon at %s is unreachable; automatic startup only supports local --daemon-url matching --listen (%s)", opts.daemonURL, expectedURL)
 	}
-	if _, err := requireAgentModel(); err != nil {
+	if _, err := ensureAgentModelInteractive(); err != nil {
 		return nil, err
 	}
 

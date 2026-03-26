@@ -82,13 +82,20 @@
 - `OPENAI_REASONING_EFFORT`
   - overrides the Responses API reasoning effort
 
-If `OPENAI_API_KEY` is unset, agent commands fail fast with a configuration error. The only model-free CLI surface is `repo`.
+If `OPENAI_API_KEY` is unset, interactive agent startup prompts for a model API key on first run and stores it in user config. Non-interactive model-required commands prompt only when attached to a TTY; otherwise they fail clearly. The only model-free CLI surface is `repo`.
 
 ### Automatic dotenv loading
 
 - `.env` in the current working directory is loaded automatically
 - `.env` in the resolved repo root is then loaded automatically
+- stored user credentials are loaded after `.env` when `OPENAI_API_KEY` is still unset
 - existing shell environment variables win over `.env` values
+
+### Stored user credentials
+
+- first-run credential bootstrap stores the key under the user config directory
+- path: `$(os.UserConfigDir)/flogo-agent/credentials.json`
+- the stored file is outside the repo and is reused on future launches
 
 ### Tooling
 

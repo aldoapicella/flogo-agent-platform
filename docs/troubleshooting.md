@@ -84,13 +84,19 @@ Check:
 
 ## Model-backed planning or repair does not trigger
 
-Model-backed turn planning, conversational responses, and repair generation only run when `OPENAI_API_KEY` is set.
+Model-backed turn planning, conversational responses, and repair generation require a model API key.
 
 Check:
 
 ```bash
 echo "$OPENAI_API_KEY"
 ```
+
+If the variable is empty:
+
+- launch `flogo-agent` or `flogo-agent tui` and enter the key in the first-run prompt
+- or set it explicitly in the shell / `.env`
+- or inspect the stored user credential file under `$(os.UserConfigDir)/flogo-agent/credentials.json`
 
 ## Model-generated patch returns as review-only
 
