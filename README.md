@@ -37,26 +37,46 @@ From the user perspective, the loop is:
 
 ### Prerequisites
 
-- Go 1.25
 - `git`
-- optional: `flogo` CLI for build and test workflows
 - optional: `docker` plus a compatible runtime for isolated execution
 - optional: pre-set `OPENAI_API_KEY` if you do not want the app to prompt on first run
 
-- install the agent with:
+### Install from the latest GitHub release
+
+macOS and Linux:
+
+```bash
+curl -fsSL https://github.com/aldoapicella/flogo-agent-platform/releases/latest/download/install.sh | bash
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://github.com/aldoapicella/flogo-agent-platform/releases/latest/download/install.ps1 | iex
+```
+
+That installs `flogo-agent` into a user-local bin directory. On first launch the app:
+
+- prompts for a model API key if needed
+- downloads a managed per-user `flogo` CLI from the same release if needed
+- starts the terminal UI
+
+### Developer install from source
+
+If you want the source-based path instead:
 
 ```bash
 go install github.com/aldoapicella/flogo-agent-platform/cmd/flogo-agent@latest
 ```
 
-### Install the Flogo CLI
+### Install the Flogo CLI manually
 
 ```bash
 go install github.com/project-flogo/cli/...@latest
 export PATH="$(go env GOPATH)/bin:$PATH"
 ```
 
-If the repo contains `.tools/bin/flogo`, `flogo-agent` now discovers that automatically for local runs, benchmarks, and daemon sessions.
+That manual path is mainly for developers. For normal release installs, `flogo-agent` downloads and manages the `flogo` binary itself. If the repo contains `.tools/bin/flogo`, `flogo-agent` also discovers that automatically for local runs, benchmarks, and daemon sessions.
 
 ### Launch the default terminal UI
 
@@ -124,6 +144,9 @@ go run ./cmd/flogo-agent run \
 - `flogo-agent run`: one-shot compatibility flow over the Flogo execution pipeline
 - `flogo-agent index`: ingest official sources into SQLite
 - `flogo-agent benchmark`: run benchmark fixtures and print a JSON summary
+- `flogo-agent doctor`: check local install prerequisites and environment
+- `flogo-agent setup`: bootstrap model key and managed `flogo` CLI
+- `flogo-agent setup flogo`: install or repair the managed `flogo` CLI
 - `flogo-agent repo status|diff|branch|commit`: local forge-agnostic git operations
 
 ## Configuration
@@ -153,6 +176,12 @@ go run ./cmd/flogo-agent run \
 - `OPENAI_REASONING_EFFORT`
 
 `OPENAI_API_KEY` is required for agent workflows such as `flogo-agent`, `tui`, `daemon`, `run`, and `benchmark`. The only model-free CLI surface is `repo`.
+
+### Managed tooling
+
+- a stored model key is kept under `$(os.UserConfigDir)/flogo-agent/credentials.json`
+- a managed `flogo` install is kept under `$(os.UserConfigDir)/flogo-agent/bin/`
+- `flogo-agent doctor` shows whether the current install is ready and where `flogo` came from: managed, repo-local, or `PATH`
 
 ## Documentation
 

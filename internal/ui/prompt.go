@@ -59,3 +59,45 @@ func PromptForModelAPIKey() (string, error) {
 	}
 	return result, nil
 }
+
+func PromptForFlogoCLIInstall() (bool, error) {
+	app := tview.NewApplication()
+	form := tview.NewForm()
+	message := tview.NewTextView().
+		SetDynamicColors(true).
+		SetWrap(true)
+	message.SetText("Flogo Agent needs the official `flogo` CLI for create, build, and test workflows.\nInstall a managed per-user copy now?")
+	message.SetBorder(true).SetTitle("Flogo Setup")
+
+	var confirmed bool
+	var runErr error
+
+	form.AddButton("Install", func() {
+		confirmed = true
+		app.Stop()
+	})
+	form.AddButton("Quit", func() {
+		runErr = fmt.Errorf("flogo CLI installation was canceled")
+		app.Stop()
+	})
+	form.SetBorder(true).SetTitle("First Run")
+
+	layout := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(nil, 0, 1, false).
+		AddItem(centered(72, 13,
+			tview.NewFlex().SetDirection(tview.FlexRow).
+				AddItem(message, 4, 0, false).
+				AddItem(form, 0, 1, true),
+		), 13, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	app.SetRoot(layout, true)
+	app.SetFocus(form)
+	if err := app.Run(); err != nil {
+		return false, err
+	}
+	if runErr != nil {
+		return false, runErr
+	}
+	return confirmed, nil
+}

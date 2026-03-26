@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/aldoapicella/flogo-agent-platform/internal/config"
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
 	"github.com/aldoapicella/flogo-agent-platform/internal/evals"
 	"github.com/aldoapicella/flogo-agent-platform/internal/knowledge"
@@ -33,6 +34,8 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+var version = "dev"
 
 func newRootCommand() *cobra.Command {
 	return newRootCommandWithLaunch(launchInteractive)
@@ -56,8 +59,9 @@ func newRootCommandWithLaunch(launch func(interactiveOptions) error) *cobra.Comm
 	var rejectionReason string
 
 	root := &cobra.Command{
-		Use:   "flogo-agent",
-		Short: "Conversational Flogo coding agent",
+		Use:     "flogo-agent",
+		Short:   "Conversational Flogo coding agent",
+		Version: version,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return launch(interactiveOptions{
 				repoPath:      repoPath,
@@ -249,6 +253,9 @@ func newRootCommandWithLaunch(launch func(interactiveOptions) error) *cobra.Comm
 			if err != nil {
 				return err
 			}
+			if err := ensureFlogoCLICLI(); err != nil {
+				return err
+			}
 			rootDir := mustRepoRoot()
 			if stateDir == "" {
 				stateDir = filepath.Join(rootDir, ".flogo-agent")
@@ -265,6 +272,46 @@ func newRootCommandWithLaunch(launch func(interactiveOptions) error) *cobra.Comm
 				return err
 			}
 			fmt.Println(string(encoded))
+			return nil
+		},
+	})
+
+	root.AddCommand(&cobra.Command{
+		Use:   "doctor",
+		Short: "Check local install prerequisites and environment",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDoctor(repoPath, stateDir, daemonURL)
+		},
+	})
+
+	setupCmd := &cobra.Command{
+		Use:   "setup",
+		Short: "Bootstrap the local agent install",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if _, err := ensureAgentModelCLI(); err != nil {
+				return err
+			}
+			if err := setupFlogoCLI(); err != nil {
+				return err
+			}
+			fmt.Println("Setup completed. Run `flogo-agent` to start the terminal UI.")
+			return nil
+		},
+	}
+	root.AddCommand(setupCmd)
+
+	setupCmd.AddCommand(&cobra.Command{
+		Use:   "flogo",
+		Short: "Install or repair the managed Flogo CLI",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := setupFlogoCLI(); err != nil {
+				return err
+			}
+			path, ok := resolveAvailableFlogoBinary()
+			if !ok {
+				return errFlogoCLIMissing
+			}
+			fmt.Printf("Flogo CLI is available at %s\n", path)
 			return nil
 		},
 	})
@@ -327,6 +374,9 @@ func runDaemon(listenAddr string, stateDir string, sources string, sandboxConfig
 	ctx := context.Background()
 	modelClient, err := ensureAgentModelCLI()
 	if err != nil {
+		return err
+	}
+	if err := ensureFlogoCLICLI(); err != nil {
 		return err
 	}
 	manager, err := agentruntime.NewManager(ctx, mustRepoRoot(), stateDir, resolveSources(sources), agentruntime.Options{
@@ -457,6 +507,9 @@ func runSession(repoPath string, goal string, mode string, stateDir string, sour
 	if err != nil {
 		return err
 	}
+	if err := ensureFlogoCLICLI(); err != nil {
+		return err
+	}
 	service, err := session.NewServiceWithOptions(ctx, mustRepoRoot(), stateDir, resolveSources(sources), session.Options{
 		Sandbox: sandboxConfig,
 		Model:   modelClient,
@@ -488,6 +541,96 @@ func runSession(repoPath string, goal string, mode string, stateDir string, sour
 	}
 	fmt.Println(string(encoded))
 	return nil
+}
+
+type doctorCheck struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Details string `json:"details"`
+}
+
+func runDoctor(repoPath string, stateDir string, daemonURL string) error {
+	if stateDir == "" {
+		stateDir = filepath.Join(mustRepoRoot(), ".flogo-agent")
+	}
+	checks := make([]doctorCheck, 0, 5)
+
+	modelStatus := doctorCheck{Name: "model-api-key", Status: "ok", Details: "OPENAI_API_KEY is configured"}
+	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) == "" {
+		modelStatus.Status = "fail"
+		modelStatus.Details = "OPENAI_API_KEY is missing; run `flogo-agent setup` or launch the UI to be prompted"
+	}
+	checks = append(checks, modelStatus)
+
+	flogoStatus := doctorCheck{Name: "flogo-cli", Status: "ok"}
+	if path, ok := resolveAvailableFlogoBinary(); ok {
+		flogoStatus.Details = describeFlogoBinary(repoPath, path)
+	} else {
+		flogoStatus.Status = "fail"
+		flogoStatus.Details = "flogo CLI is missing; run `flogo-agent setup flogo`"
+		if _, err := lookPath("go"); err != nil {
+			flogoStatus.Details += " (developer fallback via Go is unavailable)"
+		}
+	}
+	checks = append(checks, flogoStatus)
+
+	stateStatus := doctorCheck{Name: "state-dir", Status: "ok", Details: fmt.Sprintf("writable: %s", stateDir)}
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		stateStatus.Status = "fail"
+		stateStatus.Details = err.Error()
+	}
+	checks = append(checks, stateStatus)
+
+	daemonStatus := doctorCheck{Name: "daemon", Status: "warn", Details: fmt.Sprintf("not reachable at %s", daemonURL)}
+	if err := agentruntime.NewClient(daemonURL).Health(context.Background()); err == nil {
+		daemonStatus.Status = "ok"
+		daemonStatus.Details = fmt.Sprintf("reachable at %s", daemonURL)
+	}
+	checks = append(checks, daemonStatus)
+
+	execStatus := doctorCheck{Name: "agent-binary", Status: "ok"}
+	if executable, err := os.Executable(); err == nil {
+		execStatus.Details = fmt.Sprintf("%s (version %s)", executable, version)
+	} else {
+		execStatus.Status = "warn"
+		execStatus.Details = err.Error()
+	}
+	checks = append(checks, execStatus)
+
+	hasFailure := false
+	for _, check := range checks {
+		fmt.Printf("%-12s %-4s %s\n", check.Name, strings.ToUpper(check.Status), check.Details)
+		if check.Status == "fail" {
+			hasFailure = true
+		}
+	}
+	if hasFailure {
+		return fmt.Errorf("doctor found blocking issues")
+	}
+	return nil
+}
+
+func describeFlogoBinary(repoPath string, path string) string {
+	source := detectFlogoSource(path)
+	switch source {
+	case "managed":
+		if record, err := config.LoadManagedToolInstall("flogo"); err == nil && record != nil {
+			versionText := record.Version
+			if strings.TrimSpace(versionText) == "" {
+				versionText = "unknown"
+			}
+			return fmt.Sprintf("managed install at %s (source=%s version=%s)", path, record.Source, versionText)
+		}
+		return fmt.Sprintf("managed install at %s", path)
+	case "repo-local":
+		return fmt.Sprintf("repo-local binary at %s", path)
+	default:
+		absoluteRepo, _ := filepath.Abs(repoPath)
+		if strings.TrimSpace(absoluteRepo) != "" && strings.HasPrefix(filepath.ToSlash(path), filepath.ToSlash(absoluteRepo)+"/") {
+			return fmt.Sprintf("repo-scoped path at %s", path)
+		}
+		return fmt.Sprintf("PATH binary at %s", path)
+	}
 }
 
 func mustRepoRoot() string {

@@ -22,6 +22,7 @@ The platform found no `flogo` binary for build and test workflows.
 
 For normal local runs, the CLI first tries to discover:
 
+- the managed per-user install under `$(os.UserConfigDir)/flogo-agent/bin`
 - `.tools/bin/flogo` in the current working directory
 - `.tools/bin/flogo` in the resolved repo root
 - `$(go env GOPATH)/bin/flogo`
@@ -29,9 +30,34 @@ For normal local runs, the CLI first tries to discover:
 Fix:
 
 ```bash
+flogo-agent setup flogo
+```
+
+For release installs, that command downloads the matching `flogo` asset from the same GitHub release and verifies it against the published checksum file.
+
+Developer fallback:
+
+```bash
 go install github.com/project-flogo/cli/...@latest
 export PATH="$(go env GOPATH)/bin:$PATH"
 ```
+
+If `setup flogo` fails on a developer build, make sure the Go toolchain is installed and available on `PATH`.
+
+## First-run setup does not complete
+
+Check the full environment with:
+
+```bash
+flogo-agent doctor
+```
+
+That command reports:
+
+- whether a model API key is configured
+- whether `flogo` is available and whether it came from a managed install, a repo-local `.tools/bin`, or `PATH`
+- whether the daemon is reachable
+- whether the state directory is writable
 
 ## `database is locked (SQLITE_BUSY)`
 

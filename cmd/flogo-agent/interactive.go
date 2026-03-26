@@ -182,6 +182,11 @@ func loadDotEnvFile(path string) error {
 }
 
 func ensureToolPath(dirs ...string) {
+	if err := prependManagedToolPath(); err == nil {
+		if _, err := exec.LookPath("flogo"); err == nil {
+			return
+		}
+	}
 	if _, err := exec.LookPath("flogo"); err == nil {
 		return
 	}
@@ -231,6 +236,30 @@ func ensureToolPath(dirs ...string) {
 	_ = os.Setenv("PATH", strings.Join(parts, string(os.PathListSeparator)))
 }
 
+func prependManagedToolPath() error {
+	binDir, err := config.ManagedBinDir()
+	if err != nil {
+		return err
+	}
+	managedTool, err := config.ManagedToolPath("flogo")
+	if err != nil {
+		return err
+	}
+	if info, statErr := os.Stat(managedTool); statErr != nil || info.IsDir() {
+		return nil
+	}
+	parts := strings.Split(os.Getenv("PATH"), string(os.PathListSeparator))
+	for _, part := range parts {
+		if samePath(part, binDir) {
+			return nil
+		}
+	}
+	if existing := os.Getenv("PATH"); existing != "" {
+		return os.Setenv("PATH", binDir+string(os.PathListSeparator)+existing)
+	}
+	return os.Setenv("PATH", binDir)
+}
+
 func goPathBin() string {
 	if value := strings.TrimSpace(os.Getenv("GOPATH")); value != "" {
 		return filepath.Join(value, "bin")
@@ -257,6 +286,9 @@ func ensureDaemon(ctx context.Context, opts interactiveOptions) (*daemonHandle, 
 		return nil, fmt.Errorf("daemon at %s is unreachable; automatic startup only supports local --daemon-url matching --listen (%s)", opts.daemonURL, expectedURL)
 	}
 	if _, err := ensureAgentModelInteractive(); err != nil {
+		return nil, err
+	}
+	if err := ensureFlogoCLIInteractive(); err != nil {
 		return nil, err
 	}
 

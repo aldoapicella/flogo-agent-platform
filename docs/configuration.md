@@ -27,6 +27,12 @@
   - ingests knowledge sources into SQLite
 - `flogo-agent benchmark`
   - runs benchmark fixtures
+- `flogo-agent doctor`
+  - checks model key, `flogo`, daemon reachability, and writable state
+- `flogo-agent setup`
+  - bootstraps the local install
+- `flogo-agent setup flogo`
+  - installs or repairs the managed `flogo` CLI
 - `flogo-agent repo ...`
   - local forge-agnostic git operations
 
@@ -97,11 +103,20 @@ If `OPENAI_API_KEY` is unset, interactive agent startup prompts for a model API 
 - path: `$(os.UserConfigDir)/flogo-agent/credentials.json`
 - the stored file is outside the repo and is reused on future launches
 
+### Managed Flogo CLI
+
+- if no `flogo` binary is found, interactive startup now offers to install a managed per-user copy from the current product release
+- managed path: `$(os.UserConfigDir)/flogo-agent/bin/flogo`
+- managed install metadata: `$(os.UserConfigDir)/flogo-agent/tools/flogo.json`
+- `setup flogo` repairs or reinstalls that managed copy
+- released binaries download the matching `flogo_<os>_<arch>` asset and verify it against the release checksum file
+- developer builds without a release version fall back to `go install github.com/project-flogo/cli/...@latest`, so Go must be available on `PATH`
+
 ### Tooling
 
 - `PATH`
-  - must include the `flogo` binary for build and test workflows
-  - for local runs, `flogo-agent` also auto-discovers `.tools/bin/flogo` in the current repo or working directory, plus `$(go env GOPATH)/bin` when available
+  - must include the `flogo` binary for build and test workflows unless the managed copy has been installed
+  - for local runs, `flogo-agent` auto-discovers the managed user copy, `.tools/bin/flogo` in the current repo or working directory, plus `$(go env GOPATH)/bin` when available
 
 ## State Layout
 
@@ -127,14 +142,24 @@ Typical contents:
 ## Recommended Local Setup
 
 ```bash
-go install github.com/aldoapicella/flogo-agent-platform/cmd/flogo-agent@latest
-export PATH="$(go env GOPATH)/bin:$PATH"
-export OPENAI_API_KEY="..."
+curl -fsSL https://github.com/aldoapicella/flogo-agent-platform/releases/latest/download/install.sh | bash
 export OPENAI_MODEL="gpt-5.2"
 export OPENAI_EVAL_MODEL="gpt-5.2"
 ```
 
-If the repo already contains `.tools/bin/flogo`, you do not need to export `PATH` manually for normal local use.
+Then run:
+
+```bash
+flogo-agent setup
+```
+
+If the repo already contains `.tools/bin/flogo`, you do not need a managed `flogo` install for normal local use.
+
+Developer install from source remains available:
+
+```bash
+go install github.com/aldoapicella/flogo-agent-platform/cmd/flogo-agent@latest
+```
 
 Start the default UI:
 

@@ -32,6 +32,7 @@ Coverage includes:
 
 - default seamless UI boot plumbing
 - first-run model API key bootstrap in both TTY and non-interactive modes
+- managed `flogo` bootstrap via release download and developer fallback behavior
 - `.flogotest` unit-test execution
 - local git repo operations
 - daemon boot and health checks
@@ -103,3 +104,5 @@ CI currently runs:
 - real Flogo integration tests in a separate job
 
 Live OpenAI conversation evaluation runs in the separate pre-release workflow on tags and manual dispatch.
+
+Release packaging is built by the separate `Release` workflow on tags and manual dispatch.
