@@ -35,7 +35,7 @@ func TestCaptureScriptedReviewWritesExpectedArtifacts(t *testing.T) {
 	if got := byName["startup-loading"].ScreenText; got == "" {
 		t.Fatal("expected startup-loading screen text to be captured")
 	}
-	if got := byName["diff-view"].ScreenText; got == "" || !containsAll(got, "@@", "res://flow:main") {
+	if got := byName["diff-view"].ScreenText; got == "" || !containsAll(got, "SEMANTIC SUMMARY", "res://flow:main") {
 		t.Fatalf("expected diff capture to include semantic diff excerpt, got %q", got)
 	}
 	if got := byName["session-picker"].ScreenText; got == "" || !containsAll(got, "Sessions", "ui-review-session") {

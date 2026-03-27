@@ -183,110 +183,35 @@ func runCaptureScenario(ctx context.Context, outDir string, width int, height in
 }
 
 func drawScenario(screen tcell.SimulationScreen, width int, height int, spec captureSpec) error {
-	statusView := tview.NewTextView().
-		SetDynamicColors(true).
-		SetWrap(true)
-	statusView.SetBorder(true).SetTitle("Status")
+	topBar := newTopBar()
+	bannerView := newBanner()
+	transcriptView := newTranscriptView()
+	sideView := newSideView()
+	actionsView := newActionsView()
+	composer := newComposer()
 
-	transcriptView := tview.NewTextView().
-		SetDynamicColors(true).
-		SetScrollable(true).
-		SetWrap(true)
-	transcriptView.SetBorder(true).SetTitle("Conversation")
+	state := renderState{
+		RepoPath:         spec.RepoPath,
+		Mode:             spec.Mode,
+		SideMode:         spec.SideMode,
+		ConnectionStatus: spec.ConnectionStatus,
+		StatusError:      spec.StatusError,
+		ActiveSessionID:  activeSessionID(spec.Current),
+		ActiveOverlay:    spec.Overlay,
+		Current:          spec.Current,
+	}
+	renderTopBar(topBar, state)
+	renderBanner(bannerView, state)
+	renderTranscript(transcriptView, state)
+	renderSide(sideView, spec.Current, spec.SideMode)
+	renderActions(actionsView, state)
 
-	sideView := tview.NewTextView().
-		SetDynamicColors(true).
-		SetScrollable(true).
-		SetWrap(true)
-	sideView.SetBorder(true).SetTitle("Plan")
-
-	composer := tview.NewInputField().
-		SetLabel("> ").
-		SetFieldWidth(0)
-	composer.SetBorder(true).SetTitle("Message")
-
-	connectionStatus := spec.ConnectionStatus
-	if connectionStatus == "" {
-		connectionStatus = "connected"
-	}
-	sideMode := spec.SideMode
-	if sideMode == "" {
-		sideMode = "summary"
-	}
-
-	statusLines := []string{
-		fmt.Sprintf("Repo: %s", spec.RepoPath),
-		fmt.Sprintf("Mode: %s", spec.Mode),
-		fmt.Sprintf("View: %s", strings.ToUpper(sideMode)),
-		fmt.Sprintf("Connection: %s", connectionStatus),
-	}
-	if spec.Current != nil {
-		statusLines = append(statusLines,
-			fmt.Sprintf("Session: %s", spec.Current.ID),
-			fmt.Sprintf("Status: %s", spec.Current.Status),
-		)
-	} else {
-		statusLines = append(statusLines, "Session: connecting")
-	}
-	if strings.TrimSpace(spec.StatusError) != "" {
-		statusLines = append(statusLines, fmt.Sprintf("[red]Error:[-] %s", spec.StatusError))
-	}
-	if spec.Current != nil && spec.Current.PendingApproval != nil {
-		statusLines = append(statusLines, fmt.Sprintf("[yellow]Pending approval:[-] %s", spec.Current.PendingApproval.Summary))
-	}
-	if spec.Current != nil && len(spec.Current.UndoStack) > 0 {
-		statusLines = append(statusLines, fmt.Sprintf("Undo entries: %d", len(spec.Current.UndoStack)))
-	}
-	statusLines = append(statusLines, "Keys: Enter send | Ctrl+A approve | Ctrl+R reject | Ctrl+U undo | Ctrl+O sessions | Ctrl+D diff | Ctrl+P plan | Ctrl+L refresh | Ctrl+C quit")
-	fmt.Fprint(statusView, strings.Join(statusLines, "\n"))
-
-	if spec.Current == nil {
-		fmt.Fprintln(transcriptView, "[gray]Connecting to the local daemon and preparing a session...[-]")
-		transcriptView.ScrollToBeginning()
-		renderSide(sideView, nil, sideMode)
-	} else {
-		assistantCount := 0
-		for _, item := range spec.Current.Messages {
-			labelColor := "white"
-			switch item.Role {
-			case contracts.RoleUser:
-				labelColor = "blue"
-			case contracts.RoleAssistant:
-				labelColor = "green"
-				assistantCount++
-			case contracts.RoleSystem:
-				labelColor = "yellow"
-			}
-			fmt.Fprintf(transcriptView, "[%s]%s[-]\n%s\n\n", labelColor, strings.ToUpper(string(item.Role)), item.Content)
-		}
-		if assistantCount == 0 {
-			fmt.Fprintln(transcriptView, "[gray]Type your first request below. Example: repair and verify the app[-]")
-		}
-		transcriptView.ScrollToBeginning()
-		renderSide(sideView, spec.Current, sideMode)
-	}
-
-	layout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(statusView, 5, 0, false).
-		AddItem(
-			tview.NewFlex().
-				AddItem(transcriptView, 0, 3, false).
-				AddItem(sideView, 0, 2, false),
-			0, 1, false,
-		).
-		AddItem(composer, 3, 0, true)
+	layout := buildMainLayout(topBar, bannerView, transcriptView, sideView, actionsView, composer, spec.SideMode)
 
 	pages := tview.NewPages()
 	pages.AddPage("main", layout, true, true)
 	if spec.Overlay == "sessions" {
-		list := tview.NewList().ShowSecondaryText(true)
-		list.SetBorder(true).SetTitle("Sessions")
-		for _, item := range spec.Sessions {
-			label := item.ID
-			secondary := fmt.Sprintf("%s | %s | %s", filepath.Base(item.RepoPath), item.Status, item.UpdatedAt)
-			list.AddItem(label, secondary, 0, nil)
-		}
-		pages.AddAndSwitchToPage("sessions", centered(90, 20, list), true)
+		pages.AddAndSwitchToPage("sessions", buildSessionPicker(spec.Sessions, activeSessionID(spec.Current), nil, nil), true)
 	}
 
 	screen.Clear()
@@ -327,6 +252,7 @@ func writeSimulationPNG(screen tcell.SimulationScreen, path string) error {
 			} else if len(cell.Bytes) > 0 {
 				r = rune(cell.Bytes[0])
 			}
+			r = screenshotRune(r)
 			if r == ' ' {
 				continue
 			}
@@ -379,6 +305,21 @@ func toRGBA(value tcell.Color, fallback color.RGBA) color.RGBA {
 		return fallback
 	}
 	return color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: 255}
+}
+
+func screenshotRune(r rune) rune {
+	switch r {
+	case '─', '━', '═':
+		return '-'
+	case '│', '┃', '║':
+		return '|'
+	case '┌', '┐', '└', '┘', '├', '┤', '┬', '┴', '┼', '╔', '╗', '╚', '╝', '╠', '╣', '╦', '╩', '╬':
+		return '+'
+	case '…':
+		return '.'
+	default:
+		return r
+	}
 }
 
 func sessionStatus(snapshot *contracts.SessionSnapshot) string {

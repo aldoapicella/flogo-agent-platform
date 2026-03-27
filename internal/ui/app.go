@@ -11,7 +11,6 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
-	"github.com/aldoapicella/flogo-agent-platform/internal/reporting"
 	"github.com/aldoapicella/flogo-agent-platform/internal/sandbox"
 )
 
@@ -62,28 +61,12 @@ func (a *App) Run(ctx context.Context, initialRepo string, initialGoal string, i
 		app.SetScreen(a.opts.Screen)
 	}
 	pages := tview.NewPages()
-
-	statusView := tview.NewTextView().
-		SetDynamicColors(true).
-		SetWrap(true)
-	statusView.SetBorder(true).SetTitle("Status")
-
-	transcriptView := tview.NewTextView().
-		SetDynamicColors(true).
-		SetScrollable(true).
-		SetWrap(true)
-	transcriptView.SetBorder(true).SetTitle("Conversation")
-
-	sideView := tview.NewTextView().
-		SetDynamicColors(true).
-		SetScrollable(true).
-		SetWrap(true)
-	sideView.SetBorder(true).SetTitle("Plan")
-
-	composer := tview.NewInputField().
-		SetLabel("> ").
-		SetFieldWidth(0)
-	composer.SetBorder(true).SetTitle("Message")
+	topBar := newTopBar()
+	bannerView := newBanner()
+	transcriptView := newTranscriptView()
+	sideView := newSideView()
+	actionsView := newActionsView()
+	composer := newComposer()
 
 	repoPath := initialRepo
 	if strings.TrimSpace(repoPath) == "" {
@@ -165,65 +148,24 @@ func (a *App) Run(ctx context.Context, initialRepo string, initialGoal string, i
 			}
 		}
 
-		transcriptView.Clear()
-		sideView.Clear()
-		statusView.Clear()
-
-		statusLines := []string{
-			fmt.Sprintf("Repo: %s", repoPath),
-			fmt.Sprintf("Mode: %s", mode),
-			fmt.Sprintf("View: %s", strings.ToUpper(sideMode)),
-			fmt.Sprintf("Connection: %s", connectionStatus),
-		}
-		if current != nil {
-			statusLines = append(statusLines,
-				fmt.Sprintf("Session: %s", current.ID),
-				fmt.Sprintf("Status: %s", current.Status),
-			)
-		} else {
-			statusLines = append(statusLines, "Session: connecting")
-		}
 		if err != nil {
 			statusError = err.Error()
 		}
-		if statusError != "" {
-			statusLines = append(statusLines, fmt.Sprintf("[red]Error:[-] %s", statusError))
+		state := renderState{
+			RepoPath:         repoPath,
+			Mode:             mode,
+			SideMode:         sideMode,
+			ConnectionStatus: connectionStatus,
+			StatusError:      statusError,
+			ActiveSessionID:  activeSessionID,
+			ActiveOverlay:    activeOverlay,
+			Current:          current,
 		}
-		if current != nil && current.PendingApproval != nil {
-			statusLines = append(statusLines, fmt.Sprintf("[yellow]Pending approval:[-] %s", current.PendingApproval.Summary))
-		}
-		if current != nil && len(current.UndoStack) > 0 {
-			statusLines = append(statusLines, fmt.Sprintf("Undo entries: %d", len(current.UndoStack)))
-		}
-		statusLines = append(statusLines, "Keys: Enter send | Ctrl+A approve | Ctrl+R reject | Ctrl+U undo | Ctrl+O sessions | Ctrl+D diff | Ctrl+P plan | Ctrl+L refresh | Ctrl+C quit")
-		fmt.Fprint(statusView, strings.Join(statusLines, "\n"))
-
-		if current == nil {
-			fmt.Fprintln(transcriptView, "[gray]Connecting to the local daemon and preparing a session...[-]")
-			transcriptView.ScrollToEnd()
-			renderSide(sideView, nil, sideMode)
-			return
-		}
-
-		assistantCount := 0
-		for _, item := range current.Messages {
-			labelColor := "white"
-			switch item.Role {
-			case contracts.RoleUser:
-				labelColor = "blue"
-			case contracts.RoleAssistant:
-				labelColor = "green"
-				assistantCount++
-			case contracts.RoleSystem:
-				labelColor = "yellow"
-			}
-			fmt.Fprintf(transcriptView, "[%s]%s[-]\n%s\n\n", labelColor, strings.ToUpper(string(item.Role)), item.Content)
-		}
-		if assistantCount == 0 {
-			fmt.Fprintln(transcriptView, "[gray]Type your first request below. Example: repair and verify the app[-]")
-		}
-		transcriptView.ScrollToEnd()
+		renderTopBar(topBar, state)
+		renderBanner(bannerView, state)
+		renderTranscript(transcriptView, state)
 		renderSide(sideView, current, sideMode)
+		renderActions(actionsView, state)
 	}
 
 	runAsync := func(fn func() (*contracts.SessionSnapshot, error)) {
@@ -309,27 +251,21 @@ func (a *App) Run(ctx context.Context, initialRepo string, initialGoal string, i
 					return
 				}
 				sort.Slice(sessions, func(i, j int) bool { return sessions[i].UpdatedAt > sessions[j].UpdatedAt })
-				list := tview.NewList().ShowSecondaryText(true)
-				list.SetBorder(true).SetTitle("Sessions")
-				for _, item := range sessions {
-					label := item.ID
-					secondary := fmt.Sprintf("%s | %s | %s", filepath.Base(item.RepoPath), item.Status, item.UpdatedAt)
-					sessionID := item.ID
-				list.AddItem(label, secondary, 0, func() {
+				activeOverlay = "sessions"
+				pages.AddAndSwitchToPage("sessions", buildSessionPicker(sessions, activeSessionID, func(sessionID string) {
 					activeOverlay = ""
 					pages.HidePage("sessions")
 					loadSession(sessionID)
-				})
-			}
-			list.SetDoneFunc(func() {
-				activeOverlay = ""
-				pages.HidePage("sessions")
-				app.SetFocus(composer)
+				}, func() {
+					activeOverlay = ""
+					pages.HidePage("sessions")
+					app.SetFocus(composer)
+				}), true)
+				if primitive := pages.GetPage("sessions"); primitive != nil {
+					app.SetFocus(primitive)
+				}
+				render(current, nil)
 			})
-			activeOverlay = "sessions"
-			pages.AddAndSwitchToPage("sessions", centered(90, 20, list), true)
-			app.SetFocus(list)
-		})
 		}()
 	}
 
@@ -339,15 +275,7 @@ func (a *App) Run(ctx context.Context, initialRepo string, initialGoal string, i
 		}
 	})
 
-	layout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(statusView, 5, 0, false).
-		AddItem(
-			tview.NewFlex().
-				AddItem(transcriptView, 0, 3, false).
-				AddItem(sideView, 0, 2, false),
-			0, 1, false,
-		).
-		AddItem(composer, 3, 0, true)
+	layout := buildMainLayout(topBar, bannerView, transcriptView, sideView, actionsView, composer, sideMode)
 
 	pages.AddPage("main", layout, true, true)
 	app.SetRoot(pages, true)
@@ -435,76 +363,6 @@ func (a *App) bootstrapSession(ctx context.Context, repoPath string, goal string
 		StateDir:        stateDir,
 		SourcesManifest: sources,
 	})
-}
-
-func renderSide(view *tview.TextView, snapshot *contracts.SessionSnapshot, sideMode string) {
-	view.Clear()
-	if snapshot == nil {
-		fmt.Fprintln(view, "[gray]Session bootstrap in progress...[-]")
-		return
-	}
-
-	title := "Plan"
-	if sideMode == "diff" {
-		title = "Diff"
-	}
-	view.SetTitle(title)
-
-	if sideMode == "diff" {
-		diff := ""
-		switch {
-		case snapshot.PendingApproval != nil && snapshot.PendingApproval.PatchPlan != nil:
-			diff = strings.TrimSpace(snapshot.PendingApproval.PatchPlan.UnifiedDiff)
-		case snapshot.LastReport != nil && snapshot.LastReport.PatchPlan != nil:
-			diff = strings.TrimSpace(snapshot.LastReport.PatchPlan.UnifiedDiff)
-		}
-		if diff == "" {
-			fmt.Fprintln(view, "[gray]No diff available for the current session.[-]")
-			return
-		}
-		fmt.Fprintln(view, diff)
-		return
-	}
-
-	if snapshot.LastTurnPlan != nil {
-		fmt.Fprintf(view, "Goal: %s\n", snapshot.LastTurnPlan.GoalSummary)
-		if snapshot.LastTurnPlan.Planner != "" {
-			fmt.Fprintf(view, "Planner: %s\n", snapshot.LastTurnPlan.Planner)
-		}
-		if snapshot.LastTurnKind != "" {
-			fmt.Fprintf(view, "Turn kind: %s\n", snapshot.LastTurnKind)
-		}
-		fmt.Fprintln(view)
-	}
-
-	if len(snapshot.LastStepResults) > 0 {
-		fmt.Fprintln(view, "Step results:")
-		for _, result := range snapshot.LastStepResults {
-			fmt.Fprintf(view, "- [%s] %s: %s\n", result.Status, result.Type, result.Summary)
-		}
-		fmt.Fprintln(view)
-	}
-
-	if len(snapshot.Plan) > 0 {
-		fmt.Fprintln(view, "Plan:")
-		for _, item := range snapshot.Plan {
-			fmt.Fprintf(view, "- [%s] %s", item.Status, item.Title)
-			if item.Details != "" {
-				fmt.Fprintf(view, ": %s", item.Details)
-			}
-			fmt.Fprintln(view)
-		}
-		fmt.Fprintln(view)
-	}
-
-	if snapshot.PendingApproval != nil {
-		fmt.Fprintf(view, "Pending approval: %s\n\n", snapshot.PendingApproval.Summary)
-	}
-
-	if snapshot.LastReport != nil {
-		fmt.Fprintln(view, "Report:")
-		fmt.Fprintln(view, reporting.FormatReport(snapshot.LastReport))
-	}
 }
 
 func findLatestSessionForRepo(items []contracts.SessionSnapshot, repoPath string) *contracts.SessionSnapshot {
