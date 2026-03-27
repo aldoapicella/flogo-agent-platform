@@ -34,14 +34,6 @@ func TestFlogoCLIIntegrationCreateAndBuild(t *testing.T) {
 
 	client := NewFlogoClient(sandbox.NewLocalRunner(filepath.Join(repoRoot, "artifacts")))
 
-	orphaned, err := client.ListOrphaned(ctx, repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if orphaned.ExitCode != 0 {
-		t.Fatalf("orphaned refs check failed: %s", describeToolResult(orphaned))
-	}
-
 	appPath := filepath.Join(repoRoot, "myapp")
 	createResult, err := client.CreateSource(ctx, repoRoot, appPath)
 	if err != nil {
@@ -52,6 +44,14 @@ func TestFlogoCLIIntegrationCreateAndBuild(t *testing.T) {
 	}
 	if _, err := os.Stat(appPath); err != nil {
 		t.Fatalf("expected created app at %s: %v", appPath, err)
+	}
+
+	orphaned, err := client.ListOrphaned(ctx, appPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if orphaned.ExitCode != 0 {
+		t.Fatalf("orphaned refs check failed: %s", describeToolResult(orphaned))
 	}
 
 	buildResult, err := client.Build(ctx, appPath)

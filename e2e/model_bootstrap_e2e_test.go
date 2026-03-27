@@ -66,10 +66,12 @@ func TestDaemonPromptsForAPIKeyOnTTYAndPersistsE2E(t *testing.T) {
 	stateDir := filepath.Join(root, "state")
 	addr := freeAddress(t)
 	configHome := filepath.Join(root, "config")
+	fakePath := writeFakeFlogoBinary(t, root)
 	t.Setenv("XDG_CONFIG_HOME", configHome)
 
 	proc := startAgentPTY(t, root, []string{
 		"OPENAI_API_KEY=",
+		"PATH=" + fakePath + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"XDG_CONFIG_HOME=" + configHome,
 	}, "daemon", "--listen", addr, "--state-dir", stateDir, "--sources", manifest)
 	defer stopAgentPTY(t, proc, false)
@@ -95,6 +97,7 @@ func TestStoredCredentialsAllowNonInteractiveDaemonStartE2E(t *testing.T) {
 	stateDir := filepath.Join(root, "state")
 	addr := freeAddress(t)
 	configHome := filepath.Join(root, "config")
+	fakePath := writeFakeFlogoBinary(t, root)
 	t.Setenv("XDG_CONFIG_HOME", configHome)
 
 	if err := config.SaveStoredCredentials("openai", "stored-key"); err != nil {
@@ -103,6 +106,7 @@ func TestStoredCredentialsAllowNonInteractiveDaemonStartE2E(t *testing.T) {
 
 	daemon, daemonStdout, daemonStderr := startDaemon(t, root, []string{
 		"OPENAI_API_KEY=",
+		"PATH=" + fakePath + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"XDG_CONFIG_HOME=" + configHome,
 	}, addr, stateDir, manifest)
 	defer stopDaemon(t, daemon, daemonStdout, daemonStderr)
@@ -242,4 +246,17 @@ func configPathForTest(configHome string) (string, error) {
 		return "", err
 	}
 	return config.CredentialsPath()
+}
+
+func writeFakeFlogoBinary(t *testing.T, root string) string {
+	t.Helper()
+	binDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(binDir, "flogo")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return binDir
 }
