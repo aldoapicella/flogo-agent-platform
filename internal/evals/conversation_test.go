@@ -63,6 +63,10 @@ func (f fakeEvalModel) GenerateText(context.Context, model.TextRequest) (model.T
 	return model.TextResponse{Text: f.text, Model: f.model}, nil
 }
 
+func (f fakeEvalModel) GenerateMultimodalText(context.Context, model.MultimodalTextRequest) (model.TextResponse, error) {
+	return model.TextResponse{Text: f.text, Model: f.model}, nil
+}
+
 func (f fakeEvalModel) ProviderName() string {
 	return "fake"
 }

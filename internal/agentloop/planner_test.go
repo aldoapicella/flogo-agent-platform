@@ -122,6 +122,10 @@ func (f fakeModelClient) GenerateText(_ context.Context, _ model.TextRequest) (m
 	}, nil
 }
 
+func (f fakeModelClient) GenerateMultimodalText(ctx context.Context, _ model.MultimodalTextRequest) (model.TextResponse, error) {
+	return f.GenerateText(ctx, model.TextRequest{})
+}
+
 func (f fakeModelClient) ProviderName() string {
 	return f.provider
 }

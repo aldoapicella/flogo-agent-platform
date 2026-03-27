@@ -86,6 +86,21 @@ go run ./cmd/flogo-agent benchmark --bench-root ./testdata/benchmarks --mode rev
 
 This exercises the current fixture corpus and reports outcomes plus benchmark rates as JSON. Because benchmark mode is now model-backed, it requires `OPENAI_API_KEY`.
 
+### Advisory UI review
+
+Run with:
+
+```bash
+flogo-agent ui-review --repo . --out-dir /tmp/flogo-agent-ui-review
+```
+
+This command:
+
+- renders deterministic scripted TUI states into screenshots
+- runs a multimodal model review over those screenshots
+- writes PNG captures, per-capture metadata, review JSON, a Markdown summary, and a task list
+- is advisory only and is not part of the default CI gate
+
 ## Writing New E2E Tests
 
 E2E tests should:

@@ -15,6 +15,20 @@ type TextRequest struct {
 	ReasoningEffort string
 }
 
+type ImageInput struct {
+	MIMEType string
+	Data     []byte
+}
+
+type MultimodalTextRequest struct {
+	SystemPrompt    string
+	UserPrompt      string
+	Images          []ImageInput
+	Model           string
+	MaxOutputTokens int
+	ReasoningEffort string
+}
+
 type TextResponse struct {
 	Text      string
 	Model     string
@@ -23,6 +37,7 @@ type TextResponse struct {
 
 type Client interface {
 	GenerateText(context.Context, TextRequest) (TextResponse, error)
+	GenerateMultimodalText(context.Context, MultimodalTextRequest) (TextResponse, error)
 	ProviderName() string
 }
 

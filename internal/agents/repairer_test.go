@@ -159,6 +159,13 @@ func (f repairerFakeModel) GenerateText(_ context.Context, _ model.TextRequest) 
 	return model.TextResponse{Text: f.text, Model: f.model}, nil
 }
 
+func (f repairerFakeModel) GenerateMultimodalText(_ context.Context, _ model.MultimodalTextRequest) (model.TextResponse, error) {
+	if f.err != nil {
+		return model.TextResponse{}, f.err
+	}
+	return model.TextResponse{Text: f.text, Model: f.model}, nil
+}
+
 func (f repairerFakeModel) ProviderName() string {
 	return "fake"
 }

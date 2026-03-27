@@ -12,20 +12,55 @@ import (
 
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
 	"github.com/aldoapicella/flogo-agent-platform/internal/reporting"
-	agentruntime "github.com/aldoapicella/flogo-agent-platform/internal/runtime"
 	"github.com/aldoapicella/flogo-agent-platform/internal/sandbox"
 )
 
-type App struct {
-	client *agentruntime.Client
+type Client interface {
+	ListSessions(context.Context) ([]contracts.SessionSnapshot, error)
+	GetSession(context.Context, string) (*contracts.SessionSnapshot, error)
+	CreateSession(context.Context, contracts.SessionRequest) (*contracts.SessionSnapshot, error)
+	SendMessage(context.Context, string, string) (*contracts.SessionSnapshot, error)
+	Approve(context.Context, string) (*contracts.SessionSnapshot, error)
+	Reject(context.Context, string, string) (*contracts.SessionSnapshot, error)
+	Undo(context.Context, string) (*contracts.SessionSnapshot, error)
+	StreamSession(context.Context, string, func(contracts.SessionStreamEvent) error) error
 }
 
-func New(client *agentruntime.Client) *App {
+type AppOptions struct {
+	Screen           tcell.Screen
+	AfterDraw        func(*tview.Application, tcell.Screen, renderState)
+	DisableStreaming bool
+}
+
+type renderState struct {
+	RepoPath         string
+	Mode             contracts.SessionMode
+	SideMode         string
+	ConnectionStatus string
+	StatusError      string
+	ActiveSessionID  string
+	ActiveOverlay    string
+	Current          *contracts.SessionSnapshot
+}
+
+type App struct {
+	client Client
+	opts   AppOptions
+}
+
+func New(client Client) *App {
 	return &App{client: client}
+}
+
+func NewWithOptions(client Client, opts AppOptions) *App {
+	return &App{client: client, opts: opts}
 }
 
 func (a *App) Run(ctx context.Context, initialRepo string, initialGoal string, initialMode contracts.SessionMode, stateDir string, sources string, sandboxConfig sandbox.Config, initialSession string) error {
 	app := tview.NewApplication()
+	if a.opts.Screen != nil {
+		app.SetScreen(a.opts.Screen)
+	}
 	pages := tview.NewPages()
 
 	statusView := tview.NewTextView().
@@ -69,10 +104,16 @@ func (a *App) Run(ctx context.Context, initialRepo string, initialGoal string, i
 	statusError := ""
 	var streamCancel context.CancelFunc
 	activeSessionID := ""
+	activeOverlay := ""
 	var render func(snapshot *contracts.SessionSnapshot, err error)
 
 	attachStream := func(sessionID string) {
 		if strings.TrimSpace(sessionID) == "" {
+			return
+		}
+		if a.opts.DisableStreaming {
+			activeSessionID = sessionID
+			connectionStatus = "connected"
 			return
 		}
 		if streamCancel != nil {
@@ -274,18 +315,21 @@ func (a *App) Run(ctx context.Context, initialRepo string, initialGoal string, i
 					label := item.ID
 					secondary := fmt.Sprintf("%s | %s | %s", filepath.Base(item.RepoPath), item.Status, item.UpdatedAt)
 					sessionID := item.ID
-					list.AddItem(label, secondary, 0, func() {
-						pages.HidePage("sessions")
-						loadSession(sessionID)
-					})
-				}
-				list.SetDoneFunc(func() {
+				list.AddItem(label, secondary, 0, func() {
+					activeOverlay = ""
 					pages.HidePage("sessions")
-					app.SetFocus(composer)
+					loadSession(sessionID)
 				})
-				pages.AddAndSwitchToPage("sessions", centered(90, 20, list), true)
-				app.SetFocus(list)
+			}
+			list.SetDoneFunc(func() {
+				activeOverlay = ""
+				pages.HidePage("sessions")
+				app.SetFocus(composer)
 			})
+			activeOverlay = "sessions"
+			pages.AddAndSwitchToPage("sessions", centered(90, 20, list), true)
+			app.SetFocus(list)
+		})
 		}()
 	}
 
@@ -308,6 +352,20 @@ func (a *App) Run(ctx context.Context, initialRepo string, initialGoal string, i
 	pages.AddPage("main", layout, true, true)
 	app.SetRoot(pages, true)
 	app.SetFocus(composer)
+	if a.opts.AfterDraw != nil {
+		app.SetAfterDrawFunc(func(screen tcell.Screen) {
+			a.opts.AfterDraw(app, screen, renderState{
+				RepoPath:         repoPath,
+				Mode:             mode,
+				SideMode:         sideMode,
+				ConnectionStatus: connectionStatus,
+				StatusError:      statusError,
+				ActiveSessionID:  activeSessionID,
+				ActiveOverlay:    activeOverlay,
+				Current:          current,
+			})
+		})
+	}
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyCtrlC:

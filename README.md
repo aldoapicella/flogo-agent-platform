@@ -148,6 +148,7 @@ go run ./cmd/flogo-agent run \
 - `flogo-agent doctor`: check local install prerequisites and environment
 - `flogo-agent setup`: bootstrap model key and managed `flogo` CLI
 - `flogo-agent setup flogo`: install or repair the managed `flogo` CLI
+- `flogo-agent ui-review`: capture scripted TUI screenshots and run an advisory multimodal UI review
 - `flogo-agent update check|apply`: inspect or apply published updates
 - `flogo-agent repo status|diff|branch|commit`: local forge-agnostic git operations
 
@@ -225,4 +226,10 @@ Optional live OpenAI conversation smoke:
 
 ```bash
 OPENAI_E2E=1 OPENAI_API_KEY="..." go test ./e2e -run 'TestLiveOpenAI.*' -v
+```
+
+Optional advisory TUI review:
+
+```bash
+flogo-agent ui-review --repo . --out-dir /tmp/flogo-agent-ui-review
 ```

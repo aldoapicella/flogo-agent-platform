@@ -21,6 +21,14 @@ func (f fakeModelClient) GenerateText(ctx context.Context, req model.TextRequest
 	}, nil
 }
 
+func (f fakeModelClient) GenerateMultimodalText(ctx context.Context, req model.MultimodalTextRequest) (model.TextResponse, error) {
+	return model.TextResponse{
+		Text:      f.text,
+		Model:     "fake-model",
+		RequestID: "resp_fake",
+	}, nil
+}
+
 func (f fakeModelClient) ProviderName() string {
 	return "fake"
 }

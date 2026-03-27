@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/base64"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -59,6 +60,16 @@ func (c *OpenAIClient) ProviderName() string {
 }
 
 func (c *OpenAIClient) GenerateText(ctx context.Context, req TextRequest) (TextResponse, error) {
+	return c.GenerateMultimodalText(ctx, MultimodalTextRequest{
+		SystemPrompt:    req.SystemPrompt,
+		UserPrompt:      req.UserPrompt,
+		Model:           req.Model,
+		MaxOutputTokens: req.MaxOutputTokens,
+		ReasoningEffort: req.ReasoningEffort,
+	})
+}
+
+func (c *OpenAIClient) GenerateMultimodalText(ctx context.Context, req MultimodalTextRequest) (TextResponse, error) {
 	modelName := req.Model
 	if modelName == "" {
 		modelName = c.model
@@ -74,21 +85,33 @@ func (c *OpenAIClient) GenerateText(ctx context.Context, req TextRequest) (TextR
 
 	body := map[string]any{
 		"model": modelName,
-		"input": []map[string]any{
-			{
-				"role": "system",
-				"content": []map[string]any{
-					{"type": "input_text", "text": req.SystemPrompt},
-				},
+		"input": []map[string]any{{
+			"role": "system",
+			"content": []map[string]any{
+				{"type": "input_text", "text": req.SystemPrompt},
 			},
-			{
-				"role": "user",
-				"content": []map[string]any{
-					{"type": "input_text", "text": req.UserPrompt},
-				},
-			},
-		},
+		}},
 	}
+	userContent := []map[string]any{
+		{"type": "input_text", "text": req.UserPrompt},
+	}
+	for _, image := range req.Images {
+		if len(image.Data) == 0 {
+			continue
+		}
+		mimeType := strings.TrimSpace(image.MIMEType)
+		if mimeType == "" {
+			mimeType = "image/png"
+		}
+		userContent = append(userContent, map[string]any{
+			"type":      "input_image",
+			"image_url": fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(image.Data)),
+		})
+	}
+	body["input"] = append(body["input"].([]map[string]any), map[string]any{
+		"role":    "user",
+		"content": userContent,
+	})
 	if effort != "" {
 		body["reasoning"] = map[string]any{"effort": effort}
 	}

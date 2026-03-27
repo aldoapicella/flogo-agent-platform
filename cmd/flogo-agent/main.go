@@ -58,6 +58,10 @@ func newRootCommandWithLaunch(launch func(interactiveOptions) error) *cobra.Comm
 	var sessionID string
 	var message string
 	var rejectionReason string
+	var uiReviewOutDir string
+	var uiReviewWidth int
+	var uiReviewHeight int
+	var uiReviewModel string
 
 	root := &cobra.Command{
 		Use:     "flogo-agent",
@@ -281,6 +285,19 @@ func newRootCommandWithLaunch(launch func(interactiveOptions) error) *cobra.Comm
 			return nil
 		},
 	})
+
+	uiReviewCmd := &cobra.Command{
+		Use:   "ui-review",
+		Short: "Capture scripted TUI screenshots and run an advisory multimodal UI review",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runUIReview(repoPath, uiReviewOutDir, uiReviewWidth, uiReviewHeight, uiReviewModel)
+		},
+	}
+	uiReviewCmd.Flags().StringVar(&uiReviewOutDir, "out-dir", "", "directory for screenshots and review artifacts")
+	uiReviewCmd.Flags().IntVar(&uiReviewWidth, "width", 140, "simulation screen width in terminal cells")
+	uiReviewCmd.Flags().IntVar(&uiReviewHeight, "height", 42, "simulation screen height in terminal rows")
+	uiReviewCmd.Flags().StringVar(&uiReviewModel, "review-model", "", "optional model override for multimodal UI review")
+	root.AddCommand(uiReviewCmd)
 
 	root.AddCommand(&cobra.Command{
 		Use:   "doctor",
