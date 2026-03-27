@@ -20,11 +20,11 @@ import (
 
 	"github.com/aldoapicella/flogo-agent-platform/internal/config"
 	"github.com/aldoapicella/flogo-agent-platform/internal/ui"
+	"github.com/aldoapicella/flogo-agent-platform/internal/update"
 )
 
 const flogoInstallSource = "github.com/project-flogo/cli/...@latest"
 const releaseRepo = "aldoapicella/flogo-agent-platform"
-const checksumAssetName = "flogo-agent_checksums.txt"
 
 var errFlogoCLIMissing = errors.New("flogo CLI is required for build and test workflows")
 
@@ -111,8 +111,10 @@ func ensureManagedToolPath() error {
 func installManagedFlogoCLI() error {
 	baseURL := releaseBaseURL()
 	if baseURL != "" {
-		if err := downloadManagedFlogoCLI(baseURL); err == nil {
+		if err := downloadManagedFlogoCLI(baseURL, version); err == nil {
 			return nil
+		} else if version != "dev" {
+			return err
 		}
 	}
 	return installManagedFlogoCLIDeveloperFallback()
@@ -156,61 +158,12 @@ func installManagedFlogoCLIDeveloperFallback() error {
 	})
 }
 
-func downloadManagedFlogoCLI(baseURL string) error {
-	assetName := releaseAssetName("flogo")
+func downloadManagedFlogoCLI(baseURL string, releaseVersion string) error {
+	assetName := update.AssetArchiveName("flogo")
 	if assetName == "" {
 		return fmt.Errorf("unsupported platform for managed flogo download")
 	}
-	binDir, err := config.ManagedBinDir()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return err
-	}
-
-	tempDir, err := os.MkdirTemp("", "flogo-agent-flogo-install-*")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tempDir)
-
-	archivePath := filepath.Join(tempDir, assetName)
-	checksumPath := filepath.Join(tempDir, checksumAssetName)
-	if err := downloadFile(joinURL(baseURL, assetName), archivePath); err != nil {
-		return err
-	}
-	if err := downloadFile(joinURL(baseURL, checksumAssetName), checksumPath); err != nil {
-		return err
-	}
-	if err := verifyChecksum(archivePath, checksumPath, assetName); err != nil {
-		return err
-	}
-
-	extractedPath, err := extractToolArchive(archivePath, tempDir, "flogo")
-	if err != nil {
-		return err
-	}
-	managedPath, err := config.ManagedToolPath("flogo")
-	if err != nil {
-		return err
-	}
-	contents, err := os.ReadFile(extractedPath)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(managedPath, contents, 0o755); err != nil {
-		return err
-	}
-	if err := ensureManagedToolPath(); err != nil {
-		return err
-	}
-	return config.SaveManagedToolInstall(config.ManagedToolInstall{
-		Name:    "flogo",
-		Path:    managedPath,
-		Source:  "release-download",
-		Version: version,
-	})
+	return installManagedReleaseToolFromAssetURLs("flogo", "flogo", releaseVersion, joinURL(baseURL, assetName), joinURL(baseURL, update.ChecksumAssetName))
 }
 
 func ensureManagedToolRecord(path string) error {
@@ -278,20 +231,6 @@ func releaseBaseURL() string {
 	return "https://github.com/" + releaseRepo + "/releases/download/" + version
 }
 
-func releaseAssetName(binary string) string {
-	osName := runtime.GOOS
-	archName := runtime.GOARCH
-	switch archName {
-	case "amd64", "arm64":
-	default:
-		return ""
-	}
-	if osName == "windows" {
-		return fmt.Sprintf("%s_%s_%s.zip", binary, osName, archName)
-	}
-	return fmt.Sprintf("%s_%s_%s.tar.gz", binary, osName, archName)
-}
-
 func joinURL(base string, name string) string {
 	return strings.TrimRight(base, "/") + "/" + name
 }
@@ -348,6 +287,65 @@ func verifyChecksum(archivePath string, checksumPath string, assetName string) e
 		return fmt.Errorf("checksum mismatch for %s", assetName)
 	}
 	return nil
+}
+
+func installManagedReleaseToolFromAssetURLs(toolName string, binaryName string, releaseVersion string, assetURL string, checksumURL string) error {
+	assetName := update.AssetArchiveName(binaryName)
+	if assetName == "" {
+		return fmt.Errorf("unsupported platform for managed %s download", toolName)
+	}
+	binDir, err := config.ManagedBinDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return err
+	}
+
+	tempDir, err := os.MkdirTemp("", "flogo-agent-"+toolName+"-install-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
+
+	archivePath := filepath.Join(tempDir, assetName)
+	checksumPath := filepath.Join(tempDir, update.ChecksumAssetName)
+	if err := downloadFile(assetURL, archivePath); err != nil {
+		return err
+	}
+	if err := downloadFile(checksumURL, checksumPath); err != nil {
+		return err
+	}
+	if err := verifyChecksum(archivePath, checksumPath, assetName); err != nil {
+		return err
+	}
+
+	extractedPath, err := extractToolArchive(archivePath, tempDir, binaryName)
+	if err != nil {
+		return err
+	}
+	managedPath, err := config.ManagedToolPath(toolName)
+	if err != nil {
+		return err
+	}
+	contents, err := os.ReadFile(extractedPath)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(managedPath, contents, 0o755); err != nil {
+		return err
+	}
+	if toolName == "flogo" {
+		if err := ensureManagedToolPath(); err != nil {
+			return err
+		}
+	}
+	return config.SaveManagedToolInstall(config.ManagedToolInstall{
+		Name:    toolName,
+		Path:    managedPath,
+		Source:  "release-download",
+		Version: strings.TrimSpace(releaseVersion),
+	})
 }
 
 func extractToolArchive(archivePath string, tempDir string, binary string) (string, error) {

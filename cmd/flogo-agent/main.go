@@ -26,6 +26,7 @@ import (
 	"github.com/aldoapicella/flogo-agent-platform/internal/sandbox"
 	"github.com/aldoapicella/flogo-agent-platform/internal/session"
 	"github.com/aldoapicella/flogo-agent-platform/internal/tools"
+	"github.com/aldoapicella/flogo-agent-platform/internal/update"
 )
 
 func main() {
@@ -256,6 +257,11 @@ func newRootCommandWithLaunch(launch func(interactiveOptions) error) *cobra.Comm
 			if err := ensureFlogoCLICLI(); err != nil {
 				return err
 			}
+			if restarted, err := maybeApplyStartupUpdateCLI(ctx, "", ""); err != nil {
+				return err
+			} else if restarted {
+				return nil
+			}
 			rootDir := mustRepoRoot()
 			if stateDir == "" {
 				stateDir = filepath.Join(rootDir, ".flogo-agent")
@@ -367,6 +373,8 @@ func newRootCommandWithLaunch(launch func(interactiveOptions) error) *cobra.Comm
 	commitCmd.Flags().StringVarP(&commitMessage, "message", "m", "", "commit message")
 	repoCmd.AddCommand(commitCmd)
 
+	addUpdateCommands(root)
+
 	return root
 }
 
@@ -378,6 +386,11 @@ func runDaemon(listenAddr string, stateDir string, sources string, sandboxConfig
 	}
 	if err := ensureFlogoCLICLI(); err != nil {
 		return err
+	}
+	if restarted, err := maybeApplyStartupUpdateCLI(ctx, "http://"+listenAddr, listenAddr); err != nil {
+		return err
+	} else if restarted {
+		return nil
 	}
 	manager, err := agentruntime.NewManager(ctx, mustRepoRoot(), stateDir, resolveSources(sources), agentruntime.Options{
 		ServiceOptions: session.Options{Sandbox: sandboxConfig, Model: modelClient},
@@ -419,6 +432,11 @@ func runDaemon(listenAddr string, stateDir string, sources string, sandboxConfig
 
 func runChat(daemonURL string, repoPath string, goal string, mode string, stateDir string, sources string, sessionID string, message string, sandboxConfig sandbox.Config) error {
 	ctx := context.Background()
+	if restarted, err := maybeApplyStartupUpdateCLI(ctx, daemonURL, ""); err != nil {
+		return err
+	} else if restarted {
+		return nil
+	}
 	client := agentruntime.NewClient(daemonURL)
 	if err := client.Health(ctx); err != nil {
 		return err
@@ -510,6 +528,11 @@ func runSession(repoPath string, goal string, mode string, stateDir string, sour
 	if err := ensureFlogoCLICLI(); err != nil {
 		return err
 	}
+	if restarted, err := maybeApplyStartupUpdateCLI(ctx, "", ""); err != nil {
+		return err
+	} else if restarted {
+		return nil
+	}
 	service, err := session.NewServiceWithOptions(ctx, mustRepoRoot(), stateDir, resolveSources(sources), session.Options{
 		Sandbox: sandboxConfig,
 		Model:   modelClient,
@@ -553,7 +576,7 @@ func runDoctor(repoPath string, stateDir string, daemonURL string) error {
 	if stateDir == "" {
 		stateDir = filepath.Join(mustRepoRoot(), ".flogo-agent")
 	}
-	checks := make([]doctorCheck, 0, 5)
+	checks := make([]doctorCheck, 0, 6)
 
 	modelStatus := doctorCheck{Name: "model-api-key", Status: "ok", Details: "OPENAI_API_KEY is configured"}
 	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) == "" {
@@ -596,6 +619,30 @@ func runDoctor(repoPath string, stateDir string, daemonURL string) error {
 		execStatus.Details = err.Error()
 	}
 	checks = append(checks, execStatus)
+
+	updateStatus := doctorCheck{Name: "update", Status: "ok", Details: "development build"}
+	if version != "dev" {
+		updateStatus.Details = "not checked yet"
+		if state, err := update.LoadState(); err == nil {
+			switch {
+			case strings.TrimSpace(state.LastSeenVersion) == "":
+				updateStatus.Details = "not checked yet"
+			case update.IsUpdateAvailable(version, state.LastSeenVersion) && strings.TrimSpace(state.SkippedVersion) != strings.TrimSpace(state.LastSeenVersion):
+				updateStatus.Status = "warn"
+				updateStatus.Details = fmt.Sprintf("update available: %s -> %s", version, state.LastSeenVersion)
+			default:
+				updateStatus.Details = fmt.Sprintf("latest known release %s", state.LastSeenVersion)
+			}
+			if strings.TrimSpace(state.LastError) != "" {
+				updateStatus.Status = "warn"
+				updateStatus.Details += fmt.Sprintf(" (last check error: %s)", state.LastError)
+			}
+		} else {
+			updateStatus.Status = "warn"
+			updateStatus.Details = err.Error()
+		}
+	}
+	checks = append(checks, updateStatus)
 
 	hasFailure := false
 	for _, check := range checks {

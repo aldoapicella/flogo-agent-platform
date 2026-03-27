@@ -2,6 +2,10 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: Release version tag, for example v0.1.1
+        required: true
   push:
     tags:
       - "v*"
@@ -25,16 +29,46 @@ jobs:
 
       - name: Build release assets
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ inputs.version || github.ref_name }}
         run: |
           chmod +x ./scripts/build-release.sh
           ./scripts/build-release.sh
 
+      - name: Validate manual release summary
+        env:
+          RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          NOTES_FILE="docs/releases/${RELEASE_VERSION}.md"
+          if [[ ! -f "$NOTES_FILE" ]]; then
+            echo "Missing required release notes summary: $NOTES_FILE" >&2
+            exit 1
+          fi
+          echo "RELEASE_NOTES_FILE=$NOTES_FILE" >> "$GITHUB_ENV"
+
+      - name: Render hybrid release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          gh api \
+            -X POST \
+            "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f "tag_name=${RELEASE_VERSION}" \
+            --jq '.body' > generated-release-notes.md
+
+          {
+            cat "$RELEASE_NOTES_FILE"
+            printf '\n\n---\n\n'
+            cat generated-release-notes.md
+          } > release-body.md
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.version || github.ref_name }}
+          name: ${{ inputs.version || github.ref_name }}
           files: |
             dist/*
             scripts/install.sh
             scripts/install.ps1
-          generate_release_notes: true
+          body_path: release-body.md

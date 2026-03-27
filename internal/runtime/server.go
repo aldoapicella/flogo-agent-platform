@@ -28,6 +28,7 @@ func NewServer(addr string, manager *Manager) *Server {
 		},
 	}
 	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/admin/shutdown", s.handleShutdown)
 	mux.HandleFunc("/sessions", s.handleSessions)
 	mux.HandleFunc("/sessions/", s.handleSession)
 	return s
@@ -47,6 +48,18 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = s.Shutdown(context.Background())
+	}()
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {

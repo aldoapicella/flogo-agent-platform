@@ -61,16 +61,34 @@ build_target windows amd64 flogo tool
 
 (
   cd "$DIST_DIR"
-  sha256sum \
-    flogo-agent_darwin_amd64.tar.gz \
-    flogo-agent_darwin_arm64.tar.gz \
-    flogo-agent_linux_amd64.tar.gz \
-    flogo-agent_linux_arm64.tar.gz \
-    flogo-agent_windows_amd64.zip \
-    flogo_darwin_amd64.tar.gz \
-    flogo_darwin_arm64.tar.gz \
-    flogo_linux_amd64.tar.gz \
-    flogo_linux_arm64.tar.gz \
-    flogo_windows_amd64.zip \
-    > flogo-agent_checksums.txt
+  assets=(
+    flogo-agent_darwin_amd64.tar.gz
+    flogo-agent_darwin_arm64.tar.gz
+    flogo-agent_linux_amd64.tar.gz
+    flogo-agent_linux_arm64.tar.gz
+    flogo-agent_windows_amd64.zip
+    flogo_darwin_amd64.tar.gz
+    flogo_darwin_arm64.tar.gz
+    flogo_linux_amd64.tar.gz
+    flogo_linux_arm64.tar.gz
+    flogo_windows_amd64.zip
+  )
+
+  sha256sum "${assets[@]}" > flogo-agent_checksums.txt
+
+  {
+    printf '{\n'
+    printf '  "version": "%s",\n' "$VERSION"
+    printf '  "checksum_asset": "flogo-agent_checksums.txt",\n'
+    printf '  "assets": [\n'
+    for idx in "${!assets[@]}"; do
+      suffix=","
+      if [[ "$idx" -eq $((${#assets[@]} - 1)) ]]; then
+        suffix=""
+      fi
+      printf '    "%s"%s\n' "${assets[$idx]}" "$suffix"
+    done
+    printf '  ]\n'
+    printf '}\n'
+  } > release-manifest.json
 )

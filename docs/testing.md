@@ -16,6 +16,8 @@ These cover:
 
 - schema and semantic validation
 - deterministic and model-backed repair logic
+- release metadata parsing and updater state persistence
+- explicit updater command logic against fake release metadata
 - knowledge indexing and retrieval
 - sandbox command shaping
 - git wrapper behavior

@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/rivo/tview"
+
+	"github.com/aldoapicella/flogo-agent-platform/internal/update"
 )
 
 func PromptForModelAPIKey() (string, error) {
@@ -100,4 +102,61 @@ func PromptForFlogoCLIInstall() (bool, error) {
 		return false, runErr
 	}
 	return confirmed, nil
+}
+
+func PromptForUpdate(info update.ReleaseInfo, currentVersion string) (string, error) {
+	app := tview.NewApplication()
+	header := tview.NewTextView().
+		SetDynamicColors(true).
+		SetWrap(true)
+	header.SetBorder(true).SetTitle("Update Available")
+	header.SetText(fmt.Sprintf("A newer Flogo Agent release is available.\nCurrent: [yellow]%s[-]\nLatest: [green]%s[-]\nPublished: %s", currentVersion, info.Version, info.PublishedAt))
+
+	notes := tview.NewTextView().
+		SetDynamicColors(true).
+		SetWrap(true).
+		SetScrollable(true)
+	notes.SetBorder(true).SetTitle("Release Notes")
+	body := strings.TrimSpace(info.Body)
+	if body == "" {
+		body = "No release notes were published for this release."
+	}
+	notes.SetText(body)
+
+	form := tview.NewForm()
+	var result string
+	var runErr error
+	form.AddButton("Update Now", func() {
+		result = "update"
+		app.Stop()
+	})
+	form.AddButton("Skip This Version", func() {
+		result = "skip"
+		app.Stop()
+	})
+	form.AddButton("Continue", func() {
+		result = "continue"
+		app.Stop()
+	})
+	form.SetBorder(true).SetTitle("Startup Update")
+
+	layout := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(nil, 0, 1, false).
+		AddItem(centered(92, 24,
+			tview.NewFlex().SetDirection(tview.FlexRow).
+				AddItem(header, 5, 0, false).
+				AddItem(notes, 0, 1, false).
+				AddItem(form, 6, 0, true),
+		), 24, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	app.SetRoot(layout, true)
+	app.SetFocus(form)
+	if err := app.Run(); err != nil {
+		return "", err
+	}
+	if runErr != nil {
+		return "", runErr
+	}
+	return result, nil
 }

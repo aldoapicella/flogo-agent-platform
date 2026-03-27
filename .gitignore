@@ -2,3 +2,4 @@
 bin/
 /flogo-agent
 .env
+dist/

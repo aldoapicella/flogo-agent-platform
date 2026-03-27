@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/aldoapicella/flogo-agent-platform/internal/config"
+	"github.com/aldoapicella/flogo-agent-platform/internal/update"
 )
 
 func TestEnsureFlogoCLIFailsWithoutTTY(t *testing.T) {
@@ -165,12 +166,12 @@ func TestDescribeFlogoBinaryRepoLocalSource(t *testing.T) {
 func startFakeReleaseServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
 	root := t.TempDir()
-	assetName := releaseAssetName("flogo")
+	assetName := update.AssetArchiveName("flogo")
 	archivePath := filepath.Join(root, assetName)
 	writeFakeTarGz(t, archivePath, "flogo", []byte("#!/bin/sh\nexit 0\n"))
 	sum := sha256.Sum256(mustReadFile(t, archivePath))
 	checksumLine := fmt.Sprintf("%x  %s\n", sum, assetName)
-	if err := os.WriteFile(filepath.Join(root, checksumAssetName), []byte(checksumLine), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, update.ChecksumAssetName), []byte(checksumLine), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.FileServer(http.Dir(root)))

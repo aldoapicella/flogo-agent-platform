@@ -61,6 +61,17 @@ func launchInteractive(opts interactiveOptions) error {
 	opts.repoPath = repoPath
 
 	ctx := context.Background()
+	if _, err := ensureAgentModelInteractive(); err != nil {
+		return err
+	}
+	if err := ensureFlogoCLIInteractive(); err != nil {
+		return err
+	}
+	if restarted, err := maybeApplyStartupUpdateInteractive(ctx, opts); err != nil {
+		return err
+	} else if restarted {
+		return nil
+	}
 	handle, err := ensureDaemon(ctx, opts)
 	if err != nil {
 		return err

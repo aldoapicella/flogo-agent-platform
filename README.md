@@ -59,6 +59,7 @@ That installs `flogo-agent` into a user-local bin directory. On first launch the
 
 - prompts for a model API key if needed
 - downloads a managed per-user `flogo` CLI from the same release if needed
+- checks the latest published release and prompts before applying an update when a newer version exists
 - starts the terminal UI
 
 ### Developer install from source
@@ -147,6 +148,7 @@ go run ./cmd/flogo-agent run \
 - `flogo-agent doctor`: check local install prerequisites and environment
 - `flogo-agent setup`: bootstrap model key and managed `flogo` CLI
 - `flogo-agent setup flogo`: install or repair the managed `flogo` CLI
+- `flogo-agent update check|apply`: inspect or apply published updates
 - `flogo-agent repo status|diff|branch|commit`: local forge-agnostic git operations
 
 ## Configuration
@@ -181,7 +183,18 @@ go run ./cmd/flogo-agent run \
 
 - a stored model key is kept under `$(os.UserConfigDir)/flogo-agent/credentials.json`
 - a managed `flogo` install is kept under `$(os.UserConfigDir)/flogo-agent/bin/`
+- updater state is kept under `$(os.UserConfigDir)/flogo-agent/updater.json`
 - `flogo-agent doctor` shows whether the current install is ready and where `flogo` came from: managed, repo-local, or `PATH`
+
+### Auto-update
+
+Released builds check GitHub Releases on startup. If a newer stable release exists, the app shows the published hybrid release notes and lets you:
+
+- update now
+- skip that exact release version
+- continue without updating for the current run
+
+`flogo-agent update check` prints the latest known release, and `flogo-agent update apply` installs it immediately.
 
 ## Documentation
 
@@ -190,6 +203,7 @@ go run ./cmd/flogo-agent run \
 - [Testing](./docs/testing.md)
 - [Troubleshooting](./docs/troubleshooting.md)
 - [What’s Missing](./docs/what-is-missing.md)
+- [Release Notes](./docs/releases/README.md)
 - [Research Report](./docs/research-report.md)
 
 ## Official Flogo Sources

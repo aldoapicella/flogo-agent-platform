@@ -47,6 +47,10 @@ func (c *Client) Health(ctx context.Context) error {
 	return nil
 }
 
+func (c *Client) Shutdown(ctx context.Context) error {
+	return c.doJSON(ctx, http.MethodPost, "/admin/shutdown", map[string]string{}, nil)
+}
+
 func (c *Client) CreateSession(ctx context.Context, req contracts.SessionRequest) (*contracts.SessionSnapshot, error) {
 	var snapshot contracts.SessionSnapshot
 	if err := c.doJSON(ctx, http.MethodPost, "/sessions", req, &snapshot); err != nil {

@@ -56,8 +56,26 @@ That command reports:
 
 - whether a model API key is configured
 - whether `flogo` is available and whether it came from a managed install, a repo-local `.tools/bin`, or `PATH`
+- whether a newer published release is already known from the updater cache
 - whether the daemon is reachable
 - whether the state directory is writable
+
+## Startup keeps prompting for the same update
+
+If you chose `Continue` instead of `Skip this version`, the next startup will prompt again while that same newer release is still available.
+
+To suppress prompts for the current newer tag, choose `Skip this version`, or inspect the current updater state with:
+
+```bash
+flogo-agent doctor
+flogo-agent update check
+```
+
+To apply the update explicitly:
+
+```bash
+flogo-agent update apply
+```
 
 ## `database is locked (SQLITE_BUSY)`
 

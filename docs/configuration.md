@@ -29,6 +29,8 @@
   - runs benchmark fixtures
 - `flogo-agent doctor`
   - checks model key, `flogo`, daemon reachability, and writable state
+- `flogo-agent update check|apply`
+  - checks for or applies the latest published release
 - `flogo-agent setup`
   - bootstraps the local install
 - `flogo-agent setup flogo`
@@ -112,6 +114,14 @@ If `OPENAI_API_KEY` is unset, interactive agent startup prompts for a model API 
 - released binaries download the matching `flogo_<os>_<arch>` asset and verify it against the release checksum file
 - developer builds without a release version fall back to `go install github.com/project-flogo/cli/...@latest`, so Go must be available on `PATH`
 
+### Startup updater
+
+- released binaries check the latest stable GitHub Release on startup
+- if a newer version exists, interactive startup prompts with the published release notes
+- the updater state is stored at `$(os.UserConfigDir)/flogo-agent/updater.json`
+- `Skip this version` suppresses prompts for that exact tag until a newer release appears
+- non-interactive commands never block on update prompts; they print a notice and continue
+
 ### Tooling
 
 - `PATH`
@@ -130,6 +140,8 @@ Typical contents:
 
 - `knowledge.db`
   - SQLite FTS store for ingested sources
+- `daemon.log`
+  - local daemon startup log when the UI auto-starts a daemon
 - `artifacts/`
   - stdout, stderr, and generated files from tool invocations
 - `workspaces/`
@@ -151,6 +163,13 @@ Then run:
 
 ```bash
 flogo-agent setup
+```
+
+You can also check the currently installed release and apply an update explicitly:
+
+```bash
+flogo-agent update check
+flogo-agent update apply
 ```
 
 If the repo already contains `.tools/bin/flogo`, you do not need a managed `flogo` install for normal local use.
