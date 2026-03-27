@@ -57,6 +57,19 @@ func TestManagerRepairApprovalFlow(t *testing.T) {
 	if snapshot.LastReport == nil || snapshot.LastReport.Outcome != contracts.RunOutcomeApplied {
 		t.Fatalf("expected applied report, got %+v", snapshot.LastReport)
 	}
+	if len(snapshot.Messages) < 4 {
+		t.Fatalf("expected transcript to include approval turn, got %+v", snapshot.Messages)
+	}
+	foundApprovalMessage := false
+	for _, message := range snapshot.Messages {
+		if message.Role == contracts.RoleUser && strings.Contains(message.Content, "approve pending patch") {
+			foundApprovalMessage = true
+			break
+		}
+	}
+	if !foundApprovalMessage {
+		t.Fatalf("expected transcript to record explicit user approval, got %+v", snapshot.Messages)
+	}
 
 	contents, err := os.ReadFile(filepath.Join(repoPath, "flogo.json"))
 	if err != nil {

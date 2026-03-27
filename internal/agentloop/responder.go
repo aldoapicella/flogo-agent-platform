@@ -105,12 +105,12 @@ func composePendingDiffResponse(snapshot *contracts.SessionSnapshot) string {
 	var builder strings.Builder
 	builder.WriteString("The patch is still waiting for your approval.\n")
 	if len(changes) > 0 {
-		builder.WriteString("\nKey changes:\n- ")
+		builder.WriteString("\nSemantic changes:\n- ")
 		builder.WriteString(strings.Join(changes, "\n- "))
 		builder.WriteByte('\n')
 	}
 	if snippet != "" {
-		builder.WriteString("\nDiff excerpt:\n")
+		builder.WriteString("\nFocused diff excerpt:\n")
 		builder.WriteString(snippet)
 		builder.WriteByte('\n')
 	}
@@ -379,6 +379,14 @@ func compactDiffSnippet(unifiedDiff string, limit int) string {
 		limit = 8
 	}
 	lines := strings.Split(unifiedDiff, "\n")
+	selected := collectSemanticDiffLines(lines, limit)
+	if len(selected) == 0 {
+		selected = collectFallbackDiffLines(lines, limit)
+	}
+	return strings.Join(selected, "\n")
+}
+
+func collectSemanticDiffLines(lines []string, limit int) []string {
 	selected := make([]string, 0, limit)
 	for _, line := range lines {
 		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "@@") {
@@ -387,12 +395,51 @@ func compactDiffSnippet(unifiedDiff string, limit int) string {
 		if !strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "-") {
 			continue
 		}
+		if !isSemanticDiffLine(line) {
+			continue
+		}
 		selected = append(selected, line)
 		if len(selected) >= limit {
 			break
 		}
 	}
-	return strings.Join(selected, "\n")
+	return selected
+}
+
+func collectFallbackDiffLines(lines []string, limit int) []string {
+	selected := make([]string, 0, limit)
+	for _, line := range lines {
+		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "@@") {
+			continue
+		}
+		if !strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "-") {
+			continue
+		}
+		trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "+"), "-"))
+		switch trimmed {
+		case "", "{", "}", "[", "]", ",", "},", "],":
+			continue
+		}
+		selected = append(selected, line)
+		if len(selected) >= limit {
+			break
+		}
+	}
+	return selected
+}
+
+func isSemanticDiffLine(line string) bool {
+	trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "+"), "-"))
+	if trimmed == "" {
+		return false
+	}
+	return strings.Contains(trimmed, `"flowURI"`) ||
+		strings.Contains(trimmed, `"message"`) ||
+		strings.Contains(trimmed, `"id"`) ||
+		strings.Contains(trimmed, "res://flow:") ||
+		strings.Contains(trimmed, "=$.") ||
+		strings.Contains(trimmed, "=$flow") ||
+		strings.Contains(trimmed, "$.pathParams")
 }
 
 func testResultSummaries(results []contracts.TestResult) []string {

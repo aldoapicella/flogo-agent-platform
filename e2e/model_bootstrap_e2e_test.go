@@ -135,7 +135,11 @@ func startAgentPTY(t *testing.T, workdir string, extraEnv []string, args ...stri
 	t.Helper()
 	cmd := exec.Command(agentBinary(t), args...)
 	cmd.Dir = workdir
-	cmd.Env = mergeEnv(os.Environ(), extraEnv)
+	env := mergeEnv(os.Environ(), extraEnv)
+	if !envContainsKey(env, "TERM") || strings.TrimSpace(envValue(env, "TERM")) == "" {
+		env = mergeEnv(env, []string{"TERM=xterm-256color"})
+	}
+	cmd.Env = env
 	tty, err := pty.Start(cmd)
 	if err != nil {
 		t.Fatalf("start PTY process: %v", err)
@@ -145,6 +149,29 @@ func startAgentPTY(t *testing.T, workdir string, extraEnv []string, args ...stri
 		_, _ = io.Copy(buffer, tty)
 	}()
 	return &ptyProcess{cmd: cmd, tty: tty, output: buffer}
+}
+
+func envContainsKey(env []string, key string) bool {
+	for _, item := range env {
+		parts := strings.SplitN(item, "=", 2)
+		if parts[0] == key {
+			return true
+		}
+	}
+	return false
+}
+
+func envValue(env []string, key string) string {
+	for _, item := range env {
+		parts := strings.SplitN(item, "=", 2)
+		if parts[0] == key {
+			if len(parts) == 2 {
+				return parts[1]
+			}
+			return ""
+		}
+	}
+	return ""
 }
 
 func waitForPTYOutput(t *testing.T, proc *ptyProcess, want string, timeout time.Duration) {

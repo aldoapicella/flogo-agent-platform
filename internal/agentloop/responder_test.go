@@ -97,6 +97,66 @@ func TestResponderUsesDeterministicApprovalSummary(t *testing.T) {
 	}
 }
 
+func TestResponderUsesFocusedDiffExcerpt(t *testing.T) {
+	snapshot := &contracts.SessionSnapshot{
+		Status:       contracts.SessionStatusWaitingApproval,
+		LastTurnKind: "repair",
+		LastStepResults: []contracts.TurnStepResult{
+			{Type: contracts.TurnStepShowDiff, Status: contracts.TurnStepStatusCompleted},
+		},
+		LastReport: &contracts.RunReport{
+			Outcome: contracts.RunOutcomeReady,
+			Messages: []string{
+				"normalized flowURI at $.triggers[0].handlers[0].action.settings.flowURI",
+				`replaced invalid handler action input scope at $.triggers[0].handlers[0].action.input.message with "=$.pathParams.val"`,
+				"removed inline handler action id \"runFlow\" at $.triggers[0].handlers[0].action.id",
+			},
+			PatchPlan: &contracts.PatchPlan{
+				UnifiedDiff: `--- before/flogo.json
++++ after/flogo.json
+@@
+-              {
+-                "settings": {
+-                  "flowURI": "main"
+-                },
+-                "id": "runFlow",
+-                "input": {
+-                  "message": "$flow.body"
+-                }
+-              }
++              {
++                "input": {
++                  "message": "=$.pathParams.val"
++                },
++                "settings": {
++                  "flowURI": "res://flow:main"
++                }
++              }`,
+			},
+		},
+		PendingApproval: &contracts.PendingApproval{
+			Summary: "review the proposed patch before applying",
+			PatchPlan: &contracts.PatchPlan{
+				UnifiedDiff: "--- before\n+++ after",
+			},
+		},
+	}
+
+	text := NewResponder(nil).ComposeTurnResponse(context.Background(), snapshot)
+	if !strings.Contains(text, "Semantic changes:") {
+		t.Fatalf("expected semantic diff heading, got %q", text)
+	}
+	if strings.Contains(text, `-              {`) {
+		t.Fatalf("expected focused semantic excerpt, got %q", text)
+	}
+	if !strings.Contains(text, `"flowURI": "res://flow:main"`) {
+		t.Fatalf("expected flowURI line in focused diff excerpt, got %q", text)
+	}
+	if !strings.Contains(text, `"message": "=$.pathParams.val"`) {
+		t.Fatalf("expected mapping line in focused diff excerpt, got %q", text)
+	}
+}
+
 type responderFakeModel struct {
 	text  string
 	model string
