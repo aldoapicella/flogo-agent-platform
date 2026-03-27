@@ -3,6 +3,7 @@ package agentloop
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/aldoapicella/flogo-agent-platform/internal/contracts"
@@ -18,6 +19,11 @@ func NewResponder(modelClient model.Client) *Responder {
 }
 
 func (r *Responder) ComposeTurnResponse(ctx context.Context, snapshot *contracts.SessionSnapshot) string {
+	deterministic := strings.TrimSpace(composeDeterministicTurnResponse(snapshot))
+	if deterministic != "" {
+		return deterministic
+	}
+
 	trace := renderTurnSummary(snapshot)
 	if r == nil || r.modelClient == nil || snapshot == nil {
 		return trace
@@ -40,6 +46,126 @@ Do not use markdown fences.`),
 	}
 
 	return strings.TrimSpace(response.Text)
+}
+
+func composeDeterministicTurnResponse(snapshot *contracts.SessionSnapshot) string {
+	if snapshot == nil {
+		return ""
+	}
+	if snapshot.PendingApproval != nil && snapshot.PendingApproval.PatchPlan != nil {
+		if lastStepType(snapshot) == contracts.TurnStepShowDiff {
+			return composePendingDiffResponse(snapshot)
+		}
+		return composePendingPatchResponse(snapshot)
+	}
+	if snapshot.LastTurnKind == "approval" && snapshot.LastReport != nil {
+		return composeApprovalCompletionResponse(snapshot)
+	}
+	if snapshot.LastReport != nil && snapshot.Status == contracts.SessionStatusBlocked {
+		return composeBlockedResponse(snapshot)
+	}
+	return ""
+}
+
+func composePendingPatchResponse(snapshot *contracts.SessionSnapshot) string {
+	report := snapshot.LastReport
+	if report == nil || report.PatchPlan == nil {
+		return ""
+	}
+
+	var parts []string
+	issues := validationIssueSummaries(report.Evidence.ValidationResult, 4)
+	if len(issues) > 0 {
+		parts = append(parts, "I found these blocking issues:\n- "+strings.Join(issues, "\n- "))
+	}
+
+	changes := patchChangeSummaries(report, 4)
+	if len(changes) > 0 {
+		parts = append(parts, "I prepared this patch:\n- "+strings.Join(changes, "\n- "))
+	}
+
+	if next := strings.TrimSpace(report.NextAction); next != "" {
+		parts = append(parts, "Next: "+next+".")
+	} else {
+		parts = append(parts, "Next: review the proposed patch before applying it.")
+	}
+
+	return strings.Join(parts, "\n\n")
+}
+
+func composePendingDiffResponse(snapshot *contracts.SessionSnapshot) string {
+	report := snapshot.LastReport
+	if report == nil || report.PatchPlan == nil {
+		return "The patch is still waiting for your approval."
+	}
+
+	changes := patchChangeSummaries(report, 4)
+	snippet := compactDiffSnippet(report.PatchPlan.UnifiedDiff, 8)
+
+	var builder strings.Builder
+	builder.WriteString("The patch is still waiting for your approval.\n")
+	if len(changes) > 0 {
+		builder.WriteString("\nKey changes:\n- ")
+		builder.WriteString(strings.Join(changes, "\n- "))
+		builder.WriteByte('\n')
+	}
+	if snippet != "" {
+		builder.WriteString("\nDiff excerpt:\n")
+		builder.WriteString(snippet)
+		builder.WriteByte('\n')
+	}
+	builder.WriteString("\nApprove the pending patch when you want me to apply it.")
+	return strings.TrimSpace(builder.String())
+}
+
+func composeApprovalCompletionResponse(snapshot *contracts.SessionSnapshot) string {
+	report := snapshot.LastReport
+	if report == nil {
+		return ""
+	}
+
+	lines := []string{"I applied the patch you approved."}
+	if report.Evidence.ValidationResult.Passed {
+		lines = append(lines, "Validation now passes.")
+	}
+	if report.Evidence.BuildResult != nil {
+		if report.Evidence.BuildResult.ExitCode == 0 {
+			lines = append(lines, "The generated app built successfully.")
+		} else {
+			lines = append(lines, fmt.Sprintf("The build still failed with exit code %d.", report.Evidence.BuildResult.ExitCode))
+		}
+	}
+
+	tests := testResultSummaries(report.Evidence.TestResults)
+	if len(tests) > 0 {
+		lines = append(lines, "Verification summary:\n- "+strings.Join(tests, "\n- "))
+	}
+
+	if next := strings.TrimSpace(report.NextAction); next != "" {
+		lines = append(lines, "Next: "+next+".")
+	}
+	return strings.Join(lines, "\n\n")
+}
+
+func composeBlockedResponse(snapshot *contracts.SessionSnapshot) string {
+	report := snapshot.LastReport
+	if report == nil {
+		return ""
+	}
+
+	var parts []string
+	issues := validationIssueSummaries(report.Evidence.ValidationResult, 4)
+	if len(issues) > 0 {
+		parts = append(parts, "The run is blocked by:\n- "+strings.Join(issues, "\n- "))
+	}
+	failures := failingTestSummaries(report.Evidence.TestResults)
+	if len(failures) > 0 {
+		parts = append(parts, "Verification is still blocked:\n- "+strings.Join(failures, "\n- "))
+	}
+	if next := strings.TrimSpace(report.NextAction); next != "" {
+		parts = append(parts, "Next: "+next+".")
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func buildResponderPrompt(snapshot *contracts.SessionSnapshot) string {
@@ -70,7 +196,11 @@ func buildResponderPrompt(snapshot *contracts.SessionSnapshot) string {
 			builder.WriteString(fmt.Sprintf("- Patch safe: %t\n", snapshot.LastReport.PatchPlan.Safe))
 		}
 		for _, test := range snapshot.LastReport.Evidence.TestResults {
-			builder.WriteString(fmt.Sprintf("- Test %s passed=%t skipped=%t\n", test.Name, test.Passed, test.Skipped))
+			builder.WriteString(fmt.Sprintf("- Test %s passed=%t skipped=%t", test.Name, test.Passed, test.Skipped))
+			if test.SkipReason != "" {
+				builder.WriteString(" reason=" + test.SkipReason)
+			}
+			builder.WriteByte('\n')
 		}
 	}
 
@@ -104,7 +234,7 @@ func buildResponderPrompt(snapshot *contracts.SessionSnapshot) string {
 func appendValidationSummary(builder *strings.Builder, validation contracts.ValidationResult) {
 	appendIssue := func(prefix string, issues []contracts.ValidationIssue) {
 		for idx, issue := range issues {
-			if idx >= 2 {
+			if idx >= 4 {
 				break
 			}
 			builder.WriteString(fmt.Sprintf("- %s %s: %s\n", prefix, issue.RuleID, issue.Message))
@@ -112,6 +242,196 @@ func appendValidationSummary(builder *strings.Builder, validation contracts.Vali
 	}
 	appendIssue("Schema issue", validation.SchemaIssues)
 	appendIssue("Semantic issue", validation.SemanticIssues)
+}
+
+func validationIssueSummaries(validation contracts.ValidationResult, limit int) []string {
+	issues := make([]contracts.ValidationIssue, 0, len(validation.SchemaIssues)+len(validation.SemanticIssues))
+	for _, issue := range validation.SchemaIssues {
+		if !strings.EqualFold(issue.Severity, "warning") {
+			issues = append(issues, issue)
+		}
+	}
+	for _, issue := range validation.SemanticIssues {
+		if !strings.EqualFold(issue.Severity, "warning") {
+			issues = append(issues, issue)
+		}
+	}
+	if len(issues) == 0 {
+		return nil
+	}
+	sort.SliceStable(issues, func(i, j int) bool {
+		if issues[i].RuleID == issues[j].RuleID {
+			return issues[i].JSONPath < issues[j].JSONPath
+		}
+		return issues[i].RuleID < issues[j].RuleID
+	})
+	if limit > 0 && len(issues) > limit {
+		issues = issues[:limit]
+	}
+	out := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		out = append(out, issue.Message)
+	}
+	return out
+}
+
+func patchChangeSummaries(report *contracts.RunReport, limit int) []string {
+	if report == nil {
+		return nil
+	}
+	var changes []string
+	seen := map[string]struct{}{}
+	for _, note := range report.Messages {
+		summary := humanizePatchNote(note)
+		if summary == "" {
+			continue
+		}
+		if _, ok := seen[summary]; ok {
+			continue
+		}
+		seen[summary] = struct{}{}
+		changes = append(changes, summary)
+	}
+	if report.PatchPlan != nil {
+		for _, summary := range diffHighlights(report.PatchPlan.UnifiedDiff) {
+			if _, ok := seen[summary]; ok {
+				continue
+			}
+			seen[summary] = struct{}{}
+			changes = append(changes, summary)
+		}
+	}
+	if limit > 0 && len(changes) > limit {
+		changes = changes[:limit]
+	}
+	return changes
+}
+
+func humanizePatchNote(note string) string {
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return ""
+	}
+	switch {
+	case strings.Contains(note, "normalized flowURI"):
+		return "normalized the handler flowURI to use the official res://flow:<id> form"
+	case strings.Contains(note, "removed inline handler action id"):
+		return "removed the inline handler action id from the embedded handler action"
+	case strings.Contains(note, "replaced invalid handler action input scope"):
+		if idx := strings.LastIndex(note, ` with "`); idx != -1 {
+			replacement := strings.TrimSuffix(strings.TrimPrefix(note[idx+6:], `"`), `"`)
+			return fmt.Sprintf("replaced the invalid handler action input scope with %s", replacement)
+		}
+		return "replaced the invalid handler action input scope with trigger data"
+	case strings.Contains(note, "prefixed mapping expression"):
+		return "added the required '=' prefix to a mapping expression"
+	case strings.Contains(note, "renamed flow input mapping"):
+		return note
+	default:
+		return note
+	}
+}
+
+func diffHighlights(unifiedDiff string) []string {
+	lines := strings.Split(unifiedDiff, "\n")
+	var flowBefore, flowAfter string
+	var messageBefore, messageAfter string
+	var idRemoved string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, `-"flowURI":`):
+			flowBefore = strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))
+		case strings.HasPrefix(trimmed, `+"flowURI":`):
+			flowAfter = strings.TrimSpace(strings.TrimPrefix(trimmed, "+"))
+		case strings.HasPrefix(trimmed, `-"message":`):
+			messageBefore = strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))
+		case strings.HasPrefix(trimmed, `+"message":`):
+			messageAfter = strings.TrimSpace(strings.TrimPrefix(trimmed, "+"))
+		case strings.HasPrefix(trimmed, `-"id":`):
+			idRemoved = strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))
+		}
+	}
+
+	var out []string
+	if flowBefore != "" || flowAfter != "" {
+		out = append(out, fmt.Sprintf("flowURI changed from %s to %s", fallbackDiffValue(flowBefore), fallbackDiffValue(flowAfter)))
+	}
+	if idRemoved != "" {
+		out = append(out, fmt.Sprintf("removed %s from the embedded handler action", fallbackDiffValue(idRemoved)))
+	}
+	if messageBefore != "" || messageAfter != "" {
+		out = append(out, fmt.Sprintf("message input changed from %s to %s", fallbackDiffValue(messageBefore), fallbackDiffValue(messageAfter)))
+	}
+	return out
+}
+
+func fallbackDiffValue(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "<none>"
+	}
+	return text
+}
+
+func compactDiffSnippet(unifiedDiff string, limit int) string {
+	if limit <= 0 {
+		limit = 8
+	}
+	lines := strings.Split(unifiedDiff, "\n")
+	selected := make([]string, 0, limit)
+	for _, line := range lines {
+		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "@@") {
+			continue
+		}
+		if !strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "-") {
+			continue
+		}
+		selected = append(selected, line)
+		if len(selected) >= limit {
+			break
+		}
+	}
+	return strings.Join(selected, "\n")
+}
+
+func testResultSummaries(results []contracts.TestResult) []string {
+	out := make([]string, 0, len(results))
+	for _, test := range results {
+		switch {
+		case test.Skipped && test.SkipReason != "":
+			out = append(out, fmt.Sprintf("%s skipped: %s", test.Name, test.SkipReason))
+		case test.Skipped:
+			out = append(out, fmt.Sprintf("%s skipped", test.Name))
+		case test.Passed:
+			out = append(out, fmt.Sprintf("%s passed", test.Name))
+		default:
+			out = append(out, fmt.Sprintf("%s failed (exit code %d)", test.Name, test.Result.ExitCode))
+		}
+	}
+	return out
+}
+
+func failingTestSummaries(results []contracts.TestResult) []string {
+	out := make([]string, 0, len(results))
+	for _, test := range results {
+		switch {
+		case test.Skipped && test.SkipReason != "":
+			out = append(out, fmt.Sprintf("%s skipped: %s", test.Name, test.SkipReason))
+		case test.Skipped:
+			out = append(out, fmt.Sprintf("%s skipped", test.Name))
+		case !test.Passed:
+			out = append(out, fmt.Sprintf("%s failed (exit code %d)", test.Name, test.Result.ExitCode))
+		}
+	}
+	return out
+}
+
+func lastStepType(snapshot *contracts.SessionSnapshot) contracts.TurnStepType {
+	if snapshot == nil || len(snapshot.LastStepResults) == 0 {
+		return ""
+	}
+	return snapshot.LastStepResults[len(snapshot.LastStepResults)-1].Type
 }
 
 func latestCitations(snapshot *contracts.SessionSnapshot) []contracts.SourceCitation {

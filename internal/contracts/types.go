@@ -242,10 +242,11 @@ type ToolResult struct {
 }
 
 type TestResult struct {
-	Name    string     `json:"name"`
-	Result  ToolResult `json:"result"`
-	Passed  bool       `json:"passed"`
-	Skipped bool       `json:"skipped"`
+	Name       string     `json:"name"`
+	Result     ToolResult `json:"result"`
+	Passed     bool       `json:"passed"`
+	Skipped    bool       `json:"skipped"`
+	SkipReason string     `json:"skipReason,omitempty"`
 }
 
 type BuildTestEvidence struct {

@@ -27,6 +27,107 @@ func TestUnsupportedExecutableTestMode(t *testing.T) {
 	}
 }
 
+func TestBuildAndTestMarksUnsupportedFlowListSkippedWithReason(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repo")
+	binDir := filepath.Join(root, "bin")
+	workspaceRoot := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(repoPath, "flogo.json"), []byte(`{
+  "name": "demo",
+  "type": "flogo:app",
+  "version": "1.0.0",
+  "description": "demo",
+  "imports": [
+    "github.com/project-flogo/contrib/trigger/rest",
+    "github.com/project-flogo/flow"
+  ],
+  "properties": [],
+  "channels": [],
+  "triggers": [],
+  "appModel": "1.1.0",
+  "resources": [
+    {
+      "id": "flow:main",
+      "data": {
+        "metadata": {
+          "input": []
+        },
+        "tasks": [],
+        "links": []
+      }
+    }
+  ],
+  "actions": []
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	flogoScript := filepath.Join(binDir, "flogo")
+	script := `#!/bin/sh
+set -eu
+if [ "$1" = "list" ] && [ "$2" = "--orphaned" ]; then
+  printf '[]\n'
+  exit 0
+fi
+if [ "$1" = "create" ]; then
+  mkdir -p "$4"
+  cp "$3" "$4/flogo.json"
+  exit 0
+fi
+if [ "$1" = "build" ]; then
+  mkdir -p "$PWD/bin"
+  cat > "$PWD/bin/demo" <<'EOF'
+#!/bin/sh
+if [ "$1" = "-test" ]; then
+  echo "flag provided but not defined: -test" >&2
+  exit 2
+fi
+sleep 5
+EOF
+  chmod +x "$PWD/bin/demo"
+  exit 0
+fi
+exit 0
+`
+	if err := os.WriteFile(flogoScript, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	verifier := NewVerifier(tools.NewFlogoClient(sandbox.NewLocalRunner(filepath.Join(root, "artifacts"))))
+	buildResult, results, err := verifier.BuildAndTest(ctx, repoPath, workspaceRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if buildResult == nil || buildResult.ExitCode != 0 {
+		t.Fatalf("expected build result, got %+v", buildResult)
+	}
+	var found contracts.TestResult
+	ok := false
+	for _, result := range results {
+		if result.Name == "flow-list" {
+			found = result
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		t.Fatalf("expected flow-list result, got %+v", results)
+	}
+	if !found.Skipped || found.SkipReason == "" {
+		t.Fatalf("expected skipped flow-list with reason, got %+v", found)
+	}
+}
+
 func TestBuildAndTestBlocksOnStartupSmokeFailure(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

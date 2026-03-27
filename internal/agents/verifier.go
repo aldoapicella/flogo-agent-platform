@@ -122,6 +122,7 @@ func (v *Verifier) BuildAndTest(ctx context.Context, repoPath string, workspaceR
 		}
 		if unsupportedExecutableTestMode(testResult) {
 			unitResult.Skipped = true
+			unitResult.SkipReason = "the built executable does not support Flogo -test flags"
 		}
 		results = append(results, unitResult)
 		return &buildResult, results, nil
@@ -138,6 +139,7 @@ func (v *Verifier) BuildAndTest(ctx context.Context, repoPath string, workspaceR
 	}
 	if unsupportedExecutableTestMode(listFlows) {
 		flowListResult.Skipped = true
+		flowListResult.SkipReason = "the built executable does not support Flogo -test flags"
 	}
 	results = append(results, flowListResult)
 	if flowListResult.Skipped {
