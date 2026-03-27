@@ -85,7 +85,7 @@ That manual path is mainly for developers. For normal release installs, `flogo-a
 flogo-agent --repo /path/to/flogo-repo
 ```
 
-That command auto-loads `.env` from the current repo or working directory, auto-starts or reuses the local daemon, resumes the most recent session for the repo when possible, and falls back to an embedded official-source manifest when you are not running inside this source checkout.
+That command auto-loads `.env` from the current repo or working directory, auto-starts or reuses the local daemon, resumes the most recent session for the repo when possible, and falls back to an embedded first-party canonical-source manifest when you are not running inside this source checkout.
 
 If no model API key is available from the shell, `.env`, or stored user config, the app prompts for it on first launch and stores it in your user config for future runs.
 
@@ -199,6 +199,7 @@ Released builds check GitHub Releases on startup. If a newer stable release exis
 ## Documentation
 
 - [Architecture](./docs/architecture.md)
+- [Canonical Reference Corpus](./docs/sources/canonical-reference-corpus.md)
 - [Configuration](./docs/configuration.md)
 - [Testing](./docs/testing.md)
 - [Troubleshooting](./docs/troubleshooting.md)
@@ -208,14 +209,7 @@ Released builds check GitHub Releases on startup. If a newer stable release exis
 
 ## Official Flogo Sources
 
-The platform is explicitly grounded in:
-
-- https://tibcosoftware.github.io/flogo/development/apps/app-configuration/
-- https://tibcosoftware.github.io/flogo/development/flows/io-parameters/
-- https://tibcosoftware.github.io/flogo/labs/flogo-cli/
-- https://tibcosoftware.github.io/flogo/labs/helloworld/
-- https://github.com/project-flogo/core
-- https://github.com/project-flogo/flow
+The indexed source-of-truth corpus is first-party only and is defined in [Canonical Reference Corpus](./docs/sources/canonical-reference-corpus.md). The runtime manifest in [docs/sources/manifest.json](./docs/sources/manifest.json) mirrors that corpus and excludes non-canonical local material such as the research report.
 
 The enforced source-of-truth policy is in [AGENTS.md](./AGENTS.md).
 

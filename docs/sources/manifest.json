@@ -1,124 +1,186 @@
 {
   "sources": [
     {
+      "id": "flogo-introduction",
+      "title": "Project Flogo Introduction",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/introduction/",
+      "tags": ["official", "canonical", "tier-0", "strongly-recommended", "docs", "overview", "ecosystem"]
+    },
+    {
       "id": "flogo-app-configuration",
       "title": "Project Flogo App Configuration",
       "type": "web",
       "location": "https://tibcosoftware.github.io/flogo/development/apps/app-configuration/",
-      "tags": [
-        "official",
-        "docs",
-        "app-model",
-        "flogo-json"
-      ]
+      "tags": ["official", "canonical", "tier-0", "required", "docs", "app-model", "flogo-json"]
+    },
+    {
+      "id": "flogo-flows",
+      "title": "Project Flogo Flows",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/development/flows/",
+      "tags": ["official", "canonical", "tier-0", "strongly-recommended", "docs", "flows", "flow-concepts"]
     },
     {
       "id": "flogo-io-parameters",
       "title": "Project Flogo Flow Input Output Params",
       "type": "web",
       "location": "https://tibcosoftware.github.io/flogo/development/flows/io-parameters/",
-      "tags": [
-        "official",
-        "docs",
-        "flow",
-        "io-parameters",
-        "mapping"
-      ]
+      "tags": ["official", "canonical", "tier-0", "required", "docs", "flows", "flow-io", "inputs", "outputs"]
     },
     {
-      "id": "flogo-cli-docs",
-      "title": "Building apps with Flogo CLI",
+      "id": "flogo-mapping",
+      "title": "Project Flogo Mappings",
       "type": "web",
-      "location": "https://tibcosoftware.github.io/flogo/labs/flogo-cli/",
-      "tags": [
-        "official",
-        "docs",
-        "cli",
-        "build",
-        "create"
-      ]
+      "location": "https://tibcosoftware.github.io/flogo/development/flows/mapping/",
+      "tags": ["official", "canonical", "tier-0", "required", "docs", "flows", "mappings", "expressions", "resolvers"]
     },
     {
-      "id": "flogo-helloworld",
-      "title": "My First App Hello World",
+      "id": "flogo-iterators",
+      "title": "Project Flogo Iterator",
       "type": "web",
-      "location": "https://tibcosoftware.github.io/flogo/labs/helloworld/",
-      "tags": [
-        "official",
-        "docs",
-        "example",
-        "hello-world"
-      ]
+      "location": "https://tibcosoftware.github.io/flogo/development/flows/iterators/",
+      "tags": ["official", "canonical", "tier-0", "strongly-recommended", "docs", "flows", "iterators"]
+    },
+    {
+      "id": "flogo-cli-reference",
+      "title": "Project Flogo CLI Reference",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/flogo-cli/flogo-cli/",
+      "tags": ["official", "canonical", "tier-0", "required", "docs", "cli", "build", "create", "imports", "install", "update"]
     },
     {
       "id": "project-flogo-core",
       "title": "project-flogo/core",
       "type": "web",
       "location": "https://github.com/project-flogo/core",
-      "tags": [
-        "official",
-        "github",
-        "core"
-      ]
-    },
-    {
-      "id": "project-flogo-flow",
-      "title": "project-flogo/flow",
-      "type": "web",
-      "location": "https://github.com/project-flogo/flow",
-      "tags": [
-        "official",
-        "github",
-        "flow"
-      ]
+      "tags": ["official", "canonical", "tier-1", "required", "github", "core", "runtime"]
     },
     {
       "id": "project-flogo-core-schema",
       "title": "project-flogo/core schema.json",
       "type": "web",
       "location": "https://raw.githubusercontent.com/project-flogo/core/master/schema.json",
-      "tags": [
-        "official",
-        "github",
-        "schema",
-        "app-model"
-      ]
+      "tags": ["official", "canonical", "tier-1", "strongly-recommended", "github", "schema", "app-model", "flogo-json"]
     },
     {
       "id": "project-flogo-core-example",
       "title": "project-flogo/core examples/engine/flogo.json",
       "type": "web",
       "location": "https://raw.githubusercontent.com/project-flogo/core/master/examples/engine/flogo.json",
-      "tags": [
-        "official",
-        "github",
-        "example",
-        "flogo-json"
-      ]
+      "tags": ["official", "canonical", "tier-1", "strongly-recommended", "github", "example", "app-model", "flogo-json"]
+    },
+    {
+      "id": "project-flogo-flow",
+      "title": "project-flogo/flow",
+      "type": "web",
+      "location": "https://github.com/project-flogo/flow",
+      "tags": ["official", "canonical", "tier-1", "required", "github", "flow", "engine", "runtime"]
     },
     {
       "id": "project-flogo-flow-example",
       "title": "project-flogo/flow examples/log-flogo.json",
       "type": "web",
       "location": "https://raw.githubusercontent.com/project-flogo/flow/master/examples/log-flogo.json",
-      "tags": [
-        "official",
-        "github",
-        "example",
-        "flow"
-      ]
+      "tags": ["official", "canonical", "tier-1", "strongly-recommended", "github", "example", "flow", "mappings"]
     },
     {
-      "id": "research-report",
-      "title": "Building an LLM-Powered Terminal Agent for TIBCO Flogo",
-      "type": "local_file",
-      "location": "docs/research-report.md",
-      "tags": [
-        "research",
-        "report",
-        "flogo",
-        "architecture"
-      ]
+      "id": "project-flogo-contrib",
+      "title": "project-flogo/contrib",
+      "type": "web",
+      "location": "https://github.com/project-flogo/contrib",
+      "tags": ["official", "canonical", "tier-1", "required", "github", "contrib", "triggers", "activities", "functions"]
+    },
+    {
+      "id": "project-flogo-flogo-web",
+      "title": "project-flogo/flogo-web",
+      "type": "web",
+      "location": "https://github.com/project-flogo/flogo-web",
+      "tags": ["official", "canonical", "tier-1", "strongly-recommended", "github", "webui", "editor", "generated-artifacts"]
+    },
+    {
+      "id": "tibco-flogo",
+      "title": "TIBCOSoftware/flogo",
+      "type": "web",
+      "location": "https://github.com/TIBCOSoftware/flogo",
+      "tags": ["official", "canonical", "tier-1", "optional", "github", "legacy-upstream", "ecosystem", "examples"]
+    },
+    {
+      "id": "tibco-flogo-cli",
+      "title": "TIBCOSoftware/flogo-cli",
+      "type": "web",
+      "location": "https://github.com/TIBCOSoftware/flogo-cli",
+      "tags": ["official", "canonical", "tier-1", "optional", "github", "legacy-cli", "cli", "history"]
+    },
+    {
+      "id": "flogo-cli-lab",
+      "title": "Building apps with Flogo CLI",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/labs/flogo-cli/",
+      "tags": ["official", "canonical", "tier-2", "strongly-recommended", "docs", "lab", "cli", "build", "create"]
+    },
+    {
+      "id": "flogo-helloworld",
+      "title": "My First App Hello World",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/labs/helloworld/",
+      "tags": ["official", "canonical", "tier-2", "required", "docs", "lab", "example", "hello-world", "rest"]
+    },
+    {
+      "id": "flogo-webui-functions",
+      "title": "Project Flogo Web UI Functions Catalog",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/development/webui/functions/",
+      "tags": ["official", "canonical", "tier-3", "strongly-recommended", "docs", "webui", "functions", "mappings"]
+    },
+    {
+      "id": "flogo-webui-triggers",
+      "title": "Project Flogo Web UI Trigger Catalog",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/development/webui/triggers/",
+      "tags": ["official", "canonical", "tier-3", "strongly-recommended", "docs", "webui", "triggers"]
+    },
+    {
+      "id": "flogo-rest-trigger",
+      "title": "Project Flogo REST Trigger",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/development/webui/triggers/rest/",
+      "tags": ["official", "canonical", "tier-3", "required", "docs", "trigger-rest", "http", "handlers", "reply"]
+    },
+    {
+      "id": "flogo-rest-activity",
+      "title": "Project Flogo REST Activity",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/development/webui/activities/rest/",
+      "tags": ["official", "canonical", "tier-3", "strongly-recommended", "docs", "activity-rest", "http", "outbound"]
+    },
+    {
+      "id": "flogo-app-trigger",
+      "title": "Project Flogo App Trigger",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/development/webui/triggers/app/",
+      "tags": ["official", "canonical", "tier-3", "strongly-recommended", "docs", "trigger-app", "lifecycle", "startup", "shutdown"]
+    },
+    {
+      "id": "flogo-timer-trigger",
+      "title": "Project Flogo Timer Trigger",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/development/webui/triggers/timer/",
+      "tags": ["official", "canonical", "tier-3", "strongly-recommended", "docs", "trigger-timer", "scheduling", "jobs"]
+    },
+    {
+      "id": "flogo-kafka-trigger",
+      "title": "Project Flogo Kafka Trigger",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/development/webui/triggers/kafka/",
+      "tags": ["official", "canonical", "tier-3", "strongly-recommended", "docs", "trigger-kafka", "kafka", "events"]
+    },
+    {
+      "id": "flogo-kafka-activity",
+      "title": "Project Flogo Kafka Activity",
+      "type": "web",
+      "location": "https://tibcosoftware.github.io/flogo/development/webui/activities/kafka/",
+      "tags": ["official", "canonical", "tier-3", "strongly-recommended", "docs", "activity-kafka", "kafka", "producer"]
     }
   ]
 }

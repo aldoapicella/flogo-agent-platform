@@ -9,7 +9,7 @@
   - auto-loads `.env`
   - auto-starts or reuses the local daemon
   - auto-resumes the latest session for the repo when possible
-  - uses an embedded default official-source manifest when no local manifest is available
+  - uses an embedded default first-party canonical-source manifest when no local manifest is available
 - `flogo-agent daemon`
   - starts the local HTTP daemon
 - `flogo-agent chat`
@@ -49,7 +49,7 @@
 - `--state-dir`
   - state root for SQLite, artifacts, generated workspaces, and sessions
 - `--sources`
-  - explicit path to the knowledge manifest
+  - explicit path to the first-party knowledge manifest
 - `--sandbox`
   - `local` or `isolated`
 - `--sandbox-image`
@@ -98,6 +98,13 @@ If `OPENAI_API_KEY` is unset, interactive agent startup prompts for a model API 
 - `.env` in the resolved repo root is then loaded automatically
 - stored user credentials are loaded after `.env` when `OPENAI_API_KEY` is still unset
 - existing shell environment variables win over `.env` values
+
+### Canonical reference corpus
+
+- the default repo manifest is `docs/sources/manifest.json`
+- the embedded fallback manifest contains the same first-party canonical corpus
+- the corpus definition and source usage rules are documented in `docs/sources/canonical-reference-corpus.md`
+- non-canonical local documents such as `docs/research-report.md` are not part of the indexed default corpus
 
 ### Stored user credentials
 

@@ -164,7 +164,7 @@ Model candidates are reparsed and revalidated before use. They are only accepted
 
 ## Knowledge and Citations
 
-Knowledge is stored in SQLite FTS. Official sources are indexed from an explicit manifest when provided, from `docs/sources/manifest.json` when running inside the source repo, or from an embedded default manifest when the installed binary is running elsewhere. Official sources are biased ahead of non-official sources in retrieval. Validation issues and repairs attach top citations into reports and chat responses.
+Knowledge is stored in SQLite FTS. First-party canonical sources are indexed from an explicit manifest when provided, from `docs/sources/manifest.json` when running inside the source repo, or from an embedded default manifest when the installed binary is running elsewhere. The canonical corpus is documented in `docs/sources/canonical-reference-corpus.md`, and retrieval is intentionally grounded in those first-party docs, repos, labs, and trigger/activity references rather than local research notes. Validation issues and repairs attach top citations into reports and chat responses.
 
 ## Repo Ops
 
