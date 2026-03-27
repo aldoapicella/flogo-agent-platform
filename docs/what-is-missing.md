@@ -25,8 +25,9 @@ The chat loop is now model-planned, but it is still narrower than the research t
 Needed work:
 
 - stream assistant text and tool output incrementally instead of only snapshot-level updates
-- let the model choose among richer structured tools instead of routing mostly through `Analyze` and `Run`
-- persist richer turn state: tool calls, partial plans, intermediate observations
+- expand the new structured inspection steps beyond the current descriptor/runtime/build/local-testing path
+- let the model choose among richer structured tools more consistently instead of still falling back to the coarse repair/build/test pipeline for many tasks
+- persist richer turn state beyond the current step observations: partial plans, intermediate tool progress, and longer-lived working memory
 - add explicit slash-command handling without relying on text heuristics
 
 Acceptance target:

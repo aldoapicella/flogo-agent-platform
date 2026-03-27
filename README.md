@@ -14,6 +14,7 @@ The current product is a working daemon-backed prototype with:
 - undo for agent-authored file changes inside a session
 - schema and semantic validation for `flogo.json`
 - model-backed planning, repair, and conversational responses
+- observation-driven answers for operational questions like local run/test guidance
 - deterministic validation, safety checks, and execution
 - Flogo build, flow test, and `.flogotest` unit-test execution
 - local git repo operations
@@ -29,7 +30,7 @@ From the user perspective, the loop is:
 1. run `flogo-agent` in a Flogo repo
 2. let the client auto-load `.env`, load any stored user credential, prompt for a model API key on first run when needed, auto-start or reuse the local daemon, and resume the latest repo session
 3. chat with the agent about a Flogo repo
-4. let the agent inspect, validate, propose repairs, build, and test
+4. let the agent inspect, validate, explain routes/ports/local test steps, propose repairs, build, and test
 5. approve, reject, or undo agent-authored patches in review mode
 6. resume the same session later with transcript, plan, diff, and artifacts preserved
 
@@ -113,6 +114,18 @@ go run ./cmd/flogo-agent chat \
   --mode review \
   --message "repair and verify the app"
 ```
+
+After a successful repair/build pass, you can also ask operational questions like:
+
+```bash
+go run ./cmd/flogo-agent chat \
+  --repo ./testdata/benchmarks/invalid-mapping \
+  --goal "repair and verify this Flogo app" \
+  --mode review \
+  --message "How do I test this locally?"
+```
+
+The current agent will answer from explicit observations such as the REST port, route, built executable path, and whether the generated binary supports Flogo `-test` flags.
 
 ### Launch the TUI
 
@@ -221,6 +234,8 @@ go test ./...
 go build ./cmd/flogo-agent
 go test -tags=integration ./internal/tools
 ```
+
+The default test suite now includes planner/responder/runtime coverage for local operational questions such as "How do I test this locally?" so the conversational path is checked separately from the repair/build/test loop.
 
 Optional live OpenAI conversation smoke:
 

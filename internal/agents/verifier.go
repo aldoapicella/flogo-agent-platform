@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -191,6 +192,83 @@ func (v *Verifier) BuildAndTest(ctx context.Context, repoPath string, workspaceR
 	})
 
 	return &buildResult, results, nil
+}
+
+func (v *Verifier) InspectBuildArtifacts(ctx context.Context, repoPath string, workspaceRoot string) (flogo.BuildArtifactFacts, []contracts.Observation, error) {
+	facts := flogo.BuildArtifactFacts{
+		RepoPath:      repoPath,
+		WorkspacePath: workspaceRoot,
+	}
+	observations := []contracts.Observation{
+		{
+			Kind:    "workspace",
+			Summary: fmt.Sprintf("The generated workspace path is %s.", workspaceRoot),
+			Data: map[string]string{
+				"workspace_path": workspaceRoot,
+			},
+		},
+	}
+
+	if _, err := os.Stat(workspaceRoot); err != nil {
+		if os.IsNotExist(err) {
+			observations = append(observations, contracts.Observation{
+				Kind:    "binary",
+				Summary: "No generated workspace exists yet. Build the app before trying to run it locally.",
+				Data: map[string]string{
+					"workspace_path": workspaceRoot,
+				},
+			})
+			return facts, observations, nil
+		}
+		return facts, observations, err
+	}
+
+	executablePath, err := v.flogoClient.FindExecutable(workspaceRoot)
+	if err != nil {
+		observations = append(observations, contracts.Observation{
+			Kind:    "binary",
+			Summary: fmt.Sprintf("No built executable was found under %s/bin yet.", workspaceRoot),
+			Data: map[string]string{
+				"workspace_path": workspaceRoot,
+			},
+		})
+		return facts, observations, nil
+	}
+
+	facts.ExecutablePath = executablePath
+	observations = append(observations, contracts.Observation{
+		Kind:    "binary",
+		Summary: fmt.Sprintf("The built executable is %s.", executablePath),
+		Data: map[string]string{
+			"path":           executablePath,
+			"start_command":  executablePath,
+			"workspace_path": workspaceRoot,
+		},
+	})
+
+	listFlows, err := v.flogoClient.ListFlows(ctx, executablePath, workspaceRoot)
+	if err != nil {
+		return facts, observations, err
+	}
+	facts.TestSupportKnown = true
+	facts.SupportsTestFlags = listFlows.ExitCode == 0
+	if unsupportedExecutableTestMode(listFlows) {
+		facts.SupportsTestFlags = false
+	}
+
+	summary := "The built executable supports Flogo -test flags."
+	if !facts.SupportsTestFlags {
+		summary = "The built executable does not support Flogo -test flags, so local testing should use startup and trigger-level probes."
+	}
+	observations = append(observations, contracts.Observation{
+		Kind:    "test_support",
+		Summary: summary,
+		Data: map[string]string{
+			"supports_test_flags": strconv.FormatBool(facts.SupportsTestFlags),
+		},
+	})
+
+	return facts, observations, nil
 }
 
 func unsupportedExecutableTestMode(result contracts.ToolResult) bool {

@@ -21,11 +21,11 @@ func NewPlanner(modelClient model.Client) *Planner {
 }
 
 type workspaceFacts struct {
-	RepoPath          string
-	HasFlogoJSON      bool
-	HasFlogoTest      bool
+	RepoPath           string
+	HasFlogoJSON       bool
+	HasFlogoTest       bool
 	HasPendingApproval bool
-	LastOutcome       string
+	LastOutcome        string
 }
 
 func collectWorkspaceFacts(snapshot *contracts.SessionSnapshot) workspaceFacts {
@@ -59,6 +59,10 @@ func (p *Planner) PlanTurn(ctx context.Context, snapshot *contracts.SessionSnaps
 	facts := collectWorkspaceFacts(snapshot)
 	fallback := deterministicPlan(snapshot, userMessage, facts)
 	fallback.Workspace = facts.toMap()
+	if requiresDeterministicPlanning(userMessage, facts) {
+		fallback.Planner = "deterministic"
+		return fallback
+	}
 
 	if p == nil || p.modelClient == nil {
 		fallback.Planner = "deterministic"
@@ -69,6 +73,10 @@ func (p *Planner) PlanTurn(ctx context.Context, snapshot *contracts.SessionSnaps
 Return only valid JSON with no markdown fences and no explanation.
 You must choose from these step types only:
 - inspect_workspace
+- inspect_descriptor
+- inspect_runtime_config
+- inspect_build_artifacts
+- plan_local_testing
 - analyze_flogo
 - create_minimal_app
 - repair_and_verify
@@ -81,6 +89,7 @@ Rules:
 - If the repo has no flogo.json and the user asks to create/bootstrap/start a Flogo app, include create_minimal_app then repair_and_verify.
 - If the repo has no flogo.json and the user asks only to repair, do not invent a descriptor; inspect and explain the missing app instead.
 - If approval is pending and the user asks to approve/reject/show diff/status, choose those steps directly.
+- If the user asks how to run, test, or reach the app locally, prefer inspect_descriptor, inspect_runtime_config, inspect_build_artifacts, and plan_local_testing instead of repair_and_verify.
 - Prefer the smallest number of steps needed to complete the turn.
 - Keep creation scope minimal: a basic REST-triggered app with one main flow.`)
 
@@ -169,6 +178,7 @@ func deterministicPlan(snapshot *contracts.SessionSnapshot, userMessage string, 
 	}
 
 	createRequested := containsAny(normalized, "create", "bootstrap", "new app", "start app", "initialize", "init")
+	localTestRequested := asksForLocalTesting(normalized)
 	executeRequested := containsAny(normalized, "build", "test", "repair", "fix", "apply", "update", "verify", "run")
 
 	if !facts.HasFlogoJSON {
@@ -197,6 +207,18 @@ func deterministicPlan(snapshot *contracts.SessionSnapshot, userMessage string, 
 		}
 	}
 
+	if localTestRequested {
+		return contracts.TurnPlan{
+			GoalSummary: "Determine how to run and locally test the existing Flogo app",
+			Steps: []contracts.TurnStep{
+				{Type: contracts.TurnStepInspectDescriptor, Reason: "inspect flogo.json and flow resources"},
+				{Type: contracts.TurnStepInspectRuntimeConfig, Reason: "extract trigger settings such as ports, methods, and routes"},
+				{Type: contracts.TurnStepInspectBuildArtifacts, Reason: "check for a generated workspace and built executable"},
+				{Type: contracts.TurnStepPlanLocalTesting, Reason: "turn descriptor and build facts into concrete local test steps"},
+			},
+		}
+	}
+
 	if executeRequested {
 		return contracts.TurnPlan{
 			GoalSummary: "Inspect, repair, build, and test the Flogo app",
@@ -215,6 +237,38 @@ func deterministicPlan(snapshot *contracts.SessionSnapshot, userMessage string, 
 			{Type: contracts.TurnStepAnalyzeFlogo, Reason: "explain the current Flogo descriptor state"},
 		},
 	}
+}
+
+func requiresDeterministicPlanning(userMessage string, facts workspaceFacts) bool {
+	normalized := strings.ToLower(strings.TrimSpace(userMessage))
+	if normalized == "" {
+		return true
+	}
+	return asksForLocalTesting(normalized) ||
+		facts.HasPendingApproval && (normalized == "approve" || strings.Contains(normalized, "approve pending") || strings.HasPrefix(normalized, "/approve") ||
+			normalized == "reject" || strings.HasPrefix(normalized, "/reject") ||
+			normalized == "diff" || strings.HasPrefix(normalized, "/diff") || strings.Contains(normalized, "show diff"))
+}
+
+func asksForLocalTesting(normalized string) bool {
+	return containsAny(normalized,
+		"how do i test this locally",
+		"how do i test it locally",
+		"how can i test this locally",
+		"how can i run this locally",
+		"how do i run this locally",
+		"determine how to run and locally test",
+		"what port",
+		"which port",
+		"what route",
+		"which route",
+		"how do i hit",
+		"how do i call",
+		"curl",
+		"test locally",
+		"run locally",
+		"run the app locally",
+	)
 }
 
 func parseTurnPlan(text string) (contracts.TurnPlan, error) {
@@ -252,7 +306,8 @@ func validateTurnPlan(plan contracts.TurnPlan, facts workspaceFacts) error {
 	requiresCreation := false
 	for _, step := range plan.Steps {
 		switch step.Type {
-		case contracts.TurnStepInspectWorkspace, contracts.TurnStepAnalyzeFlogo, contracts.TurnStepCreateMinimalApp,
+		case contracts.TurnStepInspectWorkspace, contracts.TurnStepInspectDescriptor, contracts.TurnStepInspectRuntimeConfig,
+			contracts.TurnStepInspectBuildArtifacts, contracts.TurnStepPlanLocalTesting, contracts.TurnStepAnalyzeFlogo, contracts.TurnStepCreateMinimalApp,
 			contracts.TurnStepRepairAndVerify, contracts.TurnStepApprovePending, contracts.TurnStepRejectPending,
 			contracts.TurnStepShowDiff, contracts.TurnStepShowStatus:
 		default:

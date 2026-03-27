@@ -62,10 +62,7 @@ func (c *Coordinator) HandleUserMessage(ctx context.Context, snapshot *contracts
 
 	plan := c.planner.PlanTurn(ctx, snapshot, content)
 	snapshot.LastTurnPlan = &plan
-	snapshot.LastTurnKind = "repair"
-	if plan.RequiresCreation {
-		snapshot.LastTurnKind = "creation"
-	}
+	snapshot.LastTurnKind = classifyTurnKind(plan)
 	snapshot.LastStepResults = nil
 	appendEvent(snapshot, "planning", fmt.Sprintf("planned %d step(s) via %s", len(plan.Steps), plan.Planner))
 	c.flush(snapshot)
@@ -156,6 +153,14 @@ func (c *Coordinator) executeStep(ctx context.Context, snapshot *contracts.Sessi
 	switch step.Type {
 	case contracts.TurnStepInspectWorkspace:
 		return c.inspectWorkspace(snapshot, step), false, nil
+	case contracts.TurnStepInspectDescriptor:
+		return c.inspectDescriptor(ctx, snapshot, step)
+	case contracts.TurnStepInspectRuntimeConfig:
+		return c.inspectRuntimeConfig(ctx, snapshot, step)
+	case contracts.TurnStepInspectBuildArtifacts:
+		return c.inspectBuildArtifacts(ctx, snapshot, step)
+	case contracts.TurnStepPlanLocalTesting:
+		return c.planLocalTesting(ctx, snapshot, step)
 	case contracts.TurnStepAnalyzeFlogo:
 		return c.analyzeFlogo(ctx, snapshot)
 	case contracts.TurnStepCreateMinimalApp:
@@ -185,6 +190,23 @@ func (c *Coordinator) executeStep(ctx context.Context, snapshot *contracts.Sessi
 			Summary: fmt.Sprintf("unsupported step type %q", step.Type),
 		}, true, nil
 	}
+}
+
+func classifyTurnKind(plan contracts.TurnPlan) string {
+	if plan.RequiresCreation {
+		return "creation"
+	}
+	for _, step := range plan.Steps {
+		switch step.Type {
+		case contracts.TurnStepApprovePending, contracts.TurnStepRejectPending:
+			return "approval"
+		case contracts.TurnStepRepairAndVerify, contracts.TurnStepAnalyzeFlogo:
+			return "repair"
+		case contracts.TurnStepInspectDescriptor, contracts.TurnStepInspectRuntimeConfig, contracts.TurnStepInspectBuildArtifacts, contracts.TurnStepPlanLocalTesting:
+			return "inspection"
+		}
+	}
+	return "conversation"
 }
 
 func (c *Coordinator) inspectWorkspace(snapshot *contracts.SessionSnapshot, step contracts.TurnStep) contracts.TurnStepResult {
@@ -235,6 +257,98 @@ func (c *Coordinator) analyzeFlogo(ctx context.Context, snapshot *contracts.Sess
 		ToolCalls: toolCallsFromReport(report, "analyze_flogo"),
 		Report:    report,
 	}, report.Outcome == contracts.RunOutcomeBlocked, nil
+}
+
+func (c *Coordinator) inspectDescriptor(ctx context.Context, snapshot *contracts.SessionSnapshot, step contracts.TurnStep) (contracts.TurnStepResult, bool, error) {
+	if !hasFlogoJSON(snapshot.RepoPath) {
+		summary := "No flogo.json is present. Create a Flogo app before inspecting the descriptor."
+		return contracts.TurnStepResult{
+			Type:    step.Type,
+			Status:  contracts.TurnStepStatusBlocked,
+			Summary: summary,
+		}, true, nil
+	}
+	bundle, err := c.service.InspectDescriptor(ctx, sessionRequest(snapshot))
+	if err != nil {
+		return contracts.TurnStepResult{}, true, err
+	}
+	appendEvent(snapshot, "inspection", bundle.Summary)
+	return contracts.TurnStepResult{
+		Type:         step.Type,
+		Status:       contracts.TurnStepStatusCompleted,
+		Summary:      bundle.Summary,
+		Observations: bundle.Observations,
+		ToolCalls:    []contracts.ToolCallRecord{{Name: "inspect_descriptor", Summary: step.Reason}},
+	}, false, nil
+}
+
+func (c *Coordinator) inspectRuntimeConfig(ctx context.Context, snapshot *contracts.SessionSnapshot, step contracts.TurnStep) (contracts.TurnStepResult, bool, error) {
+	if !hasFlogoJSON(snapshot.RepoPath) {
+		summary := "No flogo.json is present. Create a Flogo app before inspecting runtime configuration."
+		return contracts.TurnStepResult{
+			Type:    step.Type,
+			Status:  contracts.TurnStepStatusBlocked,
+			Summary: summary,
+		}, true, nil
+	}
+	bundle, err := c.service.InspectRuntimeConfig(ctx, sessionRequest(snapshot))
+	if err != nil {
+		return contracts.TurnStepResult{}, true, err
+	}
+	appendEvent(snapshot, "inspection", bundle.Summary)
+	return contracts.TurnStepResult{
+		Type:         step.Type,
+		Status:       contracts.TurnStepStatusCompleted,
+		Summary:      bundle.Summary,
+		Observations: bundle.Observations,
+		ToolCalls:    []contracts.ToolCallRecord{{Name: "inspect_runtime_config", Summary: step.Reason}},
+	}, false, nil
+}
+
+func (c *Coordinator) inspectBuildArtifacts(ctx context.Context, snapshot *contracts.SessionSnapshot, step contracts.TurnStep) (contracts.TurnStepResult, bool, error) {
+	if !hasFlogoJSON(snapshot.RepoPath) {
+		summary := "No flogo.json is present. Create a Flogo app before inspecting build artifacts."
+		return contracts.TurnStepResult{
+			Type:    step.Type,
+			Status:  contracts.TurnStepStatusBlocked,
+			Summary: summary,
+		}, true, nil
+	}
+	bundle, err := c.service.InspectBuildArtifacts(ctx, sessionRequest(snapshot))
+	if err != nil {
+		return contracts.TurnStepResult{}, true, err
+	}
+	appendEvent(snapshot, "inspection", bundle.Summary)
+	return contracts.TurnStepResult{
+		Type:         step.Type,
+		Status:       contracts.TurnStepStatusCompleted,
+		Summary:      bundle.Summary,
+		Observations: bundle.Observations,
+		ToolCalls:    []contracts.ToolCallRecord{{Name: "inspect_build_artifacts", Summary: step.Reason}},
+	}, false, nil
+}
+
+func (c *Coordinator) planLocalTesting(ctx context.Context, snapshot *contracts.SessionSnapshot, step contracts.TurnStep) (contracts.TurnStepResult, bool, error) {
+	if !hasFlogoJSON(snapshot.RepoPath) {
+		summary := "No flogo.json is present. Create a Flogo app before planning local testing."
+		return contracts.TurnStepResult{
+			Type:    step.Type,
+			Status:  contracts.TurnStepStatusBlocked,
+			Summary: summary,
+		}, true, nil
+	}
+	bundle, err := c.service.PlanLocalTesting(ctx, sessionRequest(snapshot))
+	if err != nil {
+		return contracts.TurnStepResult{}, true, err
+	}
+	appendEvent(snapshot, "inspection", bundle.Summary)
+	return contracts.TurnStepResult{
+		Type:         step.Type,
+		Status:       contracts.TurnStepStatusCompleted,
+		Summary:      bundle.Summary,
+		Observations: bundle.Observations,
+		ToolCalls:    []contracts.ToolCallRecord{{Name: "plan_local_testing", Summary: step.Reason}},
+	}, true, nil
 }
 
 func (c *Coordinator) createMinimalApp(snapshot *contracts.SessionSnapshot, step contracts.TurnStep) (contracts.TurnStepResult, bool, error) {
@@ -614,6 +728,9 @@ func renderTurnSummary(snapshot *contracts.SessionSnapshot) string {
 		builder.WriteString("Step results:\n")
 		for _, result := range snapshot.LastStepResults {
 			builder.WriteString(fmt.Sprintf("- [%s] %s: %s\n", result.Status, result.Type, result.Summary))
+			for _, observation := range result.Observations {
+				builder.WriteString(fmt.Sprintf("  • %s: %s\n", observation.Kind, observation.Summary))
+			}
 		}
 	}
 	if snapshot.PendingApproval != nil {

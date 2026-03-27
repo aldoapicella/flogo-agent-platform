@@ -9,12 +9,12 @@ The top-level loop is:
 1. create or resume a persisted session
 2. receive a user message in CLI or TUI
 3. ask the model for a structured Flogo turn plan
-4. inspect `flogo.json` and Flogo resources
+4. either inspect `flogo.json`, runtime config, and build artifacts for grounded operational answers, or enter the repair/build/test path when the task actually requires changes
 5. validate and retrieve official citations
-6. produce a model-backed repair proposal, guarded by deterministic validation and safety checks
-7. in review mode, hold the patch for approval
+6. produce either observation-backed conversational guidance or a model-backed repair proposal, guarded by deterministic validation and safety checks
+7. in review mode, hold any patch for approval
 8. after approval or in apply mode, write the patch, build, and run available tests
-9. stream session snapshots back into the clients while persisting transcript, plan, events, diff, artifacts, and final report
+9. stream session snapshots back into the clients while persisting transcript, plan, events, observations, diff, artifacts, and final report
 
 ## Main Packages
 
@@ -85,6 +85,7 @@ The conversational loop is intentionally narrow and Flogo-native.
 Current supported intents and actions:
 
 - inspect the app and explain issues
+- inspect descriptor/runtime/build facts and explain how to run or test the app locally
 - repair and verify
 - build and test
 - show plan
@@ -93,7 +94,14 @@ Current supported intents and actions:
 - reject pending patch
 - show current status
 
-The coordinator is stateful at the session level, persists structured turn plans and step results, and still delegates actual validation and build/test work to the existing execution pipeline.
+The coordinator is stateful at the session level, persists structured turn plans, step results, and intermediate observations, and still delegates actual validation and build/test work to the existing execution pipeline.
+
+Current inspection-oriented step types include:
+
+- descriptor inspection
+- runtime trigger inspection
+- build artifact inspection
+- local test plan generation
 
 ## Repair Strategy
 
@@ -143,6 +151,8 @@ Model candidates are reparsed and revalidated before use. They are only accepted
 - activity ref coverage
 
 ## Execution Model
+
+The execution core is still reused for repair/build/test turns, but informational turns no longer have to collapse into `Analyze` or `Run`. The session layer now also exposes observation-producing inspection operations so the responder can answer questions like local REST routes, ports, executable paths, and fallback test instructions without rephrasing the last generic verification report.
 
 ### Local runner
 

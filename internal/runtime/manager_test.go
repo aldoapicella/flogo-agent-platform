@@ -287,6 +287,60 @@ func TestManagerUndoRemovesCreatedBootstrap(t *testing.T) {
 	}
 }
 
+func TestManagerAnswersLocalTestingQuestionWithGroundedFacts(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	manifestPath, repoPath := writeRuntimeFixture(t, root, true)
+
+	manager, err := NewManager(ctx, root, filepath.Join(root, "state"), manifestPath, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+
+	snapshot, err := manager.CreateSession(ctx, contracts.SessionRequest{
+		RepoPath: repoPath,
+		Goal:     "repair the Flogo app",
+		Mode:     contracts.ModeReview,
+		ApprovalPolicy: contracts.ApprovalPolicy{
+			RequireWriteApproval: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err = manager.SendMessage(ctx, snapshot.ID, "repair and verify the app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err = manager.Approve(ctx, snapshot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err = manager.SendMessage(ctx, snapshot.ID, "How do I test this locally?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.LastTurnKind != "inspection" {
+		t.Fatalf("expected inspection turn kind, got %s", snapshot.LastTurnKind)
+	}
+	if len(snapshot.LastStepResults) == 0 || snapshot.LastStepResults[len(snapshot.LastStepResults)-1].Type != contracts.TurnStepPlanLocalTesting {
+		t.Fatalf("expected local testing step results, got %+v", snapshot.LastStepResults)
+	}
+	last := snapshot.Messages[len(snapshot.Messages)-1]
+	if last.Role != contracts.RoleAssistant {
+		t.Fatalf("expected assistant reply, got %+v", last)
+	}
+	if !strings.Contains(last.Content, "curl -i http://127.0.0.1:8888/test") {
+		t.Fatalf("expected curl guidance, got %q", last.Content)
+	}
+	if !strings.Contains(last.Content, "/bin/sample-app") {
+		t.Fatalf("expected executable path guidance, got %q", last.Content)
+	}
+}
+
 func writeRuntimeFixture(t *testing.T, root string, installFakeFlogo bool) (string, string) {
 	t.Helper()
 

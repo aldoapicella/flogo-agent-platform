@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	headerHeight = 2
-	bannerHeight = 2
-	actionsHeight = 1
-	composerHeight = 3
+	headerHeight        = 2
+	bannerHeight        = 2
+	actionsHeight       = 1
+	composerHeight      = 3
 	maxFocusedDiffWidth = 64
 )
 
@@ -121,6 +121,8 @@ func renderBanner(view *tview.TextView, state renderState) {
 		fmt.Fprint(view, "[black:blue::b] STARTING [-:-:-] Connecting to the local daemon and restoring the latest repo session.")
 	case state.Current.PendingApproval != nil:
 		fmt.Fprintf(view, "[black:yellow::b] REVIEW REQUIRED [-:-:-] %s Approve with Ctrl+A or reject with Ctrl+R.", state.Current.PendingApproval.Summary)
+	case state.Current.LastTurnKind == "inspection":
+		fmt.Fprintf(view, "[black:blue::b] INSPECTION [-:-:-] %s", nextActionText(state.Current))
 	case state.Current.LastReport != nil:
 		fmt.Fprintf(view, "%s %s", styledOutcomeLabel(state.Current.LastReport.Outcome), nextActionText(state.Current))
 	default:
@@ -321,10 +323,41 @@ func nextActionText(state any) string {
 	if snapshot.PendingApproval != nil {
 		return "Review the patch and decide whether to approve or reject it."
 	}
+	if observationNext := latestObservationSummary(snapshot, "local_test_plan"); observationNext != "" {
+		return observationNext
+	}
+	if snapshot.LastTurnKind == "inspection" {
+		if observationNext := latestObservationSummary(snapshot, "rest_endpoint", "binary", "test_support"); observationNext != "" {
+			return observationNext
+		}
+	}
 	if snapshot.LastReport != nil && strings.TrimSpace(snapshot.LastReport.NextAction) != "" {
 		return snapshot.LastReport.NextAction
 	}
 	return "Send another request, review the latest context, or open a saved session."
+}
+
+func latestObservationSummary(snapshot *contracts.SessionSnapshot, kinds ...string) string {
+	if snapshot == nil || len(snapshot.LastStepResults) == 0 {
+		return ""
+	}
+	allowed := make(map[string]struct{}, len(kinds))
+	for _, kind := range kinds {
+		allowed[kind] = struct{}{}
+	}
+	for idx := len(snapshot.LastStepResults) - 1; idx >= 0; idx-- {
+		for _, observation := range snapshot.LastStepResults[idx].Observations {
+			if len(allowed) > 0 {
+				if _, ok := allowed[observation.Kind]; !ok {
+					continue
+				}
+			}
+			if strings.TrimSpace(observation.Summary) != "" {
+				return observation.Summary
+			}
+		}
+	}
+	return ""
 }
 
 func compactReport(report *contracts.RunReport) string {

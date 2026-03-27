@@ -139,14 +139,18 @@ type SessionStreamEvent struct {
 type TurnStepType string
 
 const (
-	TurnStepInspectWorkspace TurnStepType = "inspect_workspace"
-	TurnStepAnalyzeFlogo     TurnStepType = "analyze_flogo"
-	TurnStepCreateMinimalApp TurnStepType = "create_minimal_app"
-	TurnStepRepairAndVerify  TurnStepType = "repair_and_verify"
-	TurnStepApprovePending   TurnStepType = "approve_pending"
-	TurnStepRejectPending    TurnStepType = "reject_pending"
-	TurnStepShowDiff         TurnStepType = "show_diff"
-	TurnStepShowStatus       TurnStepType = "show_status"
+	TurnStepInspectWorkspace      TurnStepType = "inspect_workspace"
+	TurnStepInspectDescriptor     TurnStepType = "inspect_descriptor"
+	TurnStepInspectRuntimeConfig  TurnStepType = "inspect_runtime_config"
+	TurnStepInspectBuildArtifacts TurnStepType = "inspect_build_artifacts"
+	TurnStepPlanLocalTesting      TurnStepType = "plan_local_testing"
+	TurnStepAnalyzeFlogo          TurnStepType = "analyze_flogo"
+	TurnStepCreateMinimalApp      TurnStepType = "create_minimal_app"
+	TurnStepRepairAndVerify       TurnStepType = "repair_and_verify"
+	TurnStepApprovePending        TurnStepType = "approve_pending"
+	TurnStepRejectPending         TurnStepType = "reject_pending"
+	TurnStepShowDiff              TurnStepType = "show_diff"
+	TurnStepShowStatus            TurnStepType = "show_status"
 )
 
 type TurnPlan struct {
@@ -178,12 +182,19 @@ type ToolCallRecord struct {
 	Result  *ToolResult `json:"result,omitempty"`
 }
 
+type Observation struct {
+	Kind    string            `json:"kind"`
+	Summary string            `json:"summary"`
+	Data    map[string]string `json:"data,omitempty"`
+}
+
 type TurnStepResult struct {
-	Type      TurnStepType     `json:"type"`
-	Status    TurnStepStatus   `json:"status"`
-	Summary   string           `json:"summary"`
-	ToolCalls []ToolCallRecord `json:"toolCalls,omitempty"`
-	Report    *RunReport       `json:"report,omitempty"`
+	Type         TurnStepType     `json:"type"`
+	Status       TurnStepStatus   `json:"status"`
+	Summary      string           `json:"summary"`
+	ToolCalls    []ToolCallRecord `json:"toolCalls,omitempty"`
+	Observations []Observation    `json:"observations,omitempty"`
+	Report       *RunReport       `json:"report,omitempty"`
 }
 
 type SourceCitation struct {

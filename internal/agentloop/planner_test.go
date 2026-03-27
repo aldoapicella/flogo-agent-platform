@@ -105,6 +105,36 @@ func TestPlannerUsesValidatedModelPlan(t *testing.T) {
 	}
 }
 
+func TestPlannerUsesInspectionStepsForLocalTestingQuestion(t *testing.T) {
+	repoPath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoPath, "flogo.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := &contracts.SessionSnapshot{
+		RepoPath: repoPath,
+		Goal:     "help with local testing",
+		Mode:     contracts.ModeReview,
+	}
+
+	plan := NewPlanner(fakeModelClient{
+		provider: "fake",
+		model:    "planner-model",
+		text:     `{"goalSummary":"wrong","requiresCreation":false,"steps":[{"type":"repair_and_verify","reason":"bad plan"}]}`,
+	}).PlanTurn(context.Background(), snapshot, "How do I test this locally?")
+	if plan.Planner != "deterministic" {
+		t.Fatalf("expected deterministic local-testing plan, got %+v", plan)
+	}
+	if len(plan.Steps) != 4 {
+		t.Fatalf("expected inspection-oriented steps, got %+v", plan.Steps)
+	}
+	if plan.Steps[0].Type != contracts.TurnStepInspectDescriptor ||
+		plan.Steps[1].Type != contracts.TurnStepInspectRuntimeConfig ||
+		plan.Steps[2].Type != contracts.TurnStepInspectBuildArtifacts ||
+		plan.Steps[3].Type != contracts.TurnStepPlanLocalTesting {
+		t.Fatalf("unexpected local-testing steps: %+v", plan.Steps)
+	}
+}
+
 type fakeModelClient struct {
 	provider string
 	model    string

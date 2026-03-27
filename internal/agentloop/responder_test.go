@@ -157,6 +157,68 @@ func TestResponderUsesFocusedDiffExcerpt(t *testing.T) {
 	}
 }
 
+func TestResponderUsesDeterministicLocalTestingGuidance(t *testing.T) {
+	snapshot := &contracts.SessionSnapshot{
+		Status:       contracts.SessionStatusCompleted,
+		LastTurnKind: "inspection",
+		LastStepResults: []contracts.TurnStepResult{
+			{
+				Type:   contracts.TurnStepInspectBuildArtifacts,
+				Status: contracts.TurnStepStatusCompleted,
+				Observations: []contracts.Observation{
+					{
+						Kind:    "binary",
+						Summary: "The built executable is /tmp/app/bin/sample-app.",
+						Data: map[string]string{
+							"path":          "/tmp/app/bin/sample-app",
+							"start_command": "/tmp/app/bin/sample-app",
+						},
+					},
+					{
+						Kind:    "test_support",
+						Summary: "The built executable does not support Flogo -test flags, so use startup and trigger-level testing instead.",
+						Data: map[string]string{
+							"supports_test_flags": "false",
+						},
+					},
+				},
+			},
+			{
+				Type:   contracts.TurnStepPlanLocalTesting,
+				Status: contracts.TurnStepStatusCompleted,
+				Observations: []contracts.Observation{
+					{
+						Kind:    "local_test_plan",
+						Summary: "Start /tmp/app/bin/sample-app, then test GET http://127.0.0.1:8888/test with curl -i http://127.0.0.1:8888/test.",
+						Data: map[string]string{
+							"method": "GET",
+							"port":   "8888",
+							"path":   "/test",
+							"url":    "http://127.0.0.1:8888/test",
+							"curl":   "curl -i http://127.0.0.1:8888/test",
+						},
+					},
+				},
+			},
+		},
+		LastReport: &contracts.RunReport{
+			Outcome:    contracts.RunOutcomeApplied,
+			NextAction: "validation, build, and available tests completed",
+		},
+	}
+
+	text := NewResponder(responderFakeModel{text: "ignored", model: "test-model"}).ComposeTurnResponse(context.Background(), snapshot)
+	if !strings.Contains(text, "/tmp/app/bin/sample-app") {
+		t.Fatalf("expected binary path in local testing guidance, got %q", text)
+	}
+	if !strings.Contains(text, "curl -i http://127.0.0.1:8888/test") {
+		t.Fatalf("expected curl command in local testing guidance, got %q", text)
+	}
+	if strings.Contains(text, "validation, build, and available tests completed") {
+		t.Fatalf("expected local testing guidance instead of generic verification summary, got %q", text)
+	}
+}
+
 type responderFakeModel struct {
 	text  string
 	model string

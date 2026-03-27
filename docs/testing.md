@@ -16,6 +16,8 @@ These cover:
 
 - schema and semantic validation
 - deterministic and model-backed repair logic
+- descriptor inspection, runtime inspection, build-artifact inspection, and local-test-plan observations
+- deterministic responder behavior for local operational questions
 - release metadata parsing and updater state persistence
 - explicit updater command logic against fake release metadata
 - knowledge indexing and retrieval
@@ -39,6 +41,7 @@ Coverage includes:
 - local git repo operations
 - daemon boot and health checks
 - command-level model requirement checks
+- conversational runtime coverage for local testing guidance after repair/build
 
 These tests are hermetic and do not require a real OpenAI key or a real Flogo install. They do not claim to validate actual model behavior.
 
@@ -55,6 +58,7 @@ These tests:
 - use the real OpenAI Responses API
 - use the real `flogo` CLI
 - assert structural session behavior first
+- cover multi-turn repair, diff review, approval, and creation flows
 - score the finished conversation with a rubric
 - are skipped by default and are not part of the default CI gate
 
@@ -100,6 +104,18 @@ This command:
 - runs a multimodal model review over those screenshots
 - writes PNG captures, per-capture metadata, review JSON, a Markdown summary, and a task list
 - is advisory only and is not part of the default CI gate
+
+## Conversational Local-Testing Coverage
+
+The default suite now checks the specific failure mode where a user asks an operational question after a repair/build pass.
+
+Current assertions cover:
+
+- planner chooses inspection-oriented steps instead of `repair_and_verify` for questions like `How do I test this locally?`
+- descriptor inspection extracts REST trigger port, method, path, and flow I/O facts
+- build-artifact inspection captures the generated executable path and `-test` flag support
+- responder answers with grounded startup and `curl` guidance instead of generic `RunReport.NextAction` text
+- runtime/session tests verify the same behavior end to end after an approved repair
 
 ## Writing New E2E Tests
 

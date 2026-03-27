@@ -126,6 +126,29 @@ Check:
 - generated workspaces under `.flogo-agent/workspaces/`
 - the last report stored in the session snapshot under `.flogo-agent/sessions/<session-id>/session.json`
 
+## The agent answers `How do I test this locally?` with generic build/test text
+
+The current agent should no longer answer that question from the last verifier summary alone. It now has a separate inspection path for:
+
+- trigger ports, methods, and routes from `flogo.json`
+- generated workspace and executable discovery
+- whether the built binary supports Flogo `-test` flags
+- fallback local test steps such as startup plus `curl`
+
+If the answer still looks generic, check:
+
+- whether the repo actually has a `flogo.json`
+- whether a generated workspace exists under `.flogo-agent/workspaces/`
+- whether the last turn was an inspection turn in `.flogo-agent/sessions/<session-id>/session.json`
+
+You can usually retrigger the grounded path by asking one of:
+
+```bash
+How do I test this locally?
+What port does this run on?
+What route should I hit?
+```
+
 ## Model-backed planning or repair does not trigger
 
 Model-backed turn planning, conversational responses, and repair generation require a model API key.

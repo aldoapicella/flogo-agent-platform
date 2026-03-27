@@ -52,6 +52,11 @@ func composeDeterministicTurnResponse(snapshot *contracts.SessionSnapshot) strin
 	if snapshot == nil {
 		return ""
 	}
+	if snapshot.LastTurnKind == "inspection" {
+		if response := composeInspectionResponse(snapshot); strings.TrimSpace(response) != "" {
+			return response
+		}
+	}
 	if snapshot.PendingApproval != nil && snapshot.PendingApproval.PatchPlan != nil {
 		if lastStepType(snapshot) == contracts.TurnStepShowDiff {
 			return composePendingDiffResponse(snapshot)
@@ -65,6 +70,64 @@ func composeDeterministicTurnResponse(snapshot *contracts.SessionSnapshot) strin
 		return composeBlockedResponse(snapshot)
 	}
 	return ""
+}
+
+func composeInspectionResponse(snapshot *contracts.SessionSnapshot) string {
+	observations := lastTurnObservations(snapshot)
+	if len(observations) == 0 {
+		return ""
+	}
+
+	localPlans := filterObservationsByKind(observations, "local_test_plan")
+	if len(localPlans) == 0 {
+		return composeObservationSummary(observations)
+	}
+
+	binaryPath := firstObservationValue(observations, "binary", "path")
+	testSupport := firstObservation(observations, "test_support")
+	var parts []string
+
+	if binaryPath != "" {
+		parts = append(parts, "To test it locally, start the generated app with `"+binaryPath+"`.")
+	}
+
+	for idx, plan := range localPlans {
+		if idx >= 2 {
+			break
+		}
+		if curl := strings.TrimSpace(plan.Data["curl"]); curl != "" {
+			method := strings.ToUpper(strings.TrimSpace(plan.Data["method"]))
+			if method == "" {
+				method = "GET"
+			}
+			url := strings.TrimSpace(plan.Data["url"])
+			path := strings.TrimSpace(plan.Data["path"])
+			port := strings.TrimSpace(plan.Data["port"])
+			parts = append(parts, fmt.Sprintf("The descriptor configures %s %s on port %s. Probe it with `%s`.", method, valueOr(path, url), valueOr(port, "8080"), curl))
+			continue
+		}
+		parts = append(parts, plan.Summary)
+	}
+
+	if testSupport != nil && !strings.EqualFold(strings.TrimSpace(testSupport.Data["supports_test_flags"]), "true") {
+		parts = append(parts, testSupport.Summary)
+	}
+
+	return strings.Join(parts, "\n\n")
+}
+
+func composeObservationSummary(observations []contracts.Observation) string {
+	var parts []string
+	for idx, observation := range observations {
+		if idx >= 3 {
+			break
+		}
+		if strings.TrimSpace(observation.Summary) == "" {
+			continue
+		}
+		parts = append(parts, observation.Summary)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func composePendingPatchResponse(snapshot *contracts.SessionSnapshot) string {
@@ -184,6 +247,9 @@ func buildResponderPrompt(snapshot *contracts.SessionSnapshot) string {
 		builder.WriteString("Step results:\n")
 		for _, result := range snapshot.LastStepResults {
 			builder.WriteString(fmt.Sprintf("- [%s] %s: %s\n", result.Status, result.Type, result.Summary))
+			for _, observation := range result.Observations {
+				builder.WriteString(fmt.Sprintf("  - Observation %s: %s\n", observation.Kind, observation.Summary))
+			}
 		}
 	}
 
@@ -479,6 +545,53 @@ func lastStepType(snapshot *contracts.SessionSnapshot) contracts.TurnStepType {
 		return ""
 	}
 	return snapshot.LastStepResults[len(snapshot.LastStepResults)-1].Type
+}
+
+func lastTurnObservations(snapshot *contracts.SessionSnapshot) []contracts.Observation {
+	if snapshot == nil {
+		return nil
+	}
+	var observations []contracts.Observation
+	for _, result := range snapshot.LastStepResults {
+		observations = append(observations, result.Observations...)
+	}
+	return observations
+}
+
+func filterObservationsByKind(observations []contracts.Observation, kind string) []contracts.Observation {
+	filtered := make([]contracts.Observation, 0, len(observations))
+	for _, observation := range observations {
+		if observation.Kind == kind {
+			filtered = append(filtered, observation)
+		}
+	}
+	return filtered
+}
+
+func firstObservation(observations []contracts.Observation, kind string) *contracts.Observation {
+	for idx := range observations {
+		if observations[idx].Kind == kind {
+			return &observations[idx]
+		}
+	}
+	return nil
+}
+
+func firstObservationValue(observations []contracts.Observation, kind string, key string) string {
+	for _, observation := range observations {
+		if observation.Kind != kind {
+			continue
+		}
+		return strings.TrimSpace(observation.Data[key])
+	}
+	return ""
+}
+
+func valueOr(value string, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func latestCitations(snapshot *contracts.SessionSnapshot) []contracts.SourceCitation {
