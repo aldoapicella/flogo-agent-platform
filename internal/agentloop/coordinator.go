@@ -196,6 +196,7 @@ func classifyTurnKind(plan contracts.TurnPlan) string {
 	if plan.RequiresCreation {
 		return "creation"
 	}
+	hasInspection := false
 	for _, step := range plan.Steps {
 		switch step.Type {
 		case contracts.TurnStepApprovePending, contracts.TurnStepRejectPending:
@@ -203,8 +204,11 @@ func classifyTurnKind(plan contracts.TurnPlan) string {
 		case contracts.TurnStepRepairAndVerify, contracts.TurnStepAnalyzeFlogo:
 			return "repair"
 		case contracts.TurnStepInspectDescriptor, contracts.TurnStepInspectRuntimeConfig, contracts.TurnStepInspectBuildArtifacts, contracts.TurnStepPlanLocalTesting:
-			return "inspection"
+			hasInspection = true
 		}
+	}
+	if hasInspection {
+		return "inspection"
 	}
 	return "conversation"
 }

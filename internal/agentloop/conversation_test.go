@@ -36,3 +36,18 @@ func TestCoordinatorAnswersDirectProductQuestionWithoutRepoInspection(t *testing
 		t.Fatalf("unexpected assistant reply %q", last.Content)
 	}
 }
+
+func TestClassifyTurnKindPrioritizesRepairOverInspection(t *testing.T) {
+	kind := classifyTurnKind(contracts.TurnPlan{
+		GoalSummary: "repair and verify",
+		Steps: []contracts.TurnStep{
+			{Type: contracts.TurnStepInspectWorkspace},
+			{Type: contracts.TurnStepInspectDescriptor},
+			{Type: contracts.TurnStepAnalyzeFlogo},
+			{Type: contracts.TurnStepRepairAndVerify},
+		},
+	})
+	if kind != "repair" {
+		t.Fatalf("expected repair turn kind, got %q", kind)
+	}
+}
